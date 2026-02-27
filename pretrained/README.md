@@ -1,8 +1,23 @@
 # Pretrained checkpoints
 
-This repo includes a GISC-FMT checkpoint for convenience:
+GitHub blocks files larger than 100MB in regular Git history.
+To keep the checkpoint in this repository, we store it as split parts:
+
+- `pretrained/gisc_fmt_brain1000_best.ckpt.part000`
+- `pretrained/gisc_fmt_brain1000_best.ckpt.part001`
+- `pretrained/gisc_fmt_brain1000_best.ckpt.part002`
+
+## Reassemble
+
+```bash
+bash scripts/reassemble_pretrained.sh
+```
+
+This will create:
 
 - `pretrained/gisc_fmt_brain1000_best.ckpt`
+
+and verify the SHA256 checksum (see `pretrained/SHA256SUMS`).
 
 ## Use for evaluation
 
@@ -11,7 +26,3 @@ uv run python train.py test \
   model=gisc_fmt \
   ckpt_path=pretrained/gisc_fmt_brain1000_best.ckpt
 ```
-
-Notes:
-- This checkpoint is provided as-is.
-- You still need to place the dataset locally (see `DATASET.md`).
