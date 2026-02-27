@@ -1,0 +1,20 @@
+defaults:
+  - task: fit
+  - data: default
+  - loss: default
+  - optim: cosine
+  - model: gisc_fmt
+  - trainer: default
+  - logger: tensorboard
+  - callbacks: default
+  - paths: default
+  - exp: default
+  - _self_
+
+# optional: used for validate/test
+ckpt_path: null
+
+seed: 42
+deterministic: true
+benchmark: false
+verbose: false

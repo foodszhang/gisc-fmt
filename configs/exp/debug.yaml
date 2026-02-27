@@ -1,0 +1,9 @@
+defaults:
+  - override /trainer: default
+  - override /logger: wandb
+
+trainer:
+  max_epochs: 2
+
+logger:
+  mode: offline

@@ -1,0 +1,14 @@
+# AdamW optimizer with cosine annealing scheduler
+_target_: torch.optim.AdamW
+lr: 0.001
+betas: [0.9, 0.999]
+eps: 1.0e-8
+weight_decay: 0.0001
+amsgrad: false
+momentum: 0.9
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  T_max: ${trainer.max_epochs}
+  eta_min: 1.0e-6
+  interval: epoch
+  frequency: 1

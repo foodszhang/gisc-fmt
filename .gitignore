@@ -1,0 +1,51 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Project outputs
+output*/
+outputs/
+wandb/
+lightning_logs/
+.wandb/
+test_*/
+
+# Local datasets
+data/
+
+# Logs
+*.log
+*.pot
+
+# Hydra outputs (optional, if you don't want to track locally)
+# outputs/
+
+# Environment files
+.env
+.env.local
+
+

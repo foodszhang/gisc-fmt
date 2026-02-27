@@ -1,0 +1,22 @@
+max_epochs: 600
+accelerator: gpu
+devices: 1
+strategy: auto
+precision: "bf16-mixed"
+check_val_every_n_epoch: 50
+enable_progress_bar: true
+enable_model_summary: true
+log_every_n_steps: 10
+accumulate_grad_batches: 1
+
+# PyTorch 2.x compile (best-effort). Turn off if it causes issues.
+torch_compile: false
+torch_compile_mode: reduce-overhead
+gradient_clip_val: 0.0
+num_sanity_val_steps: 0
+benchmark: false
+# `true` can crash on CUDA for ops like grid_sample backward (non-deterministic).
+# Use "warn" to keep best-effort determinism without raising.
+deterministic: "warn"
+inference_mode: true
+sync_batchnorm: false

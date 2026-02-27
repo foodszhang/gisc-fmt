@@ -1,0 +1,1070 @@
+"""LightningModule with Hydra configuration support"""
+
+import gc
+import json
+import os
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn as nn
+from omegaconf import DictConfig
+from pytorch_lightning import LightningModule
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
+
+from .loss import ScatterLightLoss, dice_coefficient, compute_dice
+from .model_factory import ModelFactory
+from .utils.utils import get_psnr_3d, get_ssim_3d
+
+
+class TrainingLightningModule(LightningModule):
+    """
+    PyTorch Lightning training module with Hydra config support
+
+    Key design principles:
+    1. All hyperparameters come from OmegaConf DictConfig
+    2. forward() directly calls the original model's forward
+    3. training_step/validation_step only call loss functions (no math changes)
+    4. Optimizer and scheduler configuration come from config
+    """
+
+    def __init__(self, cfg: DictConfig):
+        """
+        Initialize LightningModule
+
+        Args:
+            cfg: Complete Hydra config (DictConfig)
+        """
+        super().__init__()
+        self.cfg = cfg
+
+        # Save hyperparameters for logging/reproducibility
+        # Note: We save a copy of the config dict, not the DictConfig object itself
+        self.save_hyperparameters(ignore=["cfg"])
+
+        # Extract commonly used parameters
+        self.learning_rate = cfg.optim.lr
+        self.max_epochs = cfg.trainer.max_epochs
+
+        # Create model and loss
+        self._setup_model()
+        self._setup_loss()
+
+        # Training metrics tracking
+        self.best_dice = -1.0
+
+        # Test-time state (initialized in on_test_start)
+        self._test_out_dir: Path | None = None
+        self._test_recon_dir: Path | None = None
+        self._test_seg_dir: Path | None = None
+        self._test_proj_dir: Path | None = None
+        self._test_angles_to_save: list[str] = []
+        self._test_angle_saved_counts: dict[str, int] = {}
+        self._test_base_seg: np.ndarray | None = None
+        self._test_new_label: int | None = None
+        self._test_pred_threshold: float = 0.5
+        self._test_max_samples_per_angle: int = 10
+        self._test_save_recon_roi: bool = True
+        self._test_save_registered_seg: bool = True
+        self._test_save_proj_comparisons: bool = True
+
+    def _setup_model(self):
+        """Create model from config using ModelFactory"""
+        self.net = ModelFactory.create_model(
+            model_type=self.cfg.model.name,
+            config=self.cfg,
+        )
+
+        # Optional torch.compile for speed (PyTorch 2.x)
+        if getattr(self.cfg.trainer, "torch_compile", False) and hasattr(torch, "compile"):
+            mode = str(getattr(self.cfg.trainer, "torch_compile_mode", "reduce-overhead"))
+
+            # Inductor/Triton compilation can fail on some shapes/kernels (e.g., int32 indexing overflow).
+            # Suppress compile errors so Dynamo falls back to eager instead of crashing.
+            try:
+                from torch import _dynamo  # type: ignore
+
+                _dynamo.config.suppress_errors = True
+            except Exception:
+                pass
+
+            self.net = torch.compile(self.net, mode=mode)  # type: ignore[attr-defined]
+
+    def _setup_loss(self):
+        """Create loss function from config"""
+        loss_cfg = self.cfg.loss
+        self.loss_func = ScatterLightLoss(
+            init_scatter_weight=loss_cfg.scatter_weight,
+            target_scatter_weight=loss_cfg.target_scatter_weight,
+            start_decay_epoch=loss_cfg.start_decay_epoch,
+            decay_epochs=loss_cfg.decay_epochs,
+            pos_weight=loss_cfg.pos_weight,
+            sparse_weight=loss_cfg.sparse_weight,
+            lambda_dice=loss_cfg.dice_weight,
+        )
+
+    def forward(self, projections, points):
+        """Forward pass."""
+        return self.net(projections, points)
+
+    def training_step(self, batch, batch_idx):
+        """
+        Single training step
+
+        Lightning automatically handles:
+        - Device transfer
+        - Backward pass
+        - Gradient accumulation
+        - Optimizer step
+
+        Args:
+            batch: Batch from dataloader
+            batch_idx: Batch index
+
+        Returns:
+            Loss value
+        """
+        projections = batch["projections"]  # keep dict for scatter loss GT
+        proj_in = projections
+        if self.cfg.model.name == "minr_fmt" and "projections_packed" in batch:
+            p = batch["projections_packed"]  # [B,V,1,H,W]
+            B, V = p.shape[0], p.shape[1]
+            # minr_fmt expects view-major flattening: [V*B,1,H,W]
+            proj_in = p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+
+        points = batch["points"]
+        density = batch["point_densities"].unsqueeze(-1)
+
+        # Forward pass (use packed tensor when available)
+        density_pred, aux_outputs = self(proj_in, points)
+
+        # Compute loss
+        loss_dict = self.loss_func(aux_outputs, projections, density_pred, density)
+        total_loss = loss_dict["total_loss"]
+
+        # Log metrics
+        self.log(
+            "train_loss",
+            total_loss,
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        for key, value in loss_dict.items():
+            if key != "total_loss" and isinstance(value, torch.Tensor):
+                self.log(
+                    f"train_{key}",
+                    value,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+
+        # Update loss function's epoch for dynamic weight adjustment
+        self.loss_func.update_epoch(self.current_epoch)
+
+        return total_loss
+
+    def validation_step(self, batch, batch_idx):
+        """
+        Single validation step
+
+        Lightning automatically handles:
+        - no_grad context
+        - Device transfer
+
+        Args:
+            batch: Batch from dataloader
+            batch_idx: Batch index
+
+        Returns:
+            Dictionary with metrics
+        """
+        projections = batch["projections"]
+        proj_in = projections
+        if self.cfg.model.name == "minr_fmt" and "projections_packed" in batch:
+            p = batch["projections_packed"]
+            B, V = p.shape[0], p.shape[1]
+            # minr_fmt expects view-major flattening: [V*B,1,H,W]
+            proj_in = p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+
+        points = batch["points"]
+        point_densities = batch["point_densities"]
+        voxel_shape = batch["feasible_voxel_shape"]
+
+        B = points.shape[0]
+
+        # Reconstruct voxel shape
+        voxel_shape_tuple = (
+            B,
+            int(voxel_shape[0][0].detach().cpu().numpy()),
+            int(voxel_shape[1][0].detach().cpu().numpy()),
+            int(voxel_shape[2][0].detach().cpu().numpy()),
+        )
+
+        density_gt = point_densities.reshape(voxel_shape_tuple)
+        density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+
+        # Inference
+        pred, _ = self(proj_in, points)
+        density_pred = pred.reshape(voxel_shape_tuple)
+
+        # Compute DSC (Dice) on binary GT
+        dice = dice_coefficient(density_pred, density_gt_bin)
+
+        # Log metric
+        self.log(
+            "val_dice",
+            dice,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        return {"dice": dice}
+
+    def on_validation_epoch_end(self):
+        """Called at the end of validation epoch"""
+        # Track best validation metric
+        avg_dice = self.trainer.callback_metrics.get("val_dice", torch.tensor(-1.0))
+        if isinstance(avg_dice, torch.Tensor):
+            avg_dice = avg_dice.item()
+
+        if avg_dice > self.best_dice:
+            self.best_dice = avg_dice
+
+        # Restore training mode after evaluation to keep behavior consistent
+        self.net.train()
+
+    def configure_optimizers(self):
+        """
+        Configure optimizer and learning rate scheduler
+
+        Returns:
+            Dictionary with optimizer and scheduler config
+        """
+        # Get optimizer config
+        optim_cfg = self.cfg.optim
+
+        # Create optimizer based on _target_
+        if "adamw" in optim_cfg._target_.lower():
+            optimizer = torch.optim.AdamW(
+                self.parameters(),
+                lr=optim_cfg.lr,
+                betas=optim_cfg.betas,
+                weight_decay=optim_cfg.weight_decay,
+                eps=optim_cfg.eps,
+            )
+        elif "adam" in optim_cfg._target_.lower():
+            optimizer = torch.optim.Adam(
+                self.parameters(),
+                lr=optim_cfg.lr,
+                betas=optim_cfg.betas,
+                weight_decay=optim_cfg.weight_decay,
+                eps=optim_cfg.eps,
+            )
+        elif "sgd" in optim_cfg._target_.lower():
+            optimizer = torch.optim.SGD(
+                self.parameters(),
+                lr=optim_cfg.lr,
+                momentum=optim_cfg.momentum,
+                weight_decay=optim_cfg.weight_decay,
+            )
+        else:
+            raise ValueError(f"Unknown optimizer: {optim_cfg._target_}")
+
+        # Configure learning rate scheduler
+        config_dict = {"optimizer": optimizer}
+
+        if "scheduler" in optim_cfg and optim_cfg.scheduler is not None:
+            scheduler_cfg = optim_cfg.scheduler.copy()
+            scheduler_class_name = scheduler_cfg._target_.split(".")[-1]
+
+            # Map scheduler target to class
+            if "StepLR" in scheduler_class_name:
+                scheduler = torch.optim.lr_scheduler.StepLR(
+                    optimizer,
+                    step_size=scheduler_cfg.step_size,
+                    gamma=scheduler_cfg.gamma,
+                )
+            elif "CosineAnnealingLR" in scheduler_class_name:
+                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    T_max=self.max_epochs,
+                    eta_min=scheduler_cfg.eta_min,
+                )
+            elif "ExponentialLR" in scheduler_class_name:
+                scheduler = torch.optim.lr_scheduler.ExponentialLR(
+                    optimizer,
+                    gamma=scheduler_cfg.gamma,
+                )
+            else:
+                scheduler = None
+
+            if scheduler is not None:
+                config_dict["lr_scheduler"] = {
+                    "scheduler": scheduler,
+                    "interval": scheduler_cfg.interval,
+                    "frequency": scheduler_cfg.frequency,
+                }
+
+        return config_dict
+
+    def on_train_epoch_start(self):
+        """Called at start of training epoch"""
+        if torch.cuda.is_available():
+            gc.collect()
+            torch.cuda.empty_cache()
+
+    def on_validation_epoch_start(self):
+        """Called at start of validation epoch"""
+        self.net.eval()
+
+    def on_test_start(self):
+        """Initialize test-time outputs (metrics + saving recon/figures)."""
+        self.net.eval()
+
+        test_cfg = getattr(self.cfg, "test", None)
+        save_dir = (
+            str(test_cfg.save_dir)
+            if test_cfg is not None and "save_dir" in test_cfg
+            else os.path.join(self.cfg.paths.output_dir, "test")
+        )
+        self._test_pred_threshold = (
+            float(test_cfg.pred_threshold)
+            if test_cfg is not None and "pred_threshold" in test_cfg
+            else 0.5
+        )
+        self._test_max_samples_per_angle = (
+            int(test_cfg.max_samples_per_angle)
+            if test_cfg is not None and "max_samples_per_angle" in test_cfg
+            else 10
+        )
+        self._test_save_recon_roi = (
+            bool(test_cfg.save_recon_roi)
+            if test_cfg is not None and "save_recon_roi" in test_cfg
+            else True
+        )
+        self._test_save_registered_seg = (
+            bool(test_cfg.save_registered_seg)
+            if test_cfg is not None and "save_registered_seg" in test_cfg
+            else True
+        )
+        self._test_save_proj_comparisons = (
+            bool(test_cfg.save_proj_comparisons)
+            if test_cfg is not None and "save_proj_comparisons" in test_cfg
+            else True
+        )
+
+        # Segmentation metrics options
+        self._test_min_region_size = (
+            int(getattr(test_cfg, "min_region_size"))
+            if test_cfg is not None and "min_region_size" in test_cfg
+            else 10
+        )
+        self._test_voxel_spacing = (
+            tuple(float(x) for x in getattr(test_cfg, "voxel_spacing"))
+            if test_cfg is not None and "voxel_spacing" in test_cfg
+            else (1.0, 1.0, 1.0)
+        )
+
+        # Connected components options for region counting (keeps defaults identical to scipy.ndimage)
+        raw_conn = (
+            int(getattr(test_cfg, "cc_connectivity"))
+            if test_cfg is not None and "cc_connectivity" in test_cfg
+            else 6
+        )
+        if raw_conn in (1, 2, 3):
+            # ndimage.generate_binary_structure connectivity parameter
+            self._test_cc_connectivity = int(raw_conn)
+        elif raw_conn == 6:
+            self._test_cc_connectivity = 1
+        elif raw_conn == 18:
+            self._test_cc_connectivity = 2
+        elif raw_conn == 26:
+            self._test_cc_connectivity = 3
+        else:
+            self._test_cc_connectivity = 1
+
+        self._test_cc_dilation_iters = (
+            int(getattr(test_cfg, "cc_dilation_iters"))
+            if test_cfg is not None and "cc_dilation_iters" in test_cfg
+            else 0
+        )
+
+        # Per-sample metrics written on rank 0 (initialized each test run)
+        self._test_sample_metrics = []
+        # Recon ROI storage stats (rank 0)
+        self._test_recon_file_sizes = {}
+
+        view_angles = [str(v) for v in getattr(self.cfg.data, "view_angles", [])]
+        if len(view_angles) > 0:
+            mid_idx = len(view_angles) // 2
+            self._test_angles_to_save = list(
+                dict.fromkeys([view_angles[0], view_angles[mid_idx], view_angles[-1]])
+            )
+            self._test_angle_saved_counts = {a: 0 for a in self._test_angles_to_save}
+
+        self._test_out_dir = Path(save_dir)
+        self._test_recon_dir = self._test_out_dir / "recon_roi"
+        self._test_seg_dir = self._test_out_dir / "seg_registered"
+        self._test_proj_dir = self._test_out_dir / "proj_compare"
+
+        if self.trainer is not None and self.trainer.is_global_zero:
+            self._test_out_dir.mkdir(parents=True, exist_ok=True)
+            if self._test_save_recon_roi:
+                self._test_recon_dir.mkdir(parents=True, exist_ok=True)
+            if self._test_save_registered_seg:
+                self._test_seg_dir.mkdir(parents=True, exist_ok=True)
+            if self._test_save_proj_comparisons:
+                self._test_proj_dir.mkdir(parents=True, exist_ok=True)
+
+            # Load base segmentation (vox_file) once, best-effort.
+            data_dir = self.cfg.data.test_dir or self.cfg.data.val_dir or self.cfg.data.train_dir
+            vox_path = (
+                os.path.join(str(data_dir), str(self.cfg.data.voxel_file)) if data_dir else None
+            )
+            base_seg_error = None
+            try:
+                if vox_path is not None and os.path.exists(vox_path):
+                    self._test_base_seg = np.load(vox_path)
+                    self._test_new_label = int(np.max(self._test_base_seg)) + 1
+            except Exception as e:
+                base_seg_error = f"{type(e).__name__}: {e}"
+                self._test_base_seg = None
+                self._test_new_label = None
+
+            # Always write meta so missing outputs are debuggable
+            try:
+                (self._test_out_dir / "meta.json").write_text(
+                    json.dumps(
+                        {
+                            "vox_path": vox_path,
+                            "vox_exists": bool(vox_path and os.path.exists(vox_path)),
+                            "base_seg_loaded": self._test_base_seg is not None,
+                            "base_seg_error": base_seg_error,
+                            "new_label": self._test_new_label,
+                            "pred_threshold": self._test_pred_threshold,
+                            "angles_saved": self._test_angles_to_save,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            except Exception:
+                pass
+
+    def _as_pair(self, v):
+        if torch.is_tensor(v):
+            v = v.detach().cpu().tolist()
+        if isinstance(v, (list, tuple)) and len(v) == 2:
+            return int(v[0]), int(v[1])
+        raise ValueError(f"Expected a pair, got: {type(v)} {v}")
+
+    def _label_components(self, mask: np.ndarray) -> tuple[np.ndarray, int]:
+        """Label connected components with optional test-time dilation/connectivity."""
+        from scipy import ndimage
+
+        mask = mask.astype(bool)
+        conn = int(getattr(self, "_test_cc_connectivity", 1))
+        conn = max(1, min(int(conn), mask.ndim))
+        structure = ndimage.generate_binary_structure(mask.ndim, conn)
+
+        dilate = int(getattr(self, "_test_cc_dilation_iters", 0))
+        if dilate > 0:
+            # Use a full neighborhood to bridge small gaps before CC labeling.
+            dil_struct = np.ones((3,) * mask.ndim, dtype=bool)
+            mask = ndimage.binary_dilation(mask, structure=dil_struct, iterations=int(dilate))
+
+        labeled, num = ndimage.label(mask, structure=structure)
+        return labeled, int(num)
+
+    def _filter_small_components(self, mask: np.ndarray, min_size: int) -> tuple[np.ndarray, int]:
+        """Return (filtered_mask, num_components_kept).
+
+        Connected-components are computed on an optional dilated mask (test.cc_dilation_iters)
+        with configurable connectivity (test.cc_connectivity), but the returned mask itself is
+        not dilated.
+        """
+        labeled, num = self._label_components(mask)
+
+        if min_size <= 1:
+            return mask.astype(bool), int(num)
+
+        if num == 0:
+            return mask.astype(bool), 0
+
+        from scipy import ndimage
+
+        sizes = ndimage.sum(mask.astype(np.uint8), labeled, index=list(range(1, num + 1)))
+        keep = np.asarray(sizes) >= int(min_size)
+        if not np.any(keep):
+            return np.zeros_like(mask, dtype=bool), 0
+
+        keep_ids = np.nonzero(keep)[0] + 1
+        filtered = np.isin(labeled, keep_ids) & mask.astype(bool)
+        return filtered, int(len(keep_ids))
+
+    def _assd_hd95(
+        self, pred: np.ndarray, gt: np.ndarray, spacing: tuple[float, float, float]
+    ) -> tuple[float, float]:
+        """Compute ASSD + HD95 between two binary 3D masks."""
+        from scipy import ndimage
+
+        pred = pred.astype(bool)
+        gt = gt.astype(bool)
+
+        if not pred.any() and not gt.any():
+            return 0.0, 0.0
+        if not pred.any() or not gt.any():
+            # Undefined for surface distance; caller should ignore.
+            return float("nan"), float("nan")
+
+        # Surface voxels
+        struct = np.ones((3, 3, 3), dtype=bool)
+        pred_s = pred ^ ndimage.binary_erosion(pred, structure=struct)
+        gt_s = gt ^ ndimage.binary_erosion(gt, structure=struct)
+
+        # Distances to the other surface
+        dt_gt = ndimage.distance_transform_edt(~gt_s, sampling=spacing)
+        dt_pred = ndimage.distance_transform_edt(~pred_s, sampling=spacing)
+
+        d_pred_to_gt = dt_gt[pred_s]
+        d_gt_to_pred = dt_pred[gt_s]
+        d = np.concatenate([d_pred_to_gt, d_gt_to_pred], axis=0)
+
+        assd = float(np.mean(d))
+        hd95 = float(np.percentile(d, 95))
+        return assd, hd95
+
+    @rank_zero_only
+    def _save_proj_compare(self, gt_img, pred_img, out_path: Path, title: str):
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
+
+        def _to_img(x):
+            if torch.is_tensor(x):
+                x = x.detach().cpu().numpy()
+            x = x.astype(np.float32)
+            x_min, x_max = float(np.min(x)), float(np.max(x))
+            if x_max > x_min:
+                x = (x - x_min) / (x_max - x_min)
+            return x
+
+        g = _to_img(gt_img)
+        p = _to_img(pred_img)
+
+        fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+        axes[0].imshow(g, cmap="gray")
+        axes[0].set_title("gt")
+        axes[0].axis("off")
+        axes[1].imshow(p, cmap="gray")
+        axes[1].set_title("pred")
+        axes[1].axis("off")
+        fig.suptitle(title)
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+
+    def test_step(self, batch, batch_idx):
+        projections = batch["projections"]
+        no_projections = batch.get("no_projections")
+        proj_in = projections
+        if self.cfg.model.name == "minr_fmt" and "projections_packed" in batch:
+            p = batch["projections_packed"]
+            B, V = p.shape[0], p.shape[1]
+            # minr_fmt expects view-major flattening: [V*B,1,H,W]
+            proj_in = p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+        points = batch["points"]
+        point_densities = batch["point_densities"]
+        voxel_shape = batch["feasible_voxel_shape"]
+
+        B = points.shape[0]
+        voxel_shape_tuple = (
+            B,
+            int(voxel_shape[0][0].detach().cpu().numpy()),
+            int(voxel_shape[1][0].detach().cpu().numpy()),
+            int(voxel_shape[2][0].detach().cpu().numpy()),
+        )
+
+        density_gt = point_densities.reshape(voxel_shape_tuple)
+        density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+        pred_density, pred_views = self(proj_in, points)
+        density_pred = pred_density.reshape(voxel_shape_tuple)
+
+        dice = dice_coefficient(density_pred, density_gt_bin, threshold=self._test_pred_threshold)
+        self.log(
+            "test_dice",
+            dice,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        # Reconstruction metrics (PSNR/SSIM) on [0,1] via gt-based min-max normalization.
+        gt_min = density_gt.amin(dim=(1, 2, 3), keepdim=True)
+        gt_max = density_gt.amax(dim=(1, 2, 3), keepdim=True)
+        denom = (gt_max - gt_min).clamp_min(1e-8)
+        density_gt_n = ((density_gt - gt_min) / denom).clamp(0.0, 1.0)
+        density_pred_n = ((density_pred - gt_min) / denom).clamp(0.0, 1.0)
+
+        psnr_vals, ssim_vals = [], []
+        for i in range(B):
+            psnr_vals.append(float(get_psnr_3d(density_pred_n[i], density_gt_n[i])))
+            ssim_vals.append(float(get_ssim_3d(density_pred_n[i], density_gt_n[i])))
+
+        psnr = torch.tensor(float(np.mean(psnr_vals)), device=density_pred.device)
+        ssim = torch.tensor(float(np.mean(ssim_vals)), device=density_pred.device)
+        self.log("test_psnr", psnr, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("test_ssim", ssim, on_step=False, on_epoch=True, sync_dist=True)
+
+        # Segmentation metrics: region count + ASSD + HD95
+        thr = float(self._test_pred_threshold)
+        min_sz = int(getattr(self, "_test_min_region_size", 10))
+        spacing = tuple(getattr(self, "_test_voxel_spacing", (1.0, 1.0, 1.0)))
+
+        pred_regions, gt_regions = [], []
+        assd_vals, hd95_vals = [], []
+        prec_vals, rec_vals = [], []
+        valid_pairs = 0
+
+        # pred_views contains predicted de-scatter per view (if provided by model)
+
+        for i in range(B):
+            pm = density_pred[i].detach().to(dtype=torch.float32).cpu().numpy() >= thr
+            # GT is a reconstruction volume; use >0 as foreground.
+            gm = density_gt_bin[i].detach().to(dtype=torch.float32).cpu().numpy() > 0.0
+
+            pm_f, n_pred = self._filter_small_components(pm, min_sz)
+            gm_f, n_gt = self._filter_small_components(gm, min_sz)
+            pred_regions.append(float(n_pred))
+            gt_regions.append(float(n_gt))
+
+            # Voxel-level Precision / Recall (on filtered masks)
+            tp = float(np.logical_and(pm_f, gm_f).sum())
+            fp = float(np.logical_and(pm_f, np.logical_not(gm_f)).sum())
+            fn = float(np.logical_and(np.logical_not(pm_f), gm_f).sum())
+            if (tp + fp) == 0.0:
+                prec = 1.0 if gm_f.sum() == 0 else 0.0
+            else:
+                prec = tp / (tp + fp)
+            if (tp + fn) == 0.0:
+                rec = 1.0
+            else:
+                rec = tp / (tp + fn)
+            prec_vals.append(float(prec))
+            rec_vals.append(float(rec))
+
+            a, h = self._assd_hd95(pm_f, gm_f, spacing)
+            if np.isfinite(a) and np.isfinite(h):
+                valid_pairs += 1
+                assd_vals.append(float(a))
+                hd95_vals.append(float(h))
+
+            # per-sample record (rank 0 only)
+            if self.trainer is not None and self.trainer.is_global_zero:
+                sid = None
+                sids = batch.get("sample_id")
+                if sids is not None:
+                    sid = str(sids[i])
+                else:
+                    sid = f"{batch_idx:06d}_{i}"
+                # Instance-level metrics (only when #lights>1)
+                mr = ms = delta_cc = None
+                if int(n_gt) > 1:
+                    gt_lab, gt_n = self._label_components(gm_f)
+                    pred_lab, pred_n = self._label_components(pm_f)
+
+                    missed = 0
+                    splits = 0
+                    for gid in range(1, int(gt_n) + 1):
+                        overlaps = np.unique(pred_lab[gt_lab == gid])
+                        overlaps = overlaps[overlaps != 0]
+                        if overlaps.size == 0:
+                            missed += 1
+                        elif overlaps.size > 1:
+                            splits += int(overlaps.size - 1)
+
+                    merges = 0
+                    for pid in range(1, int(pred_n) + 1):
+                        overlaps = np.unique(gt_lab[pred_lab == pid])
+                        overlaps = overlaps[overlaps != 0]
+                        if overlaps.size > 1:
+                            merges += int(overlaps.size - 1)
+
+                    mr = float(missed / max(int(gt_n), 1))
+                    ms = float((splits + merges) / max(int(gt_n), 1))
+                    delta_cc = float(abs(int(pred_n) - int(gt_n)))
+
+                self._test_sample_metrics.append(
+                    {
+                        "sample_id": sid,
+                        "pred_regions": int(n_pred),
+                        "gt_regions": int(n_gt),
+                        "dice": float(compute_dice(pm_f, gm_f)),
+                        "precision": float(prec),
+                        "recall": float(rec),
+                        "mr": mr,
+                        "ms": ms,
+                        "delta_cc": delta_cc,
+                        "assd": float(a) if np.isfinite(a) else None,
+                        "hd95": float(h) if np.isfinite(h) else None,
+                        "psnr": float(psnr_vals[i]),
+                        "ssim": float(ssim_vals[i]),
+                    }
+                )
+
+        test_regions = torch.tensor(float(np.mean(pred_regions)), device=density_pred.device)
+        test_gt_regions = torch.tensor(float(np.mean(gt_regions)), device=density_pred.device)
+        test_valid_surface_frac = torch.tensor(
+            float(valid_pairs / max(B, 1)), device=density_pred.device
+        )
+
+        assd_mean = float(np.mean(assd_vals)) if len(assd_vals) else 0.0
+        hd95_mean = float(np.mean(hd95_vals)) if len(hd95_vals) else 0.0
+        test_assd = torch.tensor(assd_mean, device=density_pred.device)
+        test_hd95 = torch.tensor(hd95_mean, device=density_pred.device)
+        test_precision = torch.tensor(
+            float(np.mean(prec_vals)) if len(prec_vals) else 0.0, device=density_pred.device
+        )
+        test_recall = torch.tensor(
+            float(np.mean(rec_vals)) if len(rec_vals) else 0.0, device=density_pred.device
+        )
+
+        self.log(
+            "test_regions",
+            test_regions,
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log("test_gt_regions", test_gt_regions, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("test_assd", test_assd, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("test_hd95", test_hd95, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("test_precision", test_precision, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("test_recall", test_recall, on_step=False, on_epoch=True, sync_dist=True)
+        self.log(
+            "test_surface_valid_frac",
+            test_valid_surface_frac,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        # Saving (rank 0 only)
+        if self.trainer is not None and self.trainer.is_global_zero:
+            sample_ids = batch.get("sample_id")
+            if sample_ids is None:
+                sample_ids = [f"{batch_idx:06d}_{i}" for i in range(B)]
+
+            for i in range(B):
+                sid = str(sample_ids[i])
+
+                if self._test_save_recon_roi and self._test_recon_dir is not None:
+                    npz_path = self._test_recon_dir / f"{sid}.npz"
+                    np.savez_compressed(
+                        npz_path,
+                        pred=density_pred[i].detach().to(dtype=torch.float32).cpu().numpy(),
+                        gt=density_gt[i].detach().to(dtype=torch.float32).cpu().numpy(),
+                        pred_threshold=np.float32(self._test_pred_threshold),
+                    )
+
+                    # Also store raw uint8 binary masks as .bin
+                    # - pred: pred >= pred_threshold
+                    # - gt:   gt > 0
+                    pred_bin_path = self._test_recon_dir / f"{sid}_pred.bin"
+                    gt_bin_path = self._test_recon_dir / f"{sid}_gt.bin"
+
+                    pred_bin = (
+                        density_pred[i].detach().to(dtype=torch.float32).cpu().numpy()
+                        >= float(self._test_pred_threshold)
+                    ).astype(np.uint8)
+                    gt_bin = (
+                        density_gt[i].detach().to(dtype=torch.float32).cpu().numpy() > 0.0
+                    ).astype(np.uint8)
+
+                    pred_bin.tofile(pred_bin_path)
+                    gt_bin.tofile(gt_bin_path)
+
+                    # Track storage sizes
+                    try:
+                        self._test_recon_file_sizes[sid] = {
+                            "npz_bytes": int(npz_path.stat().st_size),
+                            "pred_bin_bytes": int(pred_bin_path.stat().st_size),
+                            "gt_bin_bytes": int(gt_bin_path.stat().st_size),
+                            "shape": [int(x) for x in pred_bin.shape],
+                            "dtype": "uint8",
+                        }
+                    except Exception:
+                        pass
+
+                if self._test_save_registered_seg and self._test_seg_dir is not None:
+                    if self._test_base_seg is None or self._test_new_label is None:
+                        self._test_sample_metrics.append(
+                            {
+                                "sample_id": sid,
+                                "warning": "registered_seg_base_seg_missing",
+                            }
+                        )
+                    else:
+                        print("!!!!!!!", batch["range_x"])
+                        rx = self._as_pair(batch["range_x"][i])
+                        ry = self._as_pair(batch["range_y"][i])
+                        rz = self._as_pair(batch["range_z"][i])
+
+                        roi_mask = density_pred[i].detach().to(
+                            dtype=torch.float32
+                        ).cpu().numpy() >= float(self._test_pred_threshold)
+
+                        new_seg = self._test_base_seg.copy()
+
+                        # IMPORTANT: keep ROI slicing consistent with MultiProjDataset:
+                        # new_seg[range_x[0]:range_x[1], range_y[0]:range_y[1], range_z[0]:range_z[1]]
+                        x0, x1 = rx
+                        y0, y1 = ry
+                        z0, z1 = rz
+                        roi_view = new_seg[x0:x1, y0:y1, z0:z1]
+
+                        # If shapes don't match, skip instead of clamping/truncating (prevents silent ROI misalignment).
+                        if roi_view.shape != roi_mask.shape:
+                            self._test_sample_metrics.append(
+                                {
+                                    "sample_id": sid,
+                                    "warning": "registered_seg_roi_shape_mismatch",
+                                    "range_x": [int(x0), int(x1)],
+                                    "range_y": [int(y0), int(y1)],
+                                    "range_z": [int(z0), int(z1)],
+                                    "roi_view_shape": [int(s) for s in roi_view.shape],
+                                    "roi_mask_shape": [int(s) for s in roi_mask.shape],
+                                }
+                            )
+                        else:
+                            roi_view[roi_mask] = self._test_new_label
+                            new_seg[x0:x1, y0:y1, z0:z1] = roi_view
+                            np.save(self._test_seg_dir / f"{sid}.npy", new_seg)
+                            # Also save raw binary dump (same dtype as numpy array)
+                            new_seg.tofile(self._test_seg_dir / f"{sid}.bin")
+
+                if (
+                    self._test_save_proj_comparisons
+                    and self._test_proj_dir is not None
+                    and no_projections is not None
+                    and len(self._test_angles_to_save) > 0
+                ):
+                    for angle in self._test_angles_to_save:
+                        if (
+                            self._test_angle_saved_counts.get(angle, 0)
+                            >= self._test_max_samples_per_angle
+                        ):
+                            continue
+                        out_path = self._test_proj_dir / f"{sid}_angle{angle}.png"
+                        self._save_proj_compare(
+                            projections[angle][i],
+                            no_projections[angle][i],
+                            out_path,
+                            title=f"{sid} angle={angle}",
+                        )
+                        self._test_angle_saved_counts[angle] = (
+                            self._test_angle_saved_counts.get(angle, 0) + 1
+                        )
+
+        return {
+            "dice": dice,
+            "psnr": psnr,
+            "ssim": ssim,
+            "regions": test_regions,
+            "gt_regions": test_gt_regions,
+            "assd": test_assd,
+            "hd95": test_hd95,
+        }
+
+    def on_test_end(self):
+        """Write a small metrics summary file (rank 0 only)."""
+        if self.trainer is None or not self.trainer.is_global_zero or self._test_out_dir is None:
+            return
+
+        metrics = {}
+        for k, v in self.trainer.callback_metrics.items():
+            if not str(k).startswith("test_"):
+                continue
+            if torch.is_tensor(v):
+                v = v.detach().cpu().item()
+            metrics[str(k)] = v
+
+        try:
+            (self._test_out_dir / "metrics_summary.json").write_text(
+                json.dumps(metrics, ensure_ascii=False, indent=2)
+            )
+        except Exception:
+            pass
+
+        # Per-sample + grouped summaries
+        try:
+            import csv
+
+            rows = list(getattr(self, "_test_sample_metrics", []) or [])
+            if rows:
+                # De-duplicate by sample_id (saving stage may append warning-only rows)
+                by_id = {}
+                for r in rows:
+                    sid = r.get("sample_id")
+                    if sid is None:
+                        continue
+                    if sid not in by_id:
+                        by_id[sid] = dict(r)
+                        continue
+
+                    # Merge fields (prefer non-None); accumulate warnings
+                    for k, v in r.items():
+                        if k == "warning":
+                            if v is None:
+                                continue
+                            prev = by_id[sid].get("warning")
+                            if not prev:
+                                by_id[sid]["warning"] = v
+                            elif v not in str(prev):
+                                by_id[sid]["warning"] = f"{prev};{v}"
+                            continue
+
+                        if by_id[sid].get(k) is None and v is not None:
+                            by_id[sid][k] = v
+
+                rows = list(by_id.values())
+                # 1) per-sample csv
+                keys = [
+                    "sample_id",
+                    "pred_regions",
+                    "gt_regions",
+                    "dice",
+                    "precision",
+                    "recall",
+                    "mr",
+                    "ms",
+                    "delta_cc",
+                    "assd",
+                    "hd95",
+                    "psnr",
+                    "ssim",
+                    "warning",
+                ]
+                with open(self._test_out_dir / "metrics_per_sample.csv", "w", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=keys)
+                    w.writeheader()
+                    for r in rows:
+                        w.writerow({k: r.get(k) for k in keys})
+
+                # 2) grouped by gt_regions
+                grouped = {}
+                for r in rows:
+                    g = int(r.get("gt_regions", 0))
+                    grouped.setdefault(g, []).append(r)
+
+                summary_by_gt = {}
+                for g, rs in grouped.items():
+
+                    def _mean(field):
+                        vals = [x[field] for x in rs if x.get(field) is not None]
+                        return float(sum(vals) / len(vals)) if vals else None
+
+                    summary_by_gt[str(g)] = {
+                        "count": len(rs),
+                        "dice_mean": _mean("dice"),
+                        "precision_mean": _mean("precision"),
+                        "recall_mean": _mean("recall"),
+                        "mr_mean": _mean("mr"),
+                        "ms_mean": _mean("ms"),
+                        "delta_cc_mean": _mean("delta_cc"),
+                        "assd_mean": _mean("assd"),
+                        "hd95_mean": _mean("hd95"),
+                        "pred_regions_mean": _mean("pred_regions"),
+                        "psnr_mean": _mean("psnr"),
+                        "ssim_mean": _mean("ssim"),
+                    }
+
+                (self._test_out_dir / "summary_by_gt_regions.json").write_text(
+                    json.dumps(summary_by_gt, ensure_ascii=False, indent=2)
+                )
+
+                # 3) required summary table: 1-light / 2-light / 3-light / overall
+                def _mean_over(rs, field):
+                    vals = [x.get(field) for x in rs if x.get(field) is not None]
+                    return float(sum(vals) / len(vals)) if vals else None
+
+                groups = {
+                    "1": [r for r in rows if int(r.get("gt_regions", 0)) == 1],
+                    "2": [r for r in rows if int(r.get("gt_regions", 0)) == 2],
+                    "3": [r for r in rows if int(r.get("gt_regions", 0)) == 3],
+                    "overall": rows,
+                }
+
+                table_rows = []
+                for name, rs in groups.items():
+                    table_rows.append(
+                        {
+                            "group": name,
+                            "count": len(rs),
+                            "dsc": _mean_over(rs, "dice"),
+                            "precision": _mean_over(rs, "precision"),
+                            "recall": _mean_over(rs, "recall"),
+                            "assd": _mean_over(rs, "assd"),
+                            "hd95": _mean_over(rs, "hd95"),
+                            "mr": _mean_over(rs, "mr"),
+                            "ms": _mean_over(rs, "ms"),
+                            "delta_cc": _mean_over(rs, "delta_cc"),
+                        }
+                    )
+
+                with open(self._test_out_dir / "summary_by_num_lights.csv", "w", newline="") as f:
+                    w = csv.DictWriter(
+                        f,
+                        fieldnames=[
+                            "group",
+                            "count",
+                            "dsc",
+                            "precision",
+                            "recall",
+                            "assd",
+                            "hd95",
+                            "mr",
+                            "ms",
+                            "delta_cc",
+                        ],
+                    )
+                    w.writeheader()
+                    for r in table_rows:
+                        w.writerow(r)
+
+                (self._test_out_dir / "summary_by_num_lights.json").write_text(
+                    json.dumps(table_rows, ensure_ascii=False, indent=2)
+                )
+
+            # Recon ROI storage summary
+            if self._test_recon_dir is not None and getattr(self, "_test_recon_file_sizes", None):
+                files = dict(self._test_recon_file_sizes)
+                total_npz = sum(v.get("npz_bytes", 0) for v in files.values())
+                total_pred_bin = sum(v.get("pred_bin_bytes", 0) for v in files.values())
+                total_gt_bin = sum(v.get("gt_bin_bytes", 0) for v in files.values())
+                total_bin = total_pred_bin + total_gt_bin
+                summary = {
+                    "num_samples": len(files),
+                    "total_npz_bytes": int(total_npz),
+                    "total_pred_bin_bytes": int(total_pred_bin),
+                    "total_gt_bin_bytes": int(total_gt_bin),
+                    "total_bin_bytes": int(total_bin),
+                    "total_bytes": int(total_npz + total_bin),
+                    "total_mb": float((total_npz + total_bin) / (1024**2)),
+                    "files": files,
+                }
+                (self._test_recon_dir / "storage_size.json").write_text(
+                    json.dumps(summary, ensure_ascii=False, indent=2)
+                )
+
+        except Exception:
+            pass

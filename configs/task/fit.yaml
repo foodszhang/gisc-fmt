@@ -1,0 +1,6 @@
+# @package _global_
+task: fit
+
+# PyTorch >=2.6 defaults to weights_only=True which can fail to unpickle Hydra/OmegaConf state.
+# For resuming training from a trusted checkpoint produced by this repo, set to false.
+ckpt_weights_only: false

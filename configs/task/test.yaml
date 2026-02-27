@@ -1,0 +1,27 @@
+# @package _global_
+task: test
+
+# Test-only options
+# (kept here so it only affects runs with task=test)
+# PyTorch >=2.6 defaults to weights_only=True which may fail to load Hydra/OmegaConf state.
+# Set to false if the checkpoint is trusted (e.g. produced by this repo).
+ckpt_weights_only: false
+test:
+  save_dir: ${paths.output_dir}/test
+  pred_threshold: 0.5
+  max_samples_per_angle: 10
+  save_recon_roi: true
+  save_registered_seg: true
+  save_proj_comparisons: true
+
+  # Segmentation metrics
+  # Components smaller than this (voxel count) are ignored for region count and distance metrics.
+  min_region_size: 10
+  # Physical spacing for ASSD/HD95 (x,y,z). If unknown, keep [1,1,1].
+  voxel_spacing: [1.0, 1.0, 1.0]
+
+  # Connected components / region counting
+  # - cc_connectivity supports 6/18/26 (or 1/2/3 for ndimage.generate_binary_structure)
+  # - cc_dilation_iters dilates the mask before labeling to bridge small gaps
+  cc_connectivity: 26
+  cc_dilation_iters: 1

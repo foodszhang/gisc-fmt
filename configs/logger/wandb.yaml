@@ -1,0 +1,9 @@
+_target_: pytorch_lightning.loggers.WandbLogger
+entity: null
+project: "gisc-fmt"
+name: null
+mode: offline  # offline | online | disabled
+save_code: false
+log_model: false
+notes: "Experiment run"
+tags: []

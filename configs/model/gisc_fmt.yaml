@@ -1,0 +1,49 @@
+name: gisc_fmt
+num_views: 7
+in_channels: 1
+feature_dim: 64
+pos_enc_dim: 60
+geometry:
+  #camera_distance: 500.0
+  camera_distance: 200.0
+  detector_size: [256, 256]
+  #global_voxel_shape: [182, 164, 210]
+  global_voxel_shape: [256, 256, 256]
+  #global_voxel_shape: [239, 212, 210]
+gisc_fmt:
+  use_adapter: true
+  # Reduce adapter compute: apply a single angle-conditioned adapter after feature_fusion.
+  adapter_strategy: bottleneck_decoder  # {final, bottleneck_decoder}
+  adapter_mode: per_view  # {conditioned, per_view}
+  adapter_cond_dim: 4
+  adapter_r_ratio: 8
+  norm_type: group
+  implicit_field_hidden_dim: 128
+  implicit_field_d_x: 60
+  implicit_field_d_f: 64
+  view_weight_embed_dim: 16
+  view_weight_hidden_dim: 32
+
+  # Multi-scale fusion (required; no code-side defaults)
+  multiscale:
+    view_embed_dim: 16
+    depth_dim: 16
+    cross_view_hidden_dim: 64
+    scale_hidden_dim: 64
+    tau: 1.0
+    depth_max: 200.0
+
+  # Background branch (required mapping; can be disabled)
+  background:
+    enable_background: false
+    head:
+      hidden_dim: 64
+      d_x: 60
+      d_f: 64
+    guidance:
+      enable: false
+      dim: 16
+      mode: film  # film|gated
+      hidden_dim: 64
+      scale: 1.0
+      gate_init_bias: 4.0

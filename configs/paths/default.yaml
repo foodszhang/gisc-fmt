@@ -1,0 +1,5 @@
+root_dir: outputs
+# Include model/task in the directory name so different runs are easy to distinguish.
+output_dir: ${paths.root_dir}/${model.name}/${task}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+checkpoint_dir: ${paths.output_dir}/checkpoints
+config_dir: ${paths.output_dir}/config

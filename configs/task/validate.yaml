@@ -1,0 +1,5 @@
+# @package _global_
+task: validate
+
+# See task/test.yaml for rationale.
+ckpt_weights_only: false

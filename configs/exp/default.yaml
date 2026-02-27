@@ -1,0 +1,6 @@
+name: default_experiment
+description: Default training run
+resume_from_checkpoint: null
+test_after_training: false
+log_config: true
+log_git_info: true
