@@ -1,0 +1,20 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e1_data_smoke
+  - _self_
+
+name: fmt_simgen_e1b_nongt_mixed
+description: FMT-SimGen Non-GT 50 percent trunk-uniform plus 50 percent measurement proposal baseline
+
+data:
+  use_nongt_sampler: true
+  query_sampling:
+    type: nongt_mixed
+    num_queries: ${data.num_queries}
+    trunk_uniform_ratio: 0.5
+    meas_proposal_ratio: 0.5
+    use_gt_bbox: false
+    use_gt_foreground_oversampling: false
+    use_body_mask: false
+    use_depth_silhouette_mask: false

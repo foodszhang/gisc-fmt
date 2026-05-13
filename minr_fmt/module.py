@@ -7,12 +7,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 from omegaconf import DictConfig
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from .loss import ScatterLightLoss, dice_coefficient, compute_dice
+from .loss import ScatterLightLoss, compute_dice, dice_coefficient
 from .model_factory import ModelFactory
 from .utils.utils import get_psnr_3d, get_ssim_3d
 
@@ -79,7 +78,7 @@ class TrainingLightningModule(LightningModule):
         if getattr(self.cfg.trainer, "torch_compile", False) and hasattr(torch, "compile"):
             mode = str(getattr(self.cfg.trainer, "torch_compile_mode", "reduce-overhead"))
 
-            # Inductor/Triton compilation can fail on some shapes/kernels (e.g., int32 indexing overflow).
+            # Inductor/Triton can fail on some shapes/kernels, e.g. int32 indexing overflow.
             # Suppress compile errors so Dynamo falls back to eager instead of crashing.
             try:
                 from torch import _dynamo  # type: ignore
@@ -103,9 +102,34 @@ class TrainingLightningModule(LightningModule):
             lambda_dice=loss_cfg.dice_weight,
         )
 
-    def forward(self, projections, points):
+    def forward(self, projections, points, points_mm=None, depth_maps=None):
         """Forward pass."""
-        return self.net(projections, points)
+        return self.net(projections, points, points_mm=points_mm, depth_maps=depth_maps)
+
+    def _call_model(self, projections, points, points_mm=None, depth_maps=None):
+        out = self(projections, points, points_mm=points_mm, depth_maps=depth_maps)
+        if isinstance(out, tuple) and len(out) >= 2:
+            return out[0], out[1]
+        raise RuntimeError(f"Unexpected model output: {type(out)}")
+
+    def _prepare_projection_input(self, batch):
+        projections = batch["projections"]
+        if self.cfg.model.name in {"minr_fmt", "gisc_fmt"} and "projections_packed" in batch:
+            p = batch["projections_packed"]  # [B,V,1,H,W]
+            B, V = p.shape[0], p.shape[1]
+            # GISC-FMT expects view-major flattening: [V*B,1,H,W]
+            return projections, p.permute(1, 0, 2, 3, 4).reshape(
+                B * V, 1, p.shape[-2], p.shape[-1]
+            )
+        return projections, projections
+
+    def _shape_tuple_from_batch(self, voxel_shape, batch_size: int) -> tuple[int, int, int, int]:
+        return (
+            batch_size,
+            int(voxel_shape[0][0].detach().cpu().numpy()),
+            int(voxel_shape[1][0].detach().cpu().numpy()),
+            int(voxel_shape[2][0].detach().cpu().numpy()),
+        )
 
     def training_step(self, batch, batch_idx):
         """
@@ -124,19 +148,17 @@ class TrainingLightningModule(LightningModule):
         Returns:
             Loss value
         """
-        projections = batch["projections"]  # keep dict for scatter loss GT
-        proj_in = projections
-        if self.cfg.model.name == "minr_fmt" and "projections_packed" in batch:
-            p = batch["projections_packed"]  # [B,V,1,H,W]
-            B, V = p.shape[0], p.shape[1]
-            # minr_fmt expects view-major flattening: [V*B,1,H,W]
-            proj_in = p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+        projections, proj_in = self._prepare_projection_input(batch)
 
         points = batch["points"]
+        points_mm = batch.get("points_mm")
+        depth_maps = batch.get("depth_maps")
         density = batch["point_densities"].unsqueeze(-1)
 
         # Forward pass (use packed tensor when available)
-        density_pred, aux_outputs = self(proj_in, points)
+        density_pred, aux_outputs = self._call_model(
+            proj_in, points, points_mm=points_mm, depth_maps=depth_maps
+        )
 
         # Compute loss
         loss_dict = self.loss_func(aux_outputs, projections, density_pred, density)
@@ -182,37 +204,34 @@ class TrainingLightningModule(LightningModule):
         Returns:
             Dictionary with metrics
         """
-        projections = batch["projections"]
-        proj_in = projections
-        if self.cfg.model.name == "minr_fmt" and "projections_packed" in batch:
-            p = batch["projections_packed"]
-            B, V = p.shape[0], p.shape[1]
-            # minr_fmt expects view-major flattening: [V*B,1,H,W]
-            proj_in = p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+        _projections, proj_in = self._prepare_projection_input(batch)
 
         points = batch["points"]
+        points_mm = batch.get("points_mm")
+        depth_maps = batch.get("depth_maps")
         point_densities = batch["point_densities"]
         voxel_shape = batch["feasible_voxel_shape"]
 
         B = points.shape[0]
 
         # Reconstruct voxel shape
-        voxel_shape_tuple = (
-            B,
-            int(voxel_shape[0][0].detach().cpu().numpy()),
-            int(voxel_shape[1][0].detach().cpu().numpy()),
-            int(voxel_shape[2][0].detach().cpu().numpy()),
-        )
-
-        density_gt = point_densities.reshape(voxel_shape_tuple)
-        density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+        voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
 
         # Inference
-        pred, _ = self(proj_in, points)
-        density_pred = pred.reshape(voxel_shape_tuple)
-
-        # Compute DSC (Dice) on binary GT
-        dice = dice_coefficient(density_pred, density_gt_bin)
+        pred, _ = self._call_model(proj_in, points, points_mm=points_mm, depth_maps=depth_maps)
+        if int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]:
+            density_gt = point_densities.reshape(voxel_shape_tuple)
+            density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+            density_pred = pred.reshape(voxel_shape_tuple)
+            dice = dice_coefficient(density_pred, density_gt_bin)
+        else:
+            pred_bin = (pred.squeeze(-1) >= 0.5).float()
+            gt_bin = (point_densities > 0.0).float()
+            intersection = (pred_bin * gt_bin).sum(dim=1)
+            dice = (
+                (2.0 * intersection + 1e-8)
+                / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+            ).mean()
 
         # Log metric
         self.log(
@@ -371,7 +390,7 @@ class TrainingLightningModule(LightningModule):
             else (1.0, 1.0, 1.0)
         )
 
-        # Connected components options for region counting (keeps defaults identical to scipy.ndimage)
+        # Connected components options for region counting.
         raw_conn = (
             int(getattr(test_cfg, "cc_connectivity"))
             if test_cfg is not None and "cc_connectivity" in test_cfg
@@ -574,30 +593,34 @@ class TrainingLightningModule(LightningModule):
     def test_step(self, batch, batch_idx):
         projections = batch["projections"]
         no_projections = batch.get("no_projections")
-        proj_in = projections
-        if self.cfg.model.name == "minr_fmt" and "projections_packed" in batch:
-            p = batch["projections_packed"]
-            B, V = p.shape[0], p.shape[1]
-            # minr_fmt expects view-major flattening: [V*B,1,H,W]
-            proj_in = p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+        _projections, proj_in = self._prepare_projection_input(batch)
         points = batch["points"]
+        points_mm = batch.get("points_mm")
+        depth_maps = batch.get("depth_maps")
         point_densities = batch["point_densities"]
         voxel_shape = batch["feasible_voxel_shape"]
 
         B = points.shape[0]
-        voxel_shape_tuple = (
-            B,
-            int(voxel_shape[0][0].detach().cpu().numpy()),
-            int(voxel_shape[1][0].detach().cpu().numpy()),
-            int(voxel_shape[2][0].detach().cpu().numpy()),
+        pred_density, pred_views = self._call_model(
+            proj_in, points, points_mm=points_mm, depth_maps=depth_maps
         )
-
-        density_gt = point_densities.reshape(voxel_shape_tuple)
-        density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
-        pred_density, pred_views = self(proj_in, points)
-        density_pred = pred_density.reshape(voxel_shape_tuple)
-
-        dice = dice_coefficient(density_pred, density_gt_bin, threshold=self._test_pred_threshold)
+        voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
+        full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+        if full_grid:
+            density_gt = point_densities.reshape(voxel_shape_tuple)
+            density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+            density_pred = pred_density.reshape(voxel_shape_tuple)
+            dice = dice_coefficient(
+                density_pred, density_gt_bin, threshold=self._test_pred_threshold
+            )
+        else:
+            pred_bin = (pred_density.squeeze(-1) >= self._test_pred_threshold).float()
+            gt_bin = (point_densities > 0.0).float()
+            intersection = (pred_bin * gt_bin).sum(dim=1)
+            dice = (
+                (2.0 * intersection + 1e-8)
+                / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+            ).mean()
         self.log(
             "test_dice",
             dice,
@@ -606,6 +629,8 @@ class TrainingLightningModule(LightningModule):
             on_epoch=True,
             sync_dist=True,
         )
+        if not full_grid:
+            return {"dice": dice}
 
         # Reconstruction metrics (PSNR/SSIM) on [0,1] via gt-based min-max normalization.
         gt_min = density_gt.amin(dim=(1, 2, 3), keepdim=True)
@@ -826,13 +851,13 @@ class TrainingLightningModule(LightningModule):
                         new_seg = self._test_base_seg.copy()
 
                         # IMPORTANT: keep ROI slicing consistent with MultiProjDataset:
-                        # new_seg[range_x[0]:range_x[1], range_y[0]:range_y[1], range_z[0]:range_z[1]]
+                        # Matches MultiProjDataset ROI slicing order.
                         x0, x1 = rx
                         y0, y1 = ry
                         z0, z1 = rz
                         roi_view = new_seg[x0:x1, y0:y1, z0:z1]
 
-                        # If shapes don't match, skip instead of clamping/truncating (prevents silent ROI misalignment).
+                        # Skip instead of truncating; shape mismatch means ROI misalignment.
                         if roi_view.shape != roi_mask.shape:
                             self._test_sample_metrics.append(
                                 {

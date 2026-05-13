@@ -64,10 +64,47 @@ class ConfigExtractor:
             raise KeyError("model.geometry must be provided in the config")
         required = ["camera_distance", "detector_size", "global_voxel_shape"]
         ConfigExtractor._require_keys(geometry, required, "geometry")
+        detector_resolution = geometry.get("detector_resolution", geometry["detector_size"])
         return {
             "camera_distance": float(geometry["camera_distance"]),
             "detector_size": tuple(geometry["detector_size"]),
+            "detector_resolution": tuple(detector_resolution),
+            "fov_mm": float(geometry.get("fov_mm", 80.0)),
             "global_voxel_shape": tuple(geometry["global_voxel_shape"]),
+            "volume_center_world": tuple(geometry.get("volume_center_world", (19.0, 20.0, 10.4))),
+            "use_fmt_simgen_projection": bool(geometry.get("use_fmt_simgen_projection", False)),
+            "transpose_feature_map_for_sampling": bool(
+                geometry.get("transpose_feature_map_for_sampling", False)
+            ),
+        }
+
+    @staticmethod
+    def extract_ptfa_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        ptfa = model_cfg.get("ptfa", {}) or {}
+        if not isinstance(ptfa, dict):
+            raise KeyError("model.ptfa must be a mapping when provided")
+        return {
+            "enabled": bool(ptfa.get("enabled", False)),
+            "scales": [str(v) for v in ptfa.get("scales", [])],
+            "mode": str(ptfa.get("mode", "fixed_gaussian")),
+            "window": int(ptfa.get("window", 5)),
+            "sigma_px": float(ptfa.get("sigma_px", 1.0)),
+            "sigma_min": float(ptfa.get("sigma_min", 0.8)),
+            "sigma_max": float(ptfa.get("sigma_max", 2.5)),
+            "exit_depth_max_mm": float(ptfa.get("exit_depth_max_mm", 20.8)),
+        }
+
+    @staticmethod
+    def extract_residual_scorer_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        scorer = model_cfg.get("residual_scorer", {}) or {}
+        if not isinstance(scorer, dict):
+            raise KeyError("model.residual_scorer must be a mapping when provided")
+        return {
+            "enabled": bool(scorer.get("enabled", False)),
+            "hidden_dim": int(scorer.get("hidden_dim", 128)),
+            "lambda_r": float(scorer.get("lambda_r", 0.0)),
         }
 
     @staticmethod
@@ -243,7 +280,11 @@ class ConfigExtractor:
         bg = gisc_cfg.get("background")
         if not isinstance(bg, dict):
             raise KeyError(f"model.{section_key}.background must be a mapping")
-        ConfigExtractor._require_keys(bg, ["enable_background", "head", "guidance"], f"{section_key}.background")
+        ConfigExtractor._require_keys(
+            bg,
+            ["enable_background", "head", "guidance"],
+            f"{section_key}.background",
+        )
 
         head = bg.get("head")
         guidance = bg.get("guidance")
@@ -252,7 +293,11 @@ class ConfigExtractor:
         if not isinstance(guidance, dict):
             raise KeyError(f"model.{section_key}.background.guidance must be a mapping")
 
-        ConfigExtractor._require_keys(head, ["hidden_dim", "d_x", "d_f"], f"{section_key}.background.head")
+        ConfigExtractor._require_keys(
+            head,
+            ["hidden_dim", "d_x", "d_f"],
+            f"{section_key}.background.head",
+        )
         ConfigExtractor._require_keys(
             guidance,
             ["enable", "dim", "mode", "hidden_dim", "scale", "gate_init_bias"],

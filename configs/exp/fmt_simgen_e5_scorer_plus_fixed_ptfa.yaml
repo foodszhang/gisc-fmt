@@ -1,0 +1,20 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e4_residual_scorer_lambda020
+  - _self_
+
+name: fmt_simgen_e5_scorer_plus_fixed_ptfa
+description: FMT-SimGen E5 residual scorer lambda 0.2 plus s3 fixed Gaussian PTFA
+
+model:
+  ptfa:
+    enabled: true
+    scales: ["s3"]
+    mode: fixed_gaussian
+    window: 5
+    sigma_px: 1.0
+  residual_scorer:
+    enabled: true
+    hidden_dim: 128
+    lambda_r: 0.2

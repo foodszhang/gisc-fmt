@@ -9,19 +9,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ..config_extractor import ConfigExtractor
 from ..network.encoder import (
-    UNet,
     GateFusion,
     PointFeatureSampler,
+    UNet,
 )
 from ..network.fusion import (
     BackgroundGuidanceInteraction,
     CrossViewResidualFusion,
     ScaleFusionNet,
 )
+from ..network.ptfa import ptfa_sample_exit_depth_gaussian, ptfa_sample_fixed_gaussian
 from ..utils.cam import project_points_to_camera
-from ..config_extractor import ConfigExtractor
-
+from ..utils.fmt_simgen_projection import project_points_mm_to_detector
 
 # ===== 核心模块 =====
 
@@ -124,6 +125,25 @@ class ImplicitSourceField(nn.Module):
         return self.mlp_out(z)
 
 
+class ResidualScorer(nn.Module):
+    """Small zero-initialized residual scorer for query-level logit correction."""
+
+    def __init__(self, in_dim: int, hidden_dim: int = 128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(self, query_embedding: torch.Tensor, s3_feature: torch.Tensor) -> torch.Tensor:
+        return self.net(torch.cat([query_embedding, s3_feature], dim=-1))
+
+
 # ===== 主网络 =====
 
 
@@ -151,6 +171,8 @@ class PointDensityNet(nn.Module):
         # 提取所有参数
         net_params = ConfigExtractor.extract_network_params(config)
         geo_params = ConfigExtractor.extract_geometry_config(config)
+        ptfa_params = ConfigExtractor.extract_ptfa_config(config)
+        residual_scorer_params = ConfigExtractor.extract_residual_scorer_config(config)
         gisc_params = ConfigExtractor.extract_gisc_fmt_config(config)
         view_angles = ConfigExtractor.extract_view_angles(config)
 
@@ -170,15 +192,28 @@ class PointDensityNet(nn.Module):
         implicit_hidden = gisc_params["implicit_field_hidden_dim"]
         implicit_d_x = gisc_params["implicit_field_d_x"]
         implicit_d_f = gisc_params["implicit_field_d_f"]
-        view_weight_embed = gisc_params["view_weight_embed_dim"]
-        view_weight_hidden = gisc_params["view_weight_hidden_dim"]
         ms_params = gisc_params["multiscale"]
         bg_params = gisc_params["background"]
 
         # 几何参数
         self.camera_distance = geo_params["camera_distance"]
         self.detector_size = geo_params["detector_size"]
+        self.detector_resolution = geo_params["detector_resolution"]
+        self.fov_mm = geo_params["fov_mm"]
         self.global_voxel_shape = geo_params["global_voxel_shape"]
+        self.volume_center_world = geo_params["volume_center_world"]
+        self.use_fmt_simgen_projection = geo_params["use_fmt_simgen_projection"]
+        self.transpose_feature_map_for_sampling = geo_params["transpose_feature_map_for_sampling"]
+        self.ptfa_enabled = bool(ptfa_params["enabled"])
+        self.ptfa_scales = set(ptfa_params["scales"])
+        self.ptfa_mode = str(ptfa_params["mode"])
+        self.ptfa_window = int(ptfa_params["window"])
+        self.ptfa_sigma_px = float(ptfa_params["sigma_px"])
+        self.ptfa_sigma_min = float(ptfa_params["sigma_min"])
+        self.ptfa_sigma_max = float(ptfa_params["sigma_max"])
+        self.ptfa_exit_depth_max_mm = float(ptfa_params["exit_depth_max_mm"])
+        self.residual_scorer_enabled = bool(residual_scorer_params["enabled"])
+        self.residual_scorer_lambda = float(residual_scorer_params["lambda_r"])
         self.view_list = view_angles[:num_views]
         self.pos_enc_dim = pos_enc_dim
         self.feature_dim = feature_dim
@@ -339,6 +374,12 @@ class PointDensityNet(nn.Module):
             d_f=implicit_d_f,
         )
 
+        if self.residual_scorer_enabled:
+            self.residual_scorer = ResidualScorer(
+                in_dim=pos_enc_dim + feature_dim,
+                hidden_dim=int(residual_scorer_params["hidden_dim"]),
+            )
+
         # 点采样器
         self.sampler = PointFeatureSampler()
 
@@ -456,7 +497,6 @@ class PointDensityNet(nn.Module):
     def _vectorized_grid_sample(self, view_features, x3d):
         """向量化grid_sample采样所有视角特征"""
         B, N, _ = x3d.shape
-        C = next(iter(view_features.values())).shape[1]
 
         grids_list = []
         feature_maps_list = []
@@ -497,6 +537,120 @@ class PointDensityNet(nn.Module):
         f = torch.stack(f_list, dim=2)
         return f
 
+    def _vectorized_grid_sample_fmt(self, view_features, points_mm: torch.Tensor):
+        """Sample view features with FMT-SimGen trunk-local mm projection."""
+        B, _N, _ = points_mm.shape
+
+        grids_list = []
+        feature_maps_list = []
+        valid_masks = []
+        for view_name in self.view_list:
+            if view_name not in view_features:
+                continue
+
+            grid, _depth, valid_mask, _uv_px, _uv_phys = project_points_mm_to_detector(
+                points_mm,
+                angle_deg=int(view_name),
+                camera_distance_mm=self.camera_distance,
+                fov_mm=self.fov_mm,
+                detector_resolution=self.detector_resolution,
+                volume_center_world=self.volume_center_world,
+                align_corners=True,
+            )
+            grids_list.append(grid.unsqueeze(1))
+            valid_masks.append(valid_mask)
+
+            feat_map = view_features[view_name]
+            if self.transpose_feature_map_for_sampling:
+                feat_map = feat_map.permute(0, 1, 3, 2)
+            feature_maps_list.append(feat_map)
+
+        grids_batched = torch.cat(grids_list, dim=0)
+        feat_batched = torch.cat(feature_maps_list, dim=0)
+
+        sampled_feats = F.grid_sample(
+            feat_batched,
+            grids_batched,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=True,
+        )
+        sampled_feats = sampled_feats.squeeze(2).permute(0, 2, 1)
+
+        f_list = []
+        for v_idx in range(self.num_views):
+            f_v = sampled_feats[v_idx * B : (v_idx + 1) * B]
+            f_list.append(f_v)
+
+        f = torch.stack(f_list, dim=2)
+
+        # Keep invalid FOV samples exactly zero after interpolation.
+        valid = torch.stack(valid_masks, dim=2).unsqueeze(-1).to(dtype=f.dtype)
+        return f * valid
+
+    def _fmt_projection_grids(self, points_mm: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return FMT-SimGen projection grids and valid masks in view_list order."""
+        grids = []
+        valid_masks = []
+        for view_name in self.view_list:
+            grid, _depth, valid_mask, _uv_px, _uv_phys = project_points_mm_to_detector(
+                points_mm,
+                angle_deg=int(view_name),
+                camera_distance_mm=self.camera_distance,
+                fov_mm=self.fov_mm,
+                detector_resolution=self.detector_resolution,
+                volume_center_world=self.volume_center_world,
+                align_corners=True,
+            )
+            grids.append(grid)
+            valid_masks.append(valid_mask)
+        return torch.stack(grids, dim=2), torch.stack(valid_masks, dim=2)
+
+    def _view_feature_dict_to_tensor(self, view_features) -> torch.Tensor:
+        """Pack view feature dict into [B,V,C,H,W] in view_list order."""
+        feature_maps = []
+        for view_name in self.view_list:
+            feat_map = view_features[view_name]
+            if self.transpose_feature_map_for_sampling:
+                feat_map = feat_map.permute(0, 1, 3, 2)
+            feature_maps.append(feat_map)
+        return torch.stack(feature_maps, dim=1)
+
+    def _ptfa_sample_fixed_gaussian(self, view_features, points_mm: torch.Tensor):
+        """Sample view features with fixed Gaussian PTFA in detector feature-map space."""
+        center_grid, valid_mask = self._fmt_projection_grids(points_mm)
+        feature_map = self._view_feature_dict_to_tensor(view_features)
+        return ptfa_sample_fixed_gaussian(
+            feature_map,
+            center_grid,
+            valid_mask,
+            window=self.ptfa_window,
+            sigma_px=self.ptfa_sigma_px,
+        )
+
+    def _ptfa_sample_exit_depth_gaussian(
+        self,
+        view_features,
+        points_mm: torch.Tensor,
+        depth_maps: torch.Tensor,
+        query_depth: torch.Tensor,
+    ):
+        """Sample view features with exit-depth-dependent Gaussian PTFA."""
+        center_grid, valid_mask = self._fmt_projection_grids(points_mm)
+        feature_map = self._view_feature_dict_to_tensor(view_features)
+        sampled, _stats = ptfa_sample_exit_depth_gaussian(
+            feature_map,
+            center_grid,
+            valid_mask,
+            depth_maps,
+            query_depth,
+            sigma_min=self.ptfa_sigma_min,
+            sigma_max=self.ptfa_sigma_max,
+            exit_depth_max=self.ptfa_exit_depth_max_mm,
+            window=self.ptfa_window,
+        )
+        return sampled
+
     def _compute_depth(self, x3d: torch.Tensor) -> torch.Tensor:
         """Compute a view-independent depth cue for each 3D point.
 
@@ -513,7 +667,15 @@ class PointDensityNet(nn.Module):
         )
         return depths[..., 0:1]
 
-    def forward(self, view_projections, x3d, gamma_x=None, bg_guidance=None):
+    def forward(
+        self,
+        view_projections,
+        x3d,
+        gamma_x=None,
+        bg_guidance=None,
+        points_mm=None,
+        depth_maps=None,
+    ):
         """
         Args:
             view_projections: dict {view_name: tensor}
@@ -539,13 +701,77 @@ class PointDensityNet(nn.Module):
                 gate_out = self.gate_fusions[v_idx](feat)
                 views_no_projections[view_name] = gate_out.squeeze(1)
 
-        # depth: [B, N, 1] (approx 0~camera_distance)
-        depth = self._compute_depth(x3d)
+        if points_mm is not None and self.use_fmt_simgen_projection:
+            # FMT-SimGen depth cue is view-independent here: use 0° camera depth.
+            _grid, depth, _valid_mask, _uv_px, _uv_phys = project_points_mm_to_detector(
+                points_mm,
+                angle_deg=0,
+                camera_distance_mm=self.camera_distance,
+                fov_mm=self.fov_mm,
+                detector_resolution=self.detector_resolution,
+                volume_center_world=self.volume_center_world,
+                align_corners=True,
+            )
+            query_depth_all_views = None
+            if self.ptfa_enabled and self.ptfa_mode == "exit_depth_gaussian":
+                query_depth_all_views = []
+                for view_name in self.view_list:
+                    _grid, q_depth, _valid_mask, _uv_px, _uv_phys = project_points_mm_to_detector(
+                        points_mm,
+                        angle_deg=int(view_name),
+                        camera_distance_mm=self.camera_distance,
+                        fov_mm=self.fov_mm,
+                        detector_resolution=self.detector_resolution,
+                        volume_center_world=self.volume_center_world,
+                        align_corners=True,
+                    )
+                    query_depth_all_views.append(q_depth)
+                query_depth_all_views = torch.stack(query_depth_all_views, dim=2)
+        else:
+            # depth: [B, N, 1] (approx 0~camera_distance)
+            depth = self._compute_depth(x3d)
+            query_depth_all_views = None
 
         # 多尺度点采样
-        f_s1 = self._vectorized_grid_sample(features_s1_dict, x3d)  # [B, N, V, C]
-        f_s2 = self._vectorized_grid_sample(features_s2_dict, x3d)  # [B, N, V, C2]
-        f_s3 = self._vectorized_grid_sample(features_s3_dict, x3d)  # [B, N, V, C3]
+        f_s3_for_residual = None
+        if points_mm is not None and self.use_fmt_simgen_projection:
+            f_s1 = self._vectorized_grid_sample_fmt(features_s1_dict, points_mm)
+            f_s2 = self._vectorized_grid_sample_fmt(features_s2_dict, points_mm)
+            if self.residual_scorer_enabled:
+                # The residual scorer ablation is defined on bilinear s3 features.
+                # Keep this input fixed even when the fusion s3 path uses PTFA.
+                f_s3_for_residual = self._vectorized_grid_sample_fmt(
+                    features_s3_dict, points_mm
+                )
+            if (
+                self.ptfa_enabled
+                and self.ptfa_mode == "exit_depth_gaussian"
+                and "s3" in self.ptfa_scales
+            ):
+                if depth_maps is None:
+                    raise ValueError(
+                        "model.ptfa.mode=exit_depth_gaussian requires batch depth_maps"
+                    )
+                f_s3 = self._ptfa_sample_exit_depth_gaussian(
+                    features_s3_dict, points_mm, depth_maps, query_depth_all_views
+                )
+            elif (
+                self.ptfa_enabled
+                and self.ptfa_mode == "fixed_gaussian"
+                and "s3" in self.ptfa_scales
+            ):
+                f_s3 = self._ptfa_sample_fixed_gaussian(features_s3_dict, points_mm)
+            else:
+                f_s3 = (
+                    f_s3_for_residual
+                    if f_s3_for_residual is not None
+                    else self._vectorized_grid_sample_fmt(features_s3_dict, points_mm)
+                )
+        else:
+            f_s1 = self._vectorized_grid_sample(features_s1_dict, x3d)  # [B, N, V, C]
+            f_s2 = self._vectorized_grid_sample(features_s2_dict, x3d)  # [B, N, V, C2]
+            f_s3 = self._vectorized_grid_sample(features_s3_dict, x3d)  # [B, N, V, C3]
+            f_s3_for_residual = f_s3
 
         # 通道统一到 C=feature_dim
         g_s1 = f_s1
@@ -566,6 +792,11 @@ class PointDensityNet(nn.Module):
 
         # 隐式密度预测
         logits = self.density_head(gamma_x, fused_feat)
+        if self.residual_scorer_enabled:
+            residual_s3 = f_s3_for_residual if f_s3_for_residual is not None else f_s3
+            s3_query_feat = self.proj_s3(residual_s3).mean(dim=2)
+            residual = self.residual_scorer(gamma_x, s3_query_feat)
+            logits = logits + self.residual_scorer_lambda * residual
 
         # Background branch (optional)
         if getattr(self, "enable_background", False):
