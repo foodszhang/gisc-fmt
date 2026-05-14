@@ -203,6 +203,84 @@ def ptfa_sample_exit_depth_gaussian(
     return features, stats
 
 
+def compute_exit_depth_sigma(
+    center_grid: torch.Tensor,
+    depth_maps: torch.Tensor,
+    query_depth: torch.Tensor,
+    sigma_min: float,
+    sigma_max: float,
+    exit_depth_max: float,
+    invert_depth: bool = False,
+) -> dict[str, torch.Tensor]:
+    """Compute raw/corrected exit-depth proxy and per-query sigma.
+
+    `raw_depth_like` is the standard query-depth minus sampled-surface-depth proxy. When
+    `invert_depth=True`, this proxy is treated as inverted/exit-depth-like and converted with
+    `depth_eff = exit_depth_max - raw_depth_like` before sigma mapping.
+    """
+    if query_depth.dim() == 3:
+        query_depth = query_depth.unsqueeze(-1)
+    if query_depth.dim() != 4 or query_depth.shape[-1] != 1:
+        raise ValueError(f"query_depth must be [B,N,V,1], got {tuple(query_depth.shape)}")
+    if sigma_min <= 0 or sigma_max <= 0:
+        raise ValueError("sigma_min and sigma_max must be positive")
+    if sigma_max < sigma_min:
+        raise ValueError("sigma_max must be >= sigma_min")
+    if exit_depth_max <= 0:
+        raise ValueError("exit_depth_max must be positive")
+
+    surface_depth = _sample_surface_depth(depth_maps.to(query_depth.device), center_grid)
+    surface_depth = torch.nan_to_num(
+        surface_depth, nan=torch.inf, posinf=torch.inf, neginf=-torch.inf
+    )
+    raw_depth_like = query_depth.squeeze(-1) - surface_depth
+    raw_depth_like = torch.nan_to_num(raw_depth_like, nan=0.0, posinf=0.0, neginf=0.0)
+    raw_depth_like = raw_depth_like.clamp(0.0, float(exit_depth_max))
+    if invert_depth:
+        depth_eff = float(exit_depth_max) - raw_depth_like
+    else:
+        depth_eff = raw_depth_like
+    depth_eff = depth_eff.clamp(0.0, float(exit_depth_max))
+    sigma_px = float(sigma_min) + (float(sigma_max) - float(sigma_min)) * (
+        depth_eff / float(exit_depth_max)
+    )
+    sigma_px = sigma_px.clamp(float(sigma_min), float(sigma_max))
+    return {
+        "surface_depth_mm": surface_depth,
+        "raw_depth_like_mm": raw_depth_like,
+        "depth_eff_mm": depth_eff,
+        "sigma_px": sigma_px,
+    }
+
+
+def ptfa_sample_corrected_exit_depth_gaussian(
+    feature_map: torch.Tensor,
+    center_grid: torch.Tensor,
+    valid_mask: torch.Tensor,
+    depth_maps: torch.Tensor,
+    query_depth: torch.Tensor,
+    sigma_min: float,
+    sigma_max: float,
+    exit_depth_max: float,
+    window: int,
+    invert_depth: bool = True,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Sample PTFA features with corrected exit-depth sigma mapping."""
+    stats = compute_exit_depth_sigma(
+        center_grid=center_grid,
+        depth_maps=depth_maps.to(feature_map.device),
+        query_depth=query_depth,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        exit_depth_max=exit_depth_max,
+        invert_depth=invert_depth,
+    )
+    features = _ptfa_sample_gaussian_with_sigma(
+        feature_map, center_grid, valid_mask, window, stats["sigma_px"]
+    )
+    return features, stats
+
+
 def _ptfa_sample_gaussian_with_sigma(
     feature_map: torch.Tensor,
     center_grid: torch.Tensor,

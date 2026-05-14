@@ -219,11 +219,13 @@ class TrainingLightningModule(LightningModule):
 
         # Inference
         pred, _ = self._call_model(proj_in, points, points_mm=points_mm, depth_maps=depth_maps)
-        if int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]:
+        full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+        if full_grid:
             density_gt = point_densities.reshape(voxel_shape_tuple)
             density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
             density_pred = pred.reshape(voxel_shape_tuple)
             dice = dice_coefficient(density_pred, density_gt_bin)
+            metric_name = "val_full_dice"
         else:
             pred_bin = (pred.squeeze(-1) >= 0.5).float()
             gt_bin = (point_densities > 0.0).float()
@@ -232,8 +234,18 @@ class TrainingLightningModule(LightningModule):
                 (2.0 * intersection + 1e-8)
                 / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
             ).mean()
+            metric_name = "val_query_dice"
 
-        # Log metric
+        # FMT-SimGen regular validation uses sampled queries; val_dice is kept as a
+        # checkpoint-compatible alias and is usually equivalent to val_query_dice.
+        self.log(
+            metric_name,
+            dice,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
         self.log(
             "val_dice",
             dice,

@@ -1,0 +1,32 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e1b_nongt_mixed
+  - _self_
+
+name: fmt_simgen_e6_ced_ptfa_gate_residual
+description: corrected exit-depth PTFA with geometry-guided query aggregation and residual scorer
+
+model:
+  gisc_fmt:
+    aggregation_mode: corrected_exit_ptfa_geom_gate
+    query_aggregation:
+      hidden_dim: 64
+      temperature: 1.0
+      zero_init: true
+
+  ptfa:
+    enabled: true
+    scales: ["s3"]
+    mode: corrected_exit_depth_gaussian
+    window: 5
+    sigma_min: 0.8
+    sigma_max: 2.5
+    exit_depth_max_mm: 20.8
+    invert_depth: true
+
+  residual_scorer:
+    enabled: true
+    hidden_dim: 128
+    lambda_r: 0.2
+

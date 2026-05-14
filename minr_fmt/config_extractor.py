@@ -93,6 +93,7 @@ class ConfigExtractor:
             "sigma_min": float(ptfa.get("sigma_min", 0.8)),
             "sigma_max": float(ptfa.get("sigma_max", 2.5)),
             "exit_depth_max_mm": float(ptfa.get("exit_depth_max_mm", 20.8)),
+            "invert_depth": bool(ptfa.get("invert_depth", False)),
         }
 
     @staticmethod
@@ -105,6 +106,76 @@ class ConfigExtractor:
             "enabled": bool(scorer.get("enabled", False)),
             "hidden_dim": int(scorer.get("hidden_dim", 128)),
             "lambda_r": float(scorer.get("lambda_r", 0.0)),
+            "input_mode": str(scorer.get("input_mode", "bilinear_s3")),
+        }
+
+    @staticmethod
+    def extract_feature_refinement_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        refinement = model_cfg.get("feature_refinement", {}) or {}
+        if not isinstance(refinement, dict):
+            raise KeyError("model.feature_refinement must be a mapping when provided")
+        gate_cfg = refinement.get("reliability_gate", {}) or {}
+        if not isinstance(gate_cfg, dict):
+            raise KeyError("model.feature_refinement.reliability_gate must be a mapping")
+        mix_cfg = gate_cfg.get("residual_mix", {}) or {}
+        if not isinstance(mix_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.reliability_gate.residual_mix must be a mapping"
+            )
+        consensus_cfg = refinement.get("consensus_residual_gate", {}) or {}
+        if not isinstance(consensus_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.consensus_residual_gate must be a mapping"
+            )
+        return {
+            "enabled": bool(refinement.get("enabled", False)),
+            "input_mode": str(refinement.get("input_mode", "s1_ptfa")),
+            "ptfa_view_aggregation": str(refinement.get("ptfa_view_aggregation", "masked_mean")),
+            "hidden_dim": int(refinement.get("hidden_dim", 128)),
+            "geom_dim": int(refinement.get("geom_dim", 5)),
+            "zero_init": bool(refinement.get("zero_init", True)),
+            "reliability_gate": {
+                "hidden_dim": int(gate_cfg.get("hidden_dim", 64)),
+                "temperature": float(gate_cfg.get("temperature", 1.5)),
+                "zero_init": bool(gate_cfg.get("zero_init", True)),
+                "norm": str(gate_cfg.get("norm", "none")),
+                "geom_set": str(gate_cfg.get("geom_set", "full")),
+                "residual_mix": {
+                    "enabled": bool(mix_cfg.get("enabled", False)),
+                    "gamma": float(mix_cfg.get("gamma", 1.0)),
+                },
+            },
+            "consensus_residual_gate": {
+                "hidden_dim": int(consensus_cfg.get("hidden_dim", 64)),
+                "gamma": float(consensus_cfg.get("gamma", 0.1)),
+                "norm": str(consensus_cfg.get("norm", "layernorm")),
+                "use_evidence_stats": bool(consensus_cfg.get("use_evidence_stats", True)),
+            },
+        }
+
+    @staticmethod
+    def extract_query_aggregation_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        gisc_cfg = model_cfg.get("gisc_fmt")
+        if not isinstance(gisc_cfg, dict):
+            gisc_cfg = model_cfg.get("minr_fmt")
+        if not isinstance(gisc_cfg, dict):
+            return {
+                "aggregation_mode": "legacy_multiscale",
+                "hidden_dim": 64,
+                "temperature": 1.0,
+                "zero_init": True,
+            }
+
+        agg_cfg = gisc_cfg.get("query_aggregation", {}) or {}
+        if not isinstance(agg_cfg, dict):
+            raise KeyError("model.gisc_fmt.query_aggregation must be a mapping when provided")
+        return {
+            "aggregation_mode": str(gisc_cfg.get("aggregation_mode", "legacy_multiscale")),
+            "hidden_dim": int(agg_cfg.get("hidden_dim", 64)),
+            "temperature": float(agg_cfg.get("temperature", 1.0)),
+            "zero_init": bool(agg_cfg.get("zero_init", True)),
         }
 
     @staticmethod

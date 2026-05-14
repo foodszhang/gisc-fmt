@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e9a_stable_rg_ced_s1_ptfa_feature_refine
+  - _self_
+
+name: fmt_simgen_e9b_compact_stable_rg_ced_s1_ptfa_feature_refine
+description: Stable reliability-gated cED s1 PTFA feature refinement with compact geometry
+
+model:
+  feature_refinement:
+    reliability_gate:
+      geom_set: compact

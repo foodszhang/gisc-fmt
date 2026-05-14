@@ -1,0 +1,35 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e8_ced_s1_ptfa_feature_refine
+  - _self_
+
+name: fmt_simgen_e9c_consensus_residual_ced_s1_ptfa_feature_refine
+description: Consensus-residual calibrated cED s1 PTFA feature refinement
+
+model:
+  residual_scorer:
+    enabled: false
+
+  feature_refinement:
+    enabled: true
+    input_mode: s1_ptfa
+    hidden_dim: 128
+    geom_dim: 5
+    zero_init: true
+    ptfa_view_aggregation: consensus_residual_gate
+    consensus_residual_gate:
+      hidden_dim: 64
+      gamma: 0.1
+      norm: layernorm
+      use_evidence_stats: true
+
+  ptfa:
+    enabled: true
+    scales: ["s1"]
+    mode: corrected_exit_depth_gaussian
+    window: 5
+    sigma_min: 0.6
+    sigma_max: 1.5
+    exit_depth_max_mm: 20.8
+    invert_depth: true

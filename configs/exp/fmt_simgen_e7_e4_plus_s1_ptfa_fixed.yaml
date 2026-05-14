@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e4_residual_scorer_lambda020
+  - _self_
+
+name: fmt_simgen_e7_e4_plus_s1_ptfa_fixed
+description: E4 residual scorer with high-resolution s1 fixed-PTFA side evidence
+
+model:
+  residual_scorer:
+    enabled: true
+    hidden_dim: 128
+    lambda_r: 0.2
+    input_mode: bilinear_s3_plus_s1_ptfa
+
+  ptfa:
+    enabled: true
+    scales: ["s1"]
+    mode: fixed_gaussian
+    window: 5
+    sigma_px: 1.0
+

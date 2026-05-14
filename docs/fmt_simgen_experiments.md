@@ -11,6 +11,8 @@ the next method iteration. The current code supports:
 - Non-GT fixed-budget query sampling with trunk-uniform and measurement-proposal branches.
 - s3-only PTFA variants.
 - Query-level residual scorer variants.
+- High-resolution s1 PTFA feature-refinement variants.
+- Measurement-candidate dense/semi-dense checkpoint evaluation.
 
 The training/evaluation split used for the main results is the full `800/200` train/val split.
 All full runs used `num_queries=16384`, FMT-SimGen physical projection, and the non-GT mixed
@@ -34,9 +36,23 @@ Proposal sanity before training:
 - Proposal top-5% GT coverage: `0.68`.
 - Mixed foreground ratio: `0.004`, about `3.4x` trunk-uniform.
 
+## Validation Metric Naming
+
+The historical `val_dice` values in this document are sampled-query validation metrics. They
+should be interpreted as `val_query_dice`, not dense full-volume reconstruction Dice. Regular
+FMT-SimGen training uses fixed-budget sampled queries from the same non-GT sampler for train and
+validation, so this metric is useful for fast training monitoring but does not replace
+checkpoint-level dense or semi-dense evaluation.
+
+Newer code logs:
+
+- `val_query_dice` for sampled-query validation.
+- `val_full_dice` only when validation points cover the full voxel grid.
+- `val_dice` as a backward-compatible checkpoint callback alias.
+
 ## Main Results
 
-| Experiment | Description | Best val_dice | Epoch | Notes |
+| Experiment | Description | Best val_query_dice | Epoch | Notes |
 | --- | --- | ---: | ---: | --- |
 | E1a | trunk-uniform only | 0.4144 | 25 | Non-GT, no proposal branch |
 | E1b | trunk 50% + proposal 50% | 0.5629 | 25 | Baseline before PTFA/scorer |
@@ -44,10 +60,35 @@ Proposal sanity before training:
 | E3 | s3 exit-depth PTFA, sigma=[0.8, 2.5] | 0.5448 | 24 | Worse than fixed PTFA |
 | E3' | calibrated exit-depth PTFA, sigma=[0.6, 1.2] | 0.5395 | 26 | Worse again; not over-smoothing |
 | E4 lambda=0.05 | residual scorer only | 0.6109 | 26 | Clear gain over E1b/E2 |
-| E4 lambda=0.20 | residual scorer only | 0.6315 | 21 | Current best |
+| E4 lambda=0.20 | residual scorer only | 0.6315 | 21 | Best sampled-query scorer run |
 | E4' lambda=0.30 | residual scorer only | 0.6294 | 23 | Near lambda=0.20, slightly lower |
 | E4' lambda=0.50 | residual scorer only | 0.6051 | 23 | Too strong; optimization/performance drops |
 | E5 | residual scorer lambda=0.20 + fixed PTFA | 0.5904 | 23 | Corrected run; scorer and PTFA interfere |
+| E6 | corrected exit-depth PTFA + geometry gate + residual scorer | 0.4645 | 23 | Geometry gate path underperformed |
+| E7 | E4 scorer + s1 fixed-PTFA side evidence | 0.5794 | 35 | Continued to 60 epochs; below E4 |
+| E8 | s1 fixed-PTFA feature refinement | 0.5827 | 27 | Residual scorer disabled |
+| E8-cED | s1 corrected exit-depth PTFA feature refinement | 0.6048 | 27 | Best candidate-dense method |
+| E9 | reliability-gated cED s1 PTFA refinement | 0.5745 | 25 | Learned weighted view sum hurts |
+| E9a | stable full-geom reliability gate | 0.5547 | 25 | LayerNorm + residual mix; worse |
+| E9b | compact stable reliability gate | 0.4985 | 12 | Stopped early; clearly weak |
+| E9c | consensus-residual evidence calibration | 0.5269 | 26 | Residual confidence still hurts |
+
+## Candidate-Dense Results
+
+Candidate-dense evaluation uses `candidate_topk_ratio=0.10`, `coarse_cell_sample`,
+`samples_per_candidate_cell=8`, `outside_sample_num=131072`, `threshold=0.5`, and `seed=0`.
+It evaluates checkpoints on the full 200-sample validation split. Unlike `val_query_dice`, this
+metric is tied to a measurement-derived candidate domain and should be used for method ranking.
+
+| Experiment | Checkpoint | candidate_dice | Precision | Recall | outside_fp_rate | outside_p95 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| E4 lambda=0.20 rerun bs=4 | `2026-05-13/19-37-07/epoch=25-val_dice=0.5827.ckpt` | 0.57925 | 0.67424 | 0.60617 | 0.000148 | 2.97e-05 |
+| E7 continued to 60 | `2026-05-13/18-02-58/epoch=35-val_dice=0.5794.ckpt` | 0.57239 | 0.64325 | 0.61296 | 0.000185 | 2.53e-05 |
+| E8 fixed s1 PTFA refine | `2026-05-13/23-57-39/epoch=27-val_dice=0.5827.ckpt` | 0.58109 | 0.67621 | 0.59734 | 0.000144 | 2.35e-05 |
+| E8-cED s1 PTFA refine | `2026-05-14/09-08-20/epoch=27-val_dice=0.6048.ckpt` | 0.60957 | 0.69455 | 0.62369 | 0.000176 | 1.63e-05 |
+| E9 reliability gate | `2026-05-14/11-43-08/epoch=25-val_dice=0.5745.ckpt` | 0.57449 | 0.67805 | 0.59206 | 0.000152 | 3.84e-05 |
+| E9a stable full gate | `2026-05-14/15-06-44/epoch=25-val_dice=0.5547.ckpt` | 0.54855 | 0.63912 | 0.57145 | 0.000152 | 4.38e-05 |
+| E9c consensus residual | `2026-05-14/17-55-23/epoch=26-val_dice=0.5269.ckpt` | 0.52956 | 0.60529 | 0.56337 | 0.000129 | 4.65e-05 |
 
 ## Checkpoint Locations
 
@@ -57,6 +98,10 @@ Proposal sanity before training:
 - E5 corrected: `outputs/gisc_fmt/fit/2026-05-12/23-52-31/checkpoints/epoch=23-val_dice=0.5904.ckpt`
 - E4' lambda=0.30: `outputs/gisc_fmt/fit/2026-05-13/02-37-22/checkpoints/epoch=23-val_dice=0.6294.ckpt`
 - E4' lambda=0.50: `outputs/gisc_fmt/fit/2026-05-13/04-13-26/checkpoints/epoch=23-val_dice=0.6051.ckpt`
+- E8-cED: `outputs/gisc_fmt/fit/2026-05-14/09-08-20/checkpoints/epoch=27-val_dice=0.6048.ckpt`
+- E9: `outputs/gisc_fmt/fit/2026-05-14/11-43-08/checkpoints/epoch=25-val_dice=0.5745.ckpt`
+- E9a: `outputs/gisc_fmt/fit/2026-05-14/15-06-44/checkpoints/epoch=25-val_dice=0.5547.ckpt`
+- E9c: `outputs/gisc_fmt/fit/2026-05-14/17-55-23/checkpoints/epoch=26-val_dice=0.5269.ckpt`
 
 ## Diagnostics and Conclusions
 
@@ -75,6 +120,17 @@ Depth-source sanity showed a foreground correlation of `-0.3145` between the sam
 proxy and label z, indicating that the current depth source behaves like an inverted or
 exit-depth-like quantity. This should be treated as a finding, not patched into the current
 baseline without a targeted task.
+
+E8-cED uses the corrected depth convention:
+
+```text
+raw_depth_like = clamp(query_depth - sampled_surface_depth, 0, exit_depth_max)
+depth_eff = exit_depth_max - raw_depth_like
+sigma_px = sigma_min + (sigma_max - sigma_min) * depth_eff / exit_depth_max
+```
+
+With high-resolution s1 PTFA feature refinement, this corrected mapping improves candidate Dice
+from `0.58109` (fixed s1 PTFA) to `0.60957`.
 
 ### Residual Scorer
 
@@ -99,29 +155,85 @@ Corrected E5 reaches `val_dice=0.5904`, which is better than E2 but far below sc
 `0.6315`. This indicates that replacing the fusion s3 feature with fixed PTFA interferes with
 the residual scorer rather than adding complementary fluorescence information.
 
+### s1 PTFA Feature Refinement
+
+E7 adds s1 fixed-PTFA evidence to the residual scorer input. It does not improve candidate Dice
+over the scorer baseline and tends to trade precision for recall. E8 instead disables the
+residual scorer and applies a zero-initialized feature-refinement block:
+
+```text
+f_refined = f_base + delta([f_base, f_ptfa, f_ptfa - f_base, geom])
+```
+
+E8-cED keeps this feature-refinement structure and switches the s1 PTFA footprint from fixed
+Gaussian to corrected exit-depth Gaussian. This is the strongest checkpoint-level result so far:
+`candidate_dice=0.60957`, with both precision and recall higher than E8 fixed.
+
+### Learned View Aggregation
+
+E9 variants tested whether learned view reliability can improve E8-cED's valid-view uniform
+mean aggregation:
+
+- E9 replaces uniform mean with a geometry-only learned softmax weighted sum.
+- E9a adds LayerNorm, high temperature, and residual mixing around the uniform distribution.
+- E9b uses a compact geometry feature set; it was stopped early because the sampled-query curve
+  was clearly weak.
+- E9c anchors on uniform mean and learns only a small confidence-gated residual correction.
+
+All learned view-gating variants underperform E8-cED on candidate Dice. E9c is especially
+diagnostic: even without replacing the uniform consensus, the learned residual confidence becomes
+extreme (`c_v` spans approximately `0` to `1`) and reduces both precision and recall. The current
+evidence therefore supports keeping valid-view uniform mean aggregation for cED s1 PTFA.
+
 ## Current Recommendation
 
-Use E4 `lambda_R=0.20` as the main baseline:
+Use E8-cED as the current checkpoint-level main method:
 
 ```bash
 /home/foods/pro/minr_fmt/.venv/bin/python train.py fit \
-  exp=fmt_simgen_e4_residual_scorer_lambda020 \
+  exp=fmt_simgen_e8_ced_s1_ptfa_feature_refine \
   trainer.accelerator=gpu \
   trainer.max_epochs=30 \
   data.num_queries=16384 \
   data.sample_num=16384 \
+  data.batch_size=4 \
+  data.eval_batch_size=4 \
   data.train_max_samples=null \
   data.val_max_samples=null \
   model.geometry.use_fmt_simgen_projection=true
 ```
 
-Do not keep direct fixed-PTFA replacement as the default scorer path. If PTFA is revisited, use
-a zero-initialized additive or gated design, for example:
+Use E4 `lambda_R=0.20` as the sampled-query residual-scorer reference, but prefer candidate Dice
+for method ranking. Do not continue learned view-gating or learned view-residual calibration
+without a stronger constraint; all tested E9 variants reduce candidate performance. If PTFA is
+revisited, prioritize non-learned physical rules or a small sigma/window sweep around E8-cED.
 
-```text
-s3 = bilinear_s3 + alpha * (ptfa_s3 - bilinear_s3)
+## Candidate-Dense Evaluation
+
+FMT-SimGen does not provide a fixed generation ROI suitable for a single ROI-dense metric, and
+full-trunk dense evaluation is expensive. Use measurement-candidate dense/semi-dense evaluation
+for checkpoint-level reporting:
+
+```bash
+/home/foods/pro/minr_fmt/.venv/bin/python scripts/eval_candidate_dense_fmt_simgen.py \
+  exp=fmt_simgen_e4_residual_scorer_lambda020 \
+  ckpt_path=/abs/path/to/checkpoint.ckpt \
+  split=val \
+  eval.candidate_topk_ratio=0.10 \
+  eval.candidate_mode=coarse_cell_sample \
+  eval.samples_per_candidate_cell=8 \
+  eval.outside_sample_num=131072 \
+  eval.chunk_size=65536
 ```
 
-or expose PTFA as an additional residual-scorer input instead of replacing the base fusion
-feature.
+The candidate domain is derived only from `proposal/meas_backproj_heatmap.npy`. It does not use
+GT ROI, GT foreground, tumor parameters, or body masks. Candidate metrics report performance
+inside measurement-derived cells, while outside metrics uniformly sample trunk voxels outside
+the candidate cells to estimate false positives.
 
+Future result tables should separate:
+
+- `val_query_dice`: fast sampled-query training monitor.
+- `candidate_dice`: checkpoint-level candidate-domain metric.
+- `outside_fp_rate`: false-positive rate outside the measurement candidate domain.
+- Limited full-trunk sanity metrics, when affordable.
