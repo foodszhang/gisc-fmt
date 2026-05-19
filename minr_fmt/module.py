@@ -73,6 +73,7 @@ class TrainingLightningModule(LightningModule):
             model_type=self.cfg.model.name,
             config=self.cfg,
         )
+        self._apply_finetune_setup()
 
         # Optional torch.compile for speed (PyTorch 2.x)
         if getattr(self.cfg.trainer, "torch_compile", False) and hasattr(torch, "compile"):
@@ -88,6 +89,46 @@ class TrainingLightningModule(LightningModule):
                 pass
 
             self.net = torch.compile(self.net, mode=mode)  # type: ignore[attr-defined]
+
+    def _apply_finetune_setup(self):
+        """Optional non-strict initialization/freezing for targeted fine-tuning configs."""
+        finetune_cfg = getattr(self.cfg.model, "finetune", None)
+        if finetune_cfg is None:
+            return
+
+        init_from = str(getattr(finetune_cfg, "init_from_ckpt", "") or "")
+        if init_from:
+            ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
+            state = ckpt.get("state_dict", ckpt)
+            net_state = {}
+            for key, value in state.items():
+                if key.startswith("net."):
+                    net_state[key[len("net.") :]] = value
+            if not net_state:
+                net_state = state
+            missing, unexpected = self.net.load_state_dict(net_state, strict=False)
+            print(
+                f"[finetune] initialized net from {init_from}; "
+                f"missing={len(missing)} unexpected={len(unexpected)}"
+            )
+            if missing:
+                print(f"[finetune] missing keys: {missing}")
+            if unexpected:
+                print(f"[finetune] unexpected keys: {unexpected}")
+
+        if bool(getattr(finetune_cfg, "freeze_except_mean_prior_gate", False)):
+            for param in self.net.parameters():
+                param.requires_grad = False
+            if not hasattr(self.net, "mean_prior_residual_gate"):
+                raise ValueError(
+                    "model.finetune.freeze_except_mean_prior_gate=true requires "
+                    "mean_prior_residual_gate"
+                )
+            for param in self.net.mean_prior_residual_gate.parameters():
+                param.requires_grad = True
+            trainable = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+            total = sum(p.numel() for p in self.net.parameters())
+            print(f"[finetune] trainable parameters: {trainable}/{total}")
 
     def _setup_loss(self):
         """Create loss function from config"""
@@ -107,6 +148,8 @@ class TrainingLightningModule(LightningModule):
         return self.net(projections, points, points_mm=points_mm, depth_maps=depth_maps)
 
     def _call_model(self, projections, points, points_mm=None, depth_maps=None):
+        if hasattr(self.net, "set_training_epoch"):
+            self.net.set_training_epoch(int(self.current_epoch))
         out = self(projections, points, points_mm=points_mm, depth_maps=depth_maps)
         if isinstance(out, tuple) and len(out) >= 2:
             return out[0], out[1]
@@ -163,6 +206,11 @@ class TrainingLightningModule(LightningModule):
         # Compute loss
         loss_dict = self.loss_func(aux_outputs, projections, density_pred, density)
         total_loss = loss_dict["total_loss"]
+        anchor_loss = getattr(self.net, "last_feature_refinement_anchor_loss", None)
+        if isinstance(anchor_loss, torch.Tensor):
+            total_loss = total_loss + anchor_loss
+            loss_dict["total_loss"] = total_loss
+            loss_dict["feature_refinement_anchor_loss"] = anchor_loss.detach()
 
         # Log metrics
         self.log(
@@ -280,10 +328,35 @@ class TrainingLightningModule(LightningModule):
         # Get optimizer config
         optim_cfg = self.cfg.optim
 
+        # Mean-prior residual view correction is intentionally conservative; train its
+        # gate with a smaller LR when configured, without changing older experiments.
+        gate_lr_mult = float(getattr(self.net, "mean_prior_gate_lr_mult", 1.0))
+        gate_params = []
+        gate_param_ids = set()
+        if gate_lr_mult != 1.0 and hasattr(self.net, "mean_prior_residual_gate"):
+            for param in self.net.mean_prior_residual_gate.parameters():
+                if param.requires_grad:
+                    gate_params.append(param)
+                    gate_param_ids.add(id(param))
+        base_params = [
+            param
+            for param in self.parameters()
+            if param.requires_grad and id(param) not in gate_param_ids
+        ]
+        if gate_params:
+            optimizer_params = []
+            if base_params:
+                optimizer_params.append({"params": base_params})
+            optimizer_params.append({"params": gate_params, "lr": optim_cfg.lr * gate_lr_mult})
+        else:
+            optimizer_params = [param for param in self.parameters() if param.requires_grad]
+        if not optimizer_params:
+            raise ValueError("No trainable parameters available for optimizer")
+
         # Create optimizer based on _target_
         if "adamw" in optim_cfg._target_.lower():
             optimizer = torch.optim.AdamW(
-                self.parameters(),
+                optimizer_params,
                 lr=optim_cfg.lr,
                 betas=optim_cfg.betas,
                 weight_decay=optim_cfg.weight_decay,
@@ -291,7 +364,7 @@ class TrainingLightningModule(LightningModule):
             )
         elif "adam" in optim_cfg._target_.lower():
             optimizer = torch.optim.Adam(
-                self.parameters(),
+                optimizer_params,
                 lr=optim_cfg.lr,
                 betas=optim_cfg.betas,
                 weight_decay=optim_cfg.weight_decay,
@@ -299,7 +372,7 @@ class TrainingLightningModule(LightningModule):
             )
         elif "sgd" in optim_cfg._target_.lower():
             optimizer = torch.optim.SGD(
-                self.parameters(),
+                optimizer_params,
                 lr=optim_cfg.lr,
                 momentum=optim_cfg.momentum,
                 weight_decay=optim_cfg.weight_decay,
@@ -346,6 +419,10 @@ class TrainingLightningModule(LightningModule):
 
     def on_train_epoch_start(self):
         """Called at start of training epoch"""
+        trainer = getattr(self, "trainer", None)
+        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
+        if datamodule is not None and hasattr(datamodule, "set_epoch"):
+            datamodule.set_epoch(int(self.current_epoch))
         if torch.cuda.is_available():
             gc.collect()
             torch.cuda.empty_cache()

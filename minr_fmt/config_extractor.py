@@ -128,6 +128,22 @@ class ConfigExtractor:
             raise KeyError(
                 "model.feature_refinement.consensus_residual_gate must be a mapping"
             )
+        mean_prior_cfg = refinement.get("mean_prior_residual_gate", {}) or {}
+        if not isinstance(mean_prior_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.mean_prior_residual_gate must be a mapping"
+            )
+        anchor_cfg = mean_prior_cfg.get("anchor_loss", {}) or {}
+        if not isinstance(anchor_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.mean_prior_residual_gate.anchor_loss "
+                "must be a mapping"
+            )
+        tca_cfg = refinement.get("transport_consensus_adapter", {}) or {}
+        if not isinstance(tca_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.transport_consensus_adapter must be a mapping"
+            )
         return {
             "enabled": bool(refinement.get("enabled", False)),
             "input_mode": str(refinement.get("input_mode", "s1_ptfa")),
@@ -151,6 +167,24 @@ class ConfigExtractor:
                 "gamma": float(consensus_cfg.get("gamma", 0.1)),
                 "norm": str(consensus_cfg.get("norm", "layernorm")),
                 "use_evidence_stats": bool(consensus_cfg.get("use_evidence_stats", True)),
+            },
+            "mean_prior_residual_gate": {
+                "hidden_dim": int(mean_prior_cfg.get("hidden_dim", 64)),
+                "norm": str(mean_prior_cfg.get("norm", "layernorm")),
+                "scale_max": float(mean_prior_cfg.get("scale_max", 0.5)),
+                "alpha_max": float(mean_prior_cfg.get("alpha_max", 0.1)),
+                "warmup_epochs": int(mean_prior_cfg.get("warmup_epochs", 10)),
+                "gate_lr_mult": float(mean_prior_cfg.get("gate_lr_mult", 1.0)),
+                "anchor_loss": {
+                    "enabled": bool(anchor_cfg.get("enabled", False)),
+                    "beta": float(anchor_cfg.get("beta", 0.0)),
+                },
+            },
+            "transport_consensus_adapter": {
+                "hidden_dim": int(tca_cfg.get("hidden_dim", 128)),
+                "epsilon": float(tca_cfg.get("epsilon", 0.1)),
+                "include_dev_norm": bool(tca_cfg.get("include_dev_norm", False)),
+                "zero_init": bool(tca_cfg.get("zero_init", True)),
             },
         }
 

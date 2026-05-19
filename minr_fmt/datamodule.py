@@ -110,6 +110,12 @@ class TrainingDataModule(LightningDataModule):
         kwargs = self._loader_kwargs(shuffle=False, batch_size=self.eval_batch_size)
         return DataLoader(self.test_dataset, **kwargs)
 
+    def set_epoch(self, epoch: int) -> None:
+        """Forward epoch to datasets that support epoch-aware sampling."""
+        for dataset in (self.train_dataset, self.val_dataset, self.test_dataset):
+            if dataset is not None and hasattr(dataset, "set_epoch"):
+                dataset.set_epoch(epoch)
+
     def _loader_kwargs(self, shuffle: bool, batch_size: int) -> dict:
         kwargs = {
             "batch_size": batch_size,

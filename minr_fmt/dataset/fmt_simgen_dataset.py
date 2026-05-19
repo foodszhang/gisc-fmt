@@ -42,6 +42,13 @@ class FmtSimGenProjDataset(Dataset):
         self.projection_norm = str(self.config.get("projection_norm", "per_view_max"))
         self.projection_eps = float(self.config.get("projection_eps", 1e-8) or 1e-8)
         self.query_sampler = NonGTQuerySampler(self.config) if self.use_nongt_sampler else None
+        self.resample_queries_each_epoch = bool(
+            self.config.get("resample_queries_each_epoch", False)
+        )
+        self.query_epoch_seed_stride = int(
+            self.config.get("query_epoch_seed_stride", 1_000_003) or 1_000_003
+        )
+        self.current_epoch = 0
         self._base_seed = int(self.config.get("subset_seed", 0) or 0) + {
             "train": 0,
             "val": 1000,
@@ -132,6 +139,20 @@ class FmtSimGenProjDataset(Dataset):
     def __len__(self) -> int:
         return len(self.dirs)
 
+    def set_epoch(self, epoch: int) -> None:
+        """Set epoch for optional train-time query resampling.
+
+        This changes only the RNG seed used for query allocation. It does not use GT
+        information and is disabled by default for validation/test datasets.
+        """
+        self.current_epoch = int(epoch)
+
+    def _query_seed(self, index: int) -> int:
+        seed = self._base_seed + int(index)
+        if self.resample_queries_each_epoch and self.is_training:
+            seed += int(self.current_epoch) * self.query_epoch_seed_stride
+        return seed
+
     def _load_projection(
         self, sample_dir: Path
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -186,7 +207,7 @@ class FmtSimGenProjDataset(Dataset):
             sample_dir
         )
         gt = self._load_gt(sample_dir)
-        rng = np.random.default_rng(self._base_seed + int(index))
+        rng = np.random.default_rng(self._query_seed(index))
 
         if self.query_sampler is not None:
             sampled = self.query_sampler.sample(sample_dir, gt.shape, self.sample_num, rng)

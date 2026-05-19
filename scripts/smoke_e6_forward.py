@@ -126,6 +126,38 @@ def run_one(exp: str, data_dir: str, num_queries: int, device: str) -> None:
             f"gamma_delta_norm={float(stats['ptfa_delta_norm']):.6f} "
             f"delta_abs_mean={float(stats['ptfa_delta_abs_mean']):.6f}"
         )
+    if getattr(net, "last_mean_prior_residual_gate_stats", None):
+        stats = net.last_mean_prior_residual_gate_stats
+        print(
+            f"{exp}: mean_prior alpha={float(stats['alpha']):.6f} "
+            f"scale_mean/std/min/max="
+            f"{float(stats['residual_scale_mean']):.6f}/"
+            f"{float(stats['residual_scale_std']):.6f}/"
+            f"{float(stats['residual_scale_min']):.6f}/"
+            f"{float(stats['residual_scale_max']):.6f}"
+        )
+        print(
+            f"{exp}: mean_prior_delta "
+            f"mean_norm={float(stats['ptfa_mean_norm']):.6f} "
+            f"delta_norm={float(stats['ptfa_delta_norm']):.6f} "
+            f"alpha_delta_norm={float(stats['ptfa_alpha_delta_norm']):.6f} "
+            f"delta_abs_mean={float(stats['ptfa_delta_abs_mean']):.6f} "
+            f"anchor_loss={float(stats['anchor_loss']):.8f}"
+        )
+    if getattr(net, "last_transport_consensus_adapter_stats", None):
+        stats = net.last_transport_consensus_adapter_stats
+        print(
+            f"{exp}: tca epsilon={float(stats['epsilon']):.6f} "
+            f"mean_norm={float(stats['ptfa_mean_norm']):.6f} "
+            f"dev_abs_norm={float(stats['dev_abs_mean_norm']):.6f} "
+            f"dev_sq_norm={float(stats['dev_sq_mean_norm']):.6f}"
+        )
+        print(
+            f"{exp}: tca_delta "
+            f"delta_norm={float(stats['adapter_delta_norm']):.6f} "
+            f"epsilon_delta_norm={float(stats['adapter_epsilon_delta_norm']):.6f} "
+            f"delta_abs_mean={float(stats['adapter_delta_abs_mean']):.6f}"
+        )
     if getattr(net, "last_ptfa_stats", None):
         for key in ("raw_depth_like_mm", "depth_eff_mm", "sigma_px"):
             value = net.last_ptfa_stats.get(key)

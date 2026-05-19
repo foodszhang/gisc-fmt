@@ -26,7 +26,13 @@ from ..network.ptfa import (
     ptfa_sample_exit_depth_gaussian,
     ptfa_sample_fixed_gaussian,
 )
-from ..network.query_aggregation import ConsensusResidualGate, GeometryViewGate, ReliabilityViewGate
+from ..network.query_aggregation import (
+    ConsensusResidualGate,
+    GeometryViewGate,
+    MeanPriorResidualGate,
+    ReliabilityViewGate,
+    TransportConsensusAdapter,
+)
 from ..utils.cam import project_points_to_camera
 from ..utils.fmt_simgen_projection import project_points_mm_to_detector
 
@@ -458,6 +464,33 @@ class PointDensityNet(nn.Module):
                     norm=str(consensus_cfg["norm"]),
                 )
                 self.consensus_residual_gate_input_dim = consensus_input_dim
+            elif self.feature_refinement_ptfa_view_aggregation == "mean_prior_residual_gate":
+                mean_prior_cfg = refinement_params["mean_prior_residual_gate"]
+                mean_prior_input_dim = 8 + 4
+                self.mean_prior_residual_gate = MeanPriorResidualGate(
+                    input_dim=mean_prior_input_dim,
+                    hidden_dim=int(mean_prior_cfg["hidden_dim"]),
+                    scale_max=float(mean_prior_cfg["scale_max"]),
+                    norm=str(mean_prior_cfg["norm"]),
+                )
+                self.mean_prior_residual_gate_input_dim = mean_prior_input_dim
+                self.mean_prior_alpha_max = float(mean_prior_cfg["alpha_max"])
+                self.mean_prior_warmup_epochs = int(mean_prior_cfg["warmup_epochs"])
+                self.mean_prior_gate_lr_mult = float(mean_prior_cfg["gate_lr_mult"])
+                anchor_cfg = mean_prior_cfg["anchor_loss"]
+                self.mean_prior_anchor_loss_enabled = bool(anchor_cfg["enabled"])
+                self.mean_prior_anchor_loss_beta = float(anchor_cfg["beta"])
+                self.mean_prior_current_epoch = 0
+            elif self.feature_refinement_ptfa_view_aggregation == "transport_consensus_adapter":
+                tca_cfg = refinement_params["transport_consensus_adapter"]
+                self.transport_consensus_adapter = TransportConsensusAdapter(
+                    feature_dim=feature_dim,
+                    geom_dim=int(refinement_params["geom_dim"]),
+                    hidden_dim=int(tca_cfg["hidden_dim"]),
+                    epsilon=float(tca_cfg["epsilon"]),
+                    include_dev_norm=bool(tca_cfg["include_dev_norm"]),
+                    zero_init=bool(tca_cfg["zero_init"]),
+                )
             elif self.feature_refinement_ptfa_view_aggregation != "masked_mean":
                 raise NotImplementedError(
                     "Unknown feature_refinement.ptfa_view_aggregation: "
@@ -481,9 +514,25 @@ class PointDensityNet(nn.Module):
         self.last_reliability_gate_stats = {}
         self.last_reliability_gate_weights = None
         self.last_consensus_residual_gate_stats = {}
+        self.last_mean_prior_residual_gate_stats = {}
+        self.last_transport_consensus_adapter_stats = {}
+        self.last_feature_refinement_anchor_loss = None
+        self.last_feature_refinement_debug = {}
 
         # 点采样器
         self.sampler = PointFeatureSampler()
+
+    def set_training_epoch(self, epoch: int) -> None:
+        """Expose Lightning's epoch to modules with epoch-dependent warmup."""
+        self.mean_prior_current_epoch = int(epoch)
+
+    def _mean_prior_alpha(self) -> float:
+        warmup = max(int(getattr(self, "mean_prior_warmup_epochs", 0)), 0)
+        alpha_max = float(getattr(self, "mean_prior_alpha_max", 0.0))
+        if warmup <= 0:
+            return alpha_max
+        epoch = max(int(getattr(self, "mean_prior_current_epoch", 0)), 0)
+        return alpha_max * min(1.0, float(epoch) / float(warmup))
 
     def _forward_shared_unet(self, multi_view_images):
         """向量化执行共享U-Net"""
@@ -1092,6 +1141,9 @@ class PointDensityNet(nn.Module):
             self.last_reliability_gate_stats = {}
             self.last_reliability_gate_weights = None
             self.last_consensus_residual_gate_stats = {}
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+            self.last_feature_refinement_anchor_loss = None
         elif self.feature_refinement_ptfa_view_aggregation == "reliability_gate":
             if self.ptfa_mode != "corrected_exit_depth_gaussian":
                 raise ValueError("reliability_gate aggregation requires corrected_exit_depth_gaussian")
@@ -1104,6 +1156,9 @@ class PointDensityNet(nn.Module):
                 weights, projection_pack, ptfa_stats
             )
             self.last_consensus_residual_gate_stats = {}
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+            self.last_feature_refinement_anchor_loss = None
         elif self.feature_refinement_ptfa_view_aggregation == "consensus_residual_gate":
             if self.ptfa_mode != "corrected_exit_depth_gaussian":
                 raise ValueError(
@@ -1126,6 +1181,58 @@ class PointDensityNet(nn.Module):
             ].detach()
             self.last_reliability_gate_stats = {}
             self.last_reliability_gate_weights = None
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+            self.last_feature_refinement_anchor_loss = None
+        elif self.feature_refinement_ptfa_view_aggregation == "mean_prior_residual_gate":
+            if self.ptfa_mode != "corrected_exit_depth_gaussian":
+                raise ValueError(
+                    "mean_prior_residual_gate aggregation requires corrected_exit_depth_gaussian"
+                )
+            f_mean = self._valid_masked_mean(s1_ptfa, projection_pack["valid"])
+            gate_input = self._build_consensus_residual_gate_input(
+                s1_ptfa, f_mean, projection_pack, ptfa_stats
+            )
+            alpha = self._mean_prior_alpha()
+            s1_evidence, mean_prior_stats = self.mean_prior_residual_gate(
+                s1_ptfa, gate_input, projection_pack["valid"], alpha
+            )
+            self.last_mean_prior_residual_gate_stats = {
+                k: v.detach() if torch.is_tensor(v) else v
+                for k, v in mean_prior_stats.items()
+                if k != "residual_scale"
+            }
+            self.last_mean_prior_residual_gate_stats["residual_scale"] = mean_prior_stats[
+                "residual_scale"
+            ].detach()
+            if self.mean_prior_anchor_loss_enabled:
+                self.last_feature_refinement_anchor_loss = (
+                    self.mean_prior_anchor_loss_beta * mean_prior_stats["anchor_loss"]
+                )
+            else:
+                self.last_feature_refinement_anchor_loss = None
+            self.last_reliability_gate_stats = {}
+            self.last_reliability_gate_weights = None
+            self.last_consensus_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+        elif self.feature_refinement_ptfa_view_aggregation == "transport_consensus_adapter":
+            if self.ptfa_mode != "corrected_exit_depth_gaussian":
+                raise ValueError(
+                    "transport_consensus_adapter aggregation requires "
+                    "corrected_exit_depth_gaussian"
+                )
+            geom_summary = self._geometry_summary(projection_pack).to(dtype=s1_ptfa.dtype)
+            s1_evidence, tca_stats = self.transport_consensus_adapter(
+                s1_ptfa, projection_pack["valid"], geom_summary
+            )
+            self.last_transport_consensus_adapter_stats = {
+                k: v.detach() if torch.is_tensor(v) else v for k, v in tca_stats.items()
+            }
+            self.last_reliability_gate_stats = {}
+            self.last_reliability_gate_weights = None
+            self.last_consensus_residual_gate_stats = {}
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_feature_refinement_anchor_loss = None
         else:
             raise NotImplementedError(
                 "Unknown feature_refinement.ptfa_view_aggregation: "
@@ -1368,9 +1475,16 @@ class PointDensityNet(nn.Module):
                 "delta_norm": (refined_feat.detach() - fused_feat.detach()).norm(),
                 "refined_norm": refined_feat.detach().norm(),
             }
+            self.last_feature_refinement_debug = {
+                "f_base": fused_feat.detach(),
+                "f_ptfa": s1_evidence.detach(),
+                "f_refined": refined_feat.detach(),
+            }
             fused_feat = refined_feat
         else:
             self.last_feature_refinement_stats = {}
+            self.last_feature_refinement_anchor_loss = None
+            self.last_feature_refinement_debug = {}
 
         # 隐式密度预测
         logits = self.density_head(gamma_x, fused_feat)

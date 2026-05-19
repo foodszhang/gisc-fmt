@@ -309,3 +309,239 @@ class ConsensusResidualGate(nn.Module):
             "ptfa_delta_abs_mean": (f_out.detach() - f_mean.detach()).abs().mean(),
         }
         return f_out, stats
+
+
+class MeanPriorResidualGate(nn.Module):
+    """Mean-anchored residual view correction.
+
+    This gate never replaces the valid-view mean. It only applies a bounded
+    residual correction around that mean:
+    f_out = f_mean + alpha * mean_valid(scale_v * (f_v - f_mean)).
+    With zero-initialized final projection, scale_v starts at 0 and alpha=0 at
+    epoch 0, so the initial path is exactly the E8-cED valid-view mean.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 64,
+        scale_max: float = 0.5,
+        norm: str = "layernorm",
+    ) -> None:
+        super().__init__()
+        if input_dim <= 0:
+            raise ValueError(f"input_dim must be positive, got {input_dim}")
+        if hidden_dim <= 0:
+            raise ValueError(f"hidden_dim must be positive, got {hidden_dim}")
+        if scale_max < 0:
+            raise ValueError(f"scale_max must be non-negative, got {scale_max}")
+        if norm not in {"none", "layernorm"}:
+            raise ValueError(f"norm must be 'none' or 'layernorm', got {norm}")
+
+        self.input_dim = int(input_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.scale_max = float(scale_max)
+        self.norm_name = str(norm)
+        self.input_norm = nn.LayerNorm(self.input_dim) if self.norm_name == "layernorm" else None
+        self.net = nn.Sequential(
+            nn.Linear(self.input_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Linear(self.hidden_dim, 1),
+        )
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    @staticmethod
+    def _valid_mean(x: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+        weights = valid.unsqueeze(-1).to(dtype=x.dtype, device=x.device)
+        denom = weights.sum(dim=2).clamp_min(1.0)
+        return (x * weights).sum(dim=2) / denom
+
+    def forward(
+        self,
+        f_view: torch.Tensor,
+        gate_input: torch.Tensor,
+        valid: torch.Tensor,
+        alpha: float | torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Apply bounded residual correction around valid-view consensus.
+
+        Args:
+            f_view: [B,N,V,C] per-view evidence.
+            gate_input: [B,N,V,D] compact geom + evidence stats.
+            valid: [B,N,V] boolean view mask.
+            alpha: scalar residual strength after warmup.
+
+        Returns:
+            f_out: [B,N,C]
+            stats: tensors for scale/residual diagnostics and anchor loss.
+        """
+        if f_view.dim() != 4:
+            raise ValueError(f"f_view must be [B,N,V,C], got {tuple(f_view.shape)}")
+        if gate_input.dim() != 4 or gate_input.shape[-1] != self.input_dim:
+            raise ValueError(
+                f"gate_input must be [B,N,V,{self.input_dim}], got {tuple(gate_input.shape)}"
+            )
+        if valid.dim() != 3 or valid.shape != f_view.shape[:3]:
+            raise ValueError(f"valid shape {tuple(valid.shape)} incompatible with {tuple(f_view.shape)}")
+        if gate_input.shape[:3] != f_view.shape[:3]:
+            raise ValueError(
+                f"gate_input shape {tuple(gate_input.shape)} incompatible with "
+                f"f_view {tuple(f_view.shape)}"
+            )
+
+        valid_bool = valid.to(device=f_view.device, dtype=torch.bool)
+        valid_float = valid_bool.to(dtype=f_view.dtype)
+        x = gate_input.to(device=f_view.device, dtype=f_view.dtype)
+        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        if self.input_norm is not None:
+            x = self.input_norm(x)
+
+        raw = self.net(x).squeeze(-1)
+        residual_scale = self.scale_max * torch.tanh(
+            torch.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
+        )
+        residual_scale = residual_scale * valid_float
+
+        f_mean = self._valid_mean(f_view, valid_bool)
+        residual = f_view - f_mean.unsqueeze(2)
+        delta = self._valid_mean(residual_scale.unsqueeze(-1) * residual, valid_bool)
+
+        alpha_t = torch.as_tensor(alpha, device=f_view.device, dtype=f_view.dtype)
+        f_out = f_mean + alpha_t * delta
+        f_out = torch.nan_to_num(f_out, nan=0.0, posinf=0.0, neginf=0.0)
+        anchor_loss = (f_out - f_mean.detach()).square().mean()
+
+        valid_scale = residual_scale[valid_bool]
+        if valid_scale.numel() == 0:
+            valid_scale = residual_scale.new_zeros(1)
+
+        stats = {
+            "residual_scale": residual_scale,
+            "f_mean": f_mean,
+            "delta": delta,
+            "alpha": alpha_t.detach(),
+            "anchor_loss": anchor_loss,
+            "residual_scale_mean": valid_scale.detach().mean(),
+            "residual_scale_std": valid_scale.detach().std(unbiased=False),
+            "residual_scale_min": valid_scale.detach().min(),
+            "residual_scale_max": valid_scale.detach().max(),
+            "ptfa_mean_norm": f_mean.detach().norm(dim=-1).mean(),
+            "ptfa_delta_norm": delta.detach().norm(dim=-1).mean(),
+            "ptfa_alpha_delta_norm": (alpha_t.detach() * delta.detach()).norm(dim=-1).mean(),
+            "ptfa_delta_abs_mean": (f_out.detach() - f_mean.detach()).abs().mean(),
+        }
+        return f_out, stats
+
+
+class TransportConsensusAdapter(nn.Module):
+    """Zero-initialized adapter after valid-view transport consensus.
+
+    This module keeps valid-view mean as the anchor and consumes per-channel
+    disagreement statistics across views. It does not learn view weights.
+    """
+
+    def __init__(
+        self,
+        feature_dim: int,
+        geom_dim: int = 5,
+        hidden_dim: int = 128,
+        epsilon: float = 0.1,
+        include_dev_norm: bool = False,
+        zero_init: bool = True,
+    ) -> None:
+        super().__init__()
+        if feature_dim <= 0:
+            raise ValueError(f"feature_dim must be positive, got {feature_dim}")
+        if geom_dim <= 0:
+            raise ValueError(f"geom_dim must be positive, got {geom_dim}")
+        if hidden_dim <= 0:
+            raise ValueError(f"hidden_dim must be positive, got {hidden_dim}")
+        if epsilon < 0:
+            raise ValueError(f"epsilon must be non-negative, got {epsilon}")
+
+        self.feature_dim = int(feature_dim)
+        self.geom_dim = int(geom_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.epsilon = float(epsilon)
+        self.include_dev_norm = bool(include_dev_norm)
+        stats_dim = self.feature_dim * 3 if self.include_dev_norm else self.feature_dim * 2
+        in_dim = self.feature_dim + stats_dim + self.geom_dim
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Linear(self.hidden_dim, self.feature_dim),
+        )
+        if zero_init:
+            nn.init.zeros_(self.net[-1].weight)
+            nn.init.zeros_(self.net[-1].bias)
+
+    @staticmethod
+    def _valid_mean(x: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+        weights = valid.unsqueeze(-1).to(dtype=x.dtype, device=x.device)
+        denom = weights.sum(dim=2).clamp_min(1.0)
+        return (x * weights).sum(dim=2) / denom
+
+    def forward(
+        self,
+        f_view: torch.Tensor,
+        valid: torch.Tensor,
+        geom_summary: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Adapt valid-view mean using view disagreement statistics.
+
+        Args:
+            f_view: [B,N,V,C] per-view PTFA evidence.
+            valid: [B,N,V] boolean view mask.
+            geom_summary: [B,N,G] query-level geometry summary.
+
+        Returns:
+            f_out: [B,N,C]
+            stats: diagnostic tensors.
+        """
+        if f_view.dim() != 4:
+            raise ValueError(f"f_view must be [B,N,V,C], got {tuple(f_view.shape)}")
+        if valid.dim() != 3 or valid.shape != f_view.shape[:3]:
+            raise ValueError(f"valid shape {tuple(valid.shape)} incompatible with {tuple(f_view.shape)}")
+        if geom_summary.dim() != 3 or geom_summary.shape[:2] != f_view.shape[:2]:
+            raise ValueError(
+                f"geom_summary shape {tuple(geom_summary.shape)} incompatible with "
+                f"f_view {tuple(f_view.shape)}"
+            )
+        if f_view.shape[-1] != self.feature_dim:
+            raise ValueError(f"expected feature_dim={self.feature_dim}, got {f_view.shape[-1]}")
+        if geom_summary.shape[-1] != self.geom_dim:
+            raise ValueError(f"expected geom_dim={self.geom_dim}, got {geom_summary.shape[-1]}")
+
+        valid_bool = valid.to(device=f_view.device, dtype=torch.bool)
+        f_mean = self._valid_mean(f_view, valid_bool)
+        f_dev = f_view - f_mean.unsqueeze(2)
+        dev_abs_mean = self._valid_mean(f_dev.abs(), valid_bool)
+        dev_sq_mean = self._valid_mean(f_dev.square(), valid_bool)
+        parts = [f_mean, dev_abs_mean, dev_sq_mean]
+        if self.include_dev_norm:
+            dev_norm = f_dev.norm(dim=-1, keepdim=True)
+            dev_norm_mean = self._valid_mean(dev_norm, valid_bool)
+            parts.append(dev_norm_mean.expand_as(f_mean))
+        parts.append(geom_summary.to(device=f_view.device, dtype=f_view.dtype))
+        adapter_input = torch.cat(parts, dim=-1)
+        adapter_input = torch.nan_to_num(adapter_input, nan=0.0, posinf=0.0, neginf=0.0)
+        delta = self.net(adapter_input)
+        f_out = f_mean + self.epsilon * delta
+        f_out = torch.nan_to_num(f_out, nan=0.0, posinf=0.0, neginf=0.0)
+        stats = {
+            "f_mean": f_mean,
+            "delta": delta,
+            "epsilon": torch.as_tensor(self.epsilon, device=f_view.device, dtype=f_view.dtype),
+            "dev_abs_mean": dev_abs_mean,
+            "dev_sq_mean": dev_sq_mean,
+            "ptfa_mean_norm": f_mean.detach().norm(dim=-1).mean(),
+            "dev_abs_mean_norm": dev_abs_mean.detach().norm(dim=-1).mean(),
+            "dev_sq_mean_norm": dev_sq_mean.detach().norm(dim=-1).mean(),
+            "adapter_delta_norm": delta.detach().norm(dim=-1).mean(),
+            "adapter_epsilon_delta_norm": (self.epsilon * delta.detach()).norm(dim=-1).mean(),
+            "adapter_delta_abs_mean": (f_out.detach() - f_mean.detach()).abs().mean(),
+        }
+        return f_out, stats
