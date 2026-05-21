@@ -5,14 +5,12 @@
 缺失的配置项在入口处统一报错处理。
 """
 
-import torch
-import os
-import numpy as np
 import json
+import os
 
-from torch.utils.data import DataLoader, Dataset
-import torch.nn.functional as F
-from scipy.ndimage import zoom
+import numpy as np
+import torch
+from torch.utils.data import Dataset
 
 
 class MultiProjDataset(Dataset):
@@ -182,16 +180,25 @@ class MultiProjDataset(Dataset):
         rng = np.random.default_rng(self._base_seed + int(index))
 
         # 选择一个块（可复现）
-        block_idx = int(rng.integers(len(self.block_files)))
-        block_path = self.block_files[block_idx]
-        data = np.load(block_path)
-        coords = data["coords"]
+        _ = self.block_files[int(rng.integers(len(self.block_files)))]
 
         # 获取数据路径
         entry, entry_path = self.dirs[index]
         proj_path = os.path.join(entry_path, "proj.npz")
         dep_path = os.path.join(entry_path, "dep_proj.npz")
-        no_proj_path = os.path.join(entry_path, "no_proj.npz")
+        target_files = self.config.get(
+            "descatter_target_files", self.config.get("descatter_target_file")
+        )
+        if target_files is None:
+            target_files = ["proj_noscatter.npz", "no_proj.npz"]
+        elif isinstance(target_files, str):
+            target_files = [target_files]
+        descatter_path = None
+        for target_file in target_files:
+            candidate_path = os.path.join(entry_path, str(target_file))
+            if os.path.exists(candidate_path):
+                descatter_path = candidate_path
+                break
         json_path = os.path.join(entry_path, f"{entry}.json")
 
         # 加载JSON元数据
@@ -216,7 +223,7 @@ class MultiProjDataset(Dataset):
 
         # 加载投影数据
         projection_zip = np.load(proj_path)
-        no_projection_zip = np.load(no_proj_path)
+        descatter_zip = np.load(descatter_path) if descatter_path is not None else None
 
         # 加载深度数据
         dep_zip = np.load(dep_path)
@@ -224,7 +231,11 @@ class MultiProjDataset(Dataset):
         # 从配置获取视图角度和缩放比例
         view_angles = self.config["view_angles"]
         projection_scale = self.config["projection_scale"]
-        no_projection_scale = self.config["no_projection_scale"]
+        descatter_target_scale = self.config.get(
+            "descatter_target_scale", self.config.get("no_projection_scale")
+        )
+        if descatter_target_scale is not None:
+            descatter_target_scale = float(descatter_target_scale)
 
         # 转换为张量
         view_angles = [str(v) for v in view_angles]
@@ -237,14 +248,21 @@ class MultiProjDataset(Dataset):
             )
             for p in view_angles
         }
-        no_projections = {
-            p: torch.tensor(
-                no_projection_zip[p] / no_projection_scale,
-                dtype=torch.float32,
-                device=self.device,
-            )
-            for p in view_angles
-        }
+        descatter_targets = None
+        if descatter_zip is not None:
+            if descatter_target_scale is None:
+                raise ValueError(
+                    "data.descatter_target_scale or data.no_projection_scale must be set "
+                    "when descatter targets are provided"
+                )
+            descatter_targets = {
+                p: torch.tensor(
+                    descatter_zip[p] / descatter_target_scale,
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                for p in view_angles
+            }
 
         dep_projections = {
             p: torch.tensor(
@@ -269,18 +287,13 @@ class MultiProjDataset(Dataset):
         )
 
         projections_packed = torch.stack([projections[v] for v in view_angles], dim=0).unsqueeze(1)
-        no_projections_packed = torch.stack(
-            [no_projections[v] for v in view_angles], dim=0
-        ).unsqueeze(1)
         dep_packed = torch.stack([dep_projections[v] for v in view_angles], dim=0).unsqueeze(1)
 
-        return {
+        item = {
             "sample_id": entry,
             "projections": projections,
-            "no_projections": no_projections,
             "dep_projections": dep_projections,
             "projections_packed": projections_packed,  # [V,1,H,W] -> collate => [B,V,1,H,W]
-            "no_projections_packed": no_projections_packed,
             "dep_packed": dep_packed,
             "points": points,
             "point_densities": point_densities,
@@ -290,18 +303,16 @@ class MultiProjDataset(Dataset):
             "range_y": self.range_y,
             "range_z": self.range_z,
         }
+        if descatter_targets is not None:
+            item["descatter_targets"] = descatter_targets
+            item["descatter_targets_packed"] = torch.stack(
+                [descatter_targets[v] for v in view_angles], dim=0
+            ).unsqueeze(1)
+        return item
 
     def sample_points(self, points, values, rng=None):
         """采样点"""
         rng = rng or np.random.default_rng(self._base_seed)
-        flat_values = values[
-            points[:, 0].astype(int),
-            points[:, 1].astype(int),
-            points[:, 2].astype(int),
-        ]
-        sum_values = flat_values.sum()
-        p = (flat_values + 0.05) / (sum_values + len(flat_values) * 0.05)
-
         choice = rng.choice(len(points), size=self.sample_num, replace=False)
         points = points[choice]
 

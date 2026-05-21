@@ -1,0 +1,8 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e8_ced_stable_lowmem
+  - _self_
+
+name: fmt_simgen_e8_ced_stable_v2
+description: E8-cED stable-v2 baseline protocol for seed-repeat comparisons

@@ -353,7 +353,7 @@ def evaluate_sample(
         str(sample_dir.parent), config=cfg, split="all", is_training=False
     )
     loader.dirs = [sample_dir]
-    _projections, projections_packed, _projection_scales, depth_maps_tensor = (
+    _projections, projections_packed, _projection_scales, depth_maps_tensor, _descatter_targets = (
         loader._load_projection(sample_dir)
     )
     proj_in = pack_projection_input(projections_packed).to(device)

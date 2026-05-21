@@ -11,7 +11,7 @@ from omegaconf import DictConfig
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from .loss import ScatterLightLoss, compute_dice, dice_coefficient
+from .loss import AuxProjectionLightLoss, compute_dice, dice_coefficient
 from .model_factory import ModelFactory
 from .utils.utils import get_psnr_3d, get_ssim_3d
 
@@ -133,9 +133,13 @@ class TrainingLightningModule(LightningModule):
     def _setup_loss(self):
         """Create loss function from config"""
         loss_cfg = self.cfg.loss
-        self.loss_func = ScatterLightLoss(
-            init_scatter_weight=loss_cfg.scatter_weight,
-            target_scatter_weight=loss_cfg.target_scatter_weight,
+        self.loss_func = AuxProjectionLightLoss(
+            init_scatter_weight=loss_cfg.get(
+                "aux_projection_weight", loss_cfg.get("scatter_weight", 1.0)
+            ),
+            target_scatter_weight=loss_cfg.get(
+                "target_aux_projection_weight", loss_cfg.get("target_scatter_weight", 0.5)
+            ),
             start_decay_epoch=loss_cfg.start_decay_epoch,
             decay_epochs=loss_cfg.decay_epochs,
             pos_weight=loss_cfg.pos_weight,
@@ -174,6 +178,43 @@ class TrainingLightningModule(LightningModule):
             int(voxel_shape[2][0].detach().cpu().numpy()),
         )
 
+    def _log_query_sampling_stats(self, prefix: str, batch, point_densities: torch.Tensor) -> None:
+        """Log sampled-query composition for stability audits."""
+        pos_ratio = (point_densities > 0.0).float().mean()
+        self.log(
+            f"{prefix}_pos_ratio",
+            pos_ratio,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        query_src_tag = batch.get("query_src_tag")
+        if query_src_tag is None:
+            return
+        tags = query_src_tag.to(device=point_densities.device)
+        valid = tags >= 0
+        denom = valid.float().sum().clamp_min(1.0)
+        trunk_ratio = ((tags == 0).float().sum() / denom).detach()
+        proposal_ratio = ((tags == 1).float().sum() / denom).detach()
+        self.log(
+            f"{prefix}_query_trunk_ratio",
+            trunk_ratio,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log(
+            f"{prefix}_query_proposal_ratio",
+            proposal_ratio,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
     def training_step(self, batch, batch_idx):
         """
         Single training step
@@ -197,6 +238,7 @@ class TrainingLightningModule(LightningModule):
         points_mm = batch.get("points_mm")
         depth_maps = batch.get("depth_maps")
         density = batch["point_densities"].unsqueeze(-1)
+        self._log_query_sampling_stats("train", batch, batch["point_densities"])
 
         # Forward pass (use packed tensor when available)
         density_pred, aux_outputs = self._call_model(
@@ -204,7 +246,8 @@ class TrainingLightningModule(LightningModule):
         )
 
         # Compute loss
-        loss_dict = self.loss_func(aux_outputs, projections, density_pred, density)
+        descatter_targets = batch.get("descatter_targets")
+        loss_dict = self.loss_func(aux_outputs, descatter_targets, density_pred, density)
         total_loss = loss_dict["total_loss"]
         anchor_loss = getattr(self.net, "last_feature_refinement_anchor_loss", None)
         if isinstance(anchor_loss, torch.Tensor):
@@ -259,6 +302,7 @@ class TrainingLightningModule(LightningModule):
         depth_maps = batch.get("depth_maps")
         point_densities = batch["point_densities"]
         voxel_shape = batch["feasible_voxel_shape"]
+        self._log_query_sampling_stats("val", batch, point_densities)
 
         B = points.shape[0]
 
@@ -388,6 +432,8 @@ class TrainingLightningModule(LightningModule):
             scheduler_class_name = scheduler_cfg._target_.split(".")[-1]
 
             # Map scheduler target to class
+            warmup_epochs = int(scheduler_cfg.get("warmup_epochs", 0))
+            warmup_start_factor = float(scheduler_cfg.get("warmup_start_factor", 0.01))
             if "StepLR" in scheduler_class_name:
                 scheduler = torch.optim.lr_scheduler.StepLR(
                     optimizer,
@@ -397,7 +443,7 @@ class TrainingLightningModule(LightningModule):
             elif "CosineAnnealingLR" in scheduler_class_name:
                 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                     optimizer,
-                    T_max=self.max_epochs,
+                    T_max=max(1, self.max_epochs - warmup_epochs),
                     eta_min=scheduler_cfg.eta_min,
                 )
             elif "ExponentialLR" in scheduler_class_name:
@@ -409,6 +455,18 @@ class TrainingLightningModule(LightningModule):
                 scheduler = None
 
             if scheduler is not None:
+                if warmup_epochs > 0:
+                    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+                        optimizer,
+                        start_factor=warmup_start_factor,
+                        end_factor=1.0,
+                        total_iters=warmup_epochs,
+                    )
+                    scheduler = torch.optim.lr_scheduler.SequentialLR(
+                        optimizer,
+                        schedulers=[warmup_scheduler, scheduler],
+                        milestones=[warmup_epochs],
+                    )
                 config_dict["lr_scheduler"] = {
                     "scheduler": scheduler,
                     "interval": scheduler_cfg.interval,
@@ -423,7 +481,30 @@ class TrainingLightningModule(LightningModule):
         datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
         if datamodule is not None and hasattr(datamodule, "set_epoch"):
             datamodule.set_epoch(int(self.current_epoch))
-        if torch.cuda.is_available():
+            train_dataset = getattr(datamodule, "train_dataset", None)
+            resample_enabled = bool(
+                getattr(train_dataset, "resample_queries_each_epoch", False)
+                and getattr(train_dataset, "is_training", False)
+            )
+            self.log(
+                "train_query_resample_enabled",
+                float(resample_enabled),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                "train_query_epoch",
+                float(self.current_epoch),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+        if torch.cuda.is_available() and bool(
+            getattr(getattr(self.cfg, "trainer", {}), "empty_cache_each_epoch", False)
+        ):
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -681,7 +762,7 @@ class TrainingLightningModule(LightningModule):
 
     def test_step(self, batch, batch_idx):
         projections = batch["projections"]
-        no_projections = batch.get("no_projections")
+        descatter_targets = batch.get("descatter_targets")
         _projections, proj_in = self._prepare_projection_input(batch)
         points = batch["points"]
         points_mm = batch.get("points_mm")
@@ -690,7 +771,7 @@ class TrainingLightningModule(LightningModule):
         voxel_shape = batch["feasible_voxel_shape"]
 
         B = points.shape[0]
-        pred_density, pred_views = self._call_model(
+        pred_density, _aux_projections = self._call_model(
             proj_in, points, points_mm=points_mm, depth_maps=depth_maps
         )
         voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
@@ -748,7 +829,7 @@ class TrainingLightningModule(LightningModule):
         prec_vals, rec_vals = [], []
         valid_pairs = 0
 
-        # pred_views contains predicted de-scatter per view (if provided by model)
+        # aux_projections contains predicted auxiliary per-view projections when provided.
 
         for i in range(B):
             pm = density_pred[i].detach().to(dtype=torch.float32).cpu().numpy() >= thr
@@ -969,7 +1050,7 @@ class TrainingLightningModule(LightningModule):
                 if (
                     self._test_save_proj_comparisons
                     and self._test_proj_dir is not None
-                    and no_projections is not None
+                    and descatter_targets is not None
                     and len(self._test_angles_to_save) > 0
                 ):
                     for angle in self._test_angles_to_save:
@@ -981,7 +1062,7 @@ class TrainingLightningModule(LightningModule):
                         out_path = self._test_proj_dir / f"{sid}_angle{angle}.png"
                         self._save_proj_compare(
                             projections[angle][i],
-                            no_projections[angle][i],
+                            descatter_targets[angle][i],
                             out_path,
                             title=f"{sid} angle={angle}",
                         )

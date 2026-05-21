@@ -84,6 +84,9 @@ class ConfigExtractor:
         ptfa = model_cfg.get("ptfa", {}) or {}
         if not isinstance(ptfa, dict):
             raise KeyError("model.ptfa must be a mapping when provided")
+        pcfs = ptfa.get("pcfs", {}) or {}
+        if not isinstance(pcfs, dict):
+            raise KeyError("model.ptfa.pcfs must be a mapping when provided")
         return {
             "enabled": bool(ptfa.get("enabled", False)),
             "scales": [str(v) for v in ptfa.get("scales", [])],
@@ -94,6 +97,13 @@ class ConfigExtractor:
             "sigma_max": float(ptfa.get("sigma_max", 2.5)),
             "exit_depth_max_mm": float(ptfa.get("exit_depth_max_mm", 20.8)),
             "invert_depth": bool(ptfa.get("invert_depth", False)),
+            "pcfs": {
+                "hidden_dim": int(pcfs.get("hidden_dim", 64)),
+                "delta_max": float(pcfs.get("delta_max", 0.1)),
+                "warmup_epochs": int(pcfs.get("warmup_epochs", 10)),
+                "norm": str(pcfs.get("norm", "layernorm")),
+                "zero_init": bool(pcfs.get("zero_init", True)),
+            },
         }
 
     @staticmethod
@@ -144,6 +154,9 @@ class ConfigExtractor:
             raise KeyError(
                 "model.feature_refinement.transport_consensus_adapter must be a mapping"
             )
+        canonical_cfg = refinement.get("canonical_reliability", {}) or {}
+        if not isinstance(canonical_cfg, dict):
+            raise KeyError("model.feature_refinement.canonical_reliability must be a mapping")
         return {
             "enabled": bool(refinement.get("enabled", False)),
             "input_mode": str(refinement.get("input_mode", "s1_ptfa")),
@@ -185,6 +198,12 @@ class ConfigExtractor:
                 "epsilon": float(tca_cfg.get("epsilon", 0.1)),
                 "include_dev_norm": bool(tca_cfg.get("include_dev_norm", False)),
                 "zero_init": bool(tca_cfg.get("zero_init", True)),
+            },
+            "canonical_reliability": {
+                "hidden_dim": int(canonical_cfg.get("hidden_dim", 128)),
+                "temperature": float(canonical_cfg.get("temperature", 1.0)),
+                "residual_epsilon": float(canonical_cfg.get("residual_epsilon", 0.1)),
+                "zero_init": bool(canonical_cfg.get("zero_init", True)),
             },
         }
 

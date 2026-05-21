@@ -226,8 +226,12 @@ def plot_sigma_physics(stats: dict, batch: dict, out_dir: Path) -> dict:
 def loss_fn_from_cfg(cfg):
     loss_cfg = cfg.loss
     return ScatterLightLoss(
-        init_scatter_weight=loss_cfg.scatter_weight,
-        target_scatter_weight=loss_cfg.target_scatter_weight,
+        init_scatter_weight=loss_cfg.get(
+            "aux_projection_weight", loss_cfg.get("scatter_weight", 1.0)
+        ),
+        target_scatter_weight=loss_cfg.get(
+            "target_aux_projection_weight", loss_cfg.get("target_scatter_weight", 0.5)
+        ),
         start_decay_epoch=loss_cfg.start_decay_epoch,
         decay_epochs=loss_cfg.decay_epochs,
         pos_weight=loss_cfg.pos_weight,

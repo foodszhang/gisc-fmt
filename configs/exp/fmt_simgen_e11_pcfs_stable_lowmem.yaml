@@ -1,11 +1,11 @@
 # @package _global_
 
 defaults:
-  - fmt_simgen_e9_stable_v2_mean_prior_residual_ced_s1_ptfa_feature_refine
+  - fmt_simgen_e11_pcfs_ced_s1_ptfa_feature_refine
   - _self_
 
-name: fmt_simgen_e9_stable_v2_stable_lowmem
-description: E9 mean-prior residual gate stable low-memory protocol with epoch query resampling
+name: fmt_simgen_e11_pcfs_stable_lowmem
+description: E11 PCFS stable low-memory protocol with epoch query resampling
 
 data:
   train_max_samples: null

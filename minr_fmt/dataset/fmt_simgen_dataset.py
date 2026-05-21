@@ -34,13 +34,32 @@ class FmtSimGenProjDataset(Dataset):
 
         default_angles = [-90, -60, -30, 0, 30, 60, 90]
         self.view_angles = [int(v) for v in self.config.get("view_angles", default_angles)]
-        self.sample_num = int(
+        default_sample_num = int(
             self.config.get("sample_num", self.config.get("num_queries", 16384)) or 16384
         )
+        if self.is_training:
+            self.sample_num = default_sample_num
+        else:
+            eval_sample_num = self.config.get(
+                f"{self.split}_sample_num",
+                self.config.get("eval_sample_num", self.config.get("eval_num_queries")),
+            )
+            self.sample_num = int(eval_sample_num or default_sample_num)
         self.voxel_size_mm = float(self.config.get("voxel_size_mm", 0.2) or 0.2)
         self.use_nongt_sampler = bool(self.config.get("use_nongt_sampler", False))
         self.projection_norm = str(self.config.get("projection_norm", "per_view_max"))
         self.projection_eps = float(self.config.get("projection_eps", 1e-8) or 1e-8)
+        target_files = self.config.get(
+            "descatter_target_files", self.config.get("descatter_target_file")
+        )
+        if target_files is None:
+            target_files = ["proj_noscatter.npz", "no_proj.npz"]
+        elif isinstance(target_files, str):
+            target_files = [target_files]
+        self.descatter_target_files = [str(p) for p in target_files]
+        self.descatter_target_scale = self.config.get("descatter_target_scale")
+        if self.descatter_target_scale is not None:
+            self.descatter_target_scale = float(self.descatter_target_scale)
         self.query_sampler = NonGTQuerySampler(self.config) if self.use_nongt_sampler else None
         self.resample_queries_each_epoch = bool(
             self.config.get("resample_queries_each_epoch", False)
@@ -153,11 +172,24 @@ class FmtSimGenProjDataset(Dataset):
             seed += int(self.current_epoch) * self.query_epoch_seed_stride
         return seed
 
-    def _load_projection(
-        self, sample_dir: Path
-    ) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _load_projection(self, sample_dir: Path) -> tuple[
+        dict[str, torch.Tensor],
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        dict[str, torch.Tensor] | None,
+    ]:
         z = np.load(sample_dir / "proj.npz")
+        descatter_zip = None
+        descatter_path = None
+        for candidate in self.descatter_target_files:
+            candidate_path = sample_dir / candidate
+            if candidate_path.exists():
+                descatter_path = candidate_path
+                descatter_zip = np.load(candidate_path)
+                break
         projections = {}
+        descatter_targets = {} if descatter_zip is not None else None
         packed = []
         scales = []
         depth_maps = []
@@ -177,6 +209,20 @@ class FmtSimGenProjDataset(Dataset):
             packed.append(t)
             scales.append(scale)
 
+            if descatter_zip is not None:
+                if key not in descatter_zip.files:
+                    raise KeyError(f"{descatter_path} missing descatter target key {key!r}")
+                descatter = np.nan_to_num(
+                    descatter_zip[key].astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0
+                )
+                target_scale = self.descatter_target_scale
+                if target_scale is None:
+                    target_scale = scale
+                descatter = descatter / max(float(target_scale), self.projection_eps)
+                descatter_targets[key] = torch.tensor(
+                    descatter, dtype=torch.float32, device=self.device
+                )
+
             depth_key = f"depth_{angle}"
             if depth_key in z.files:
                 depth = z[depth_key].astype(np.float32)
@@ -190,7 +236,13 @@ class FmtSimGenProjDataset(Dataset):
         projections_packed = torch.stack(packed, dim=0).unsqueeze(1)
         projection_scales = torch.tensor(scales, dtype=torch.float32, device=self.device)
         depth_maps_tensor = torch.stack(depth_maps, dim=0)
-        return projections, projections_packed, projection_scales, depth_maps_tensor
+        return (
+            projections,
+            projections_packed,
+            projection_scales,
+            depth_maps_tensor,
+            descatter_targets,
+        )
 
     def _load_gt(self, sample_dir: Path) -> np.ndarray:
         gt = np.load(sample_dir / "gt_voxels.npy").astype(np.float32)
@@ -203,9 +255,13 @@ class FmtSimGenProjDataset(Dataset):
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         sample_dir = self.dirs[index]
-        projections, projections_packed, projection_scales, depth_maps = self._load_projection(
-            sample_dir
-        )
+        (
+            projections,
+            projections_packed,
+            projection_scales,
+            depth_maps,
+            descatter_targets,
+        ) = self._load_projection(sample_dir)
         gt = self._load_gt(sample_dir)
         rng = np.random.default_rng(self._query_seed(index))
 
@@ -244,7 +300,7 @@ class FmtSimGenProjDataset(Dataset):
             except Exception:
                 num_foci = -1
 
-        return {
+        item = {
             "sample_id": sample_dir.name,
             "projections": projections,
             "projections_packed": projections_packed,
@@ -261,3 +317,6 @@ class FmtSimGenProjDataset(Dataset):
             "projection_scales": projection_scales,
             "num_foci": num_foci,
         }
+        if descatter_targets is not None:
+            item["descatter_targets"] = descatter_targets
+        return item

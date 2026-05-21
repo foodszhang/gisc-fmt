@@ -545,3 +545,146 @@ class TransportConsensusAdapter(nn.Module):
             "adapter_delta_abs_mean": (f_out.detach() - f_mean.detach()).abs().mean(),
         }
         return f_out, stats
+
+
+class CanonicalReliabilityAggregator(nn.Module):
+    """Interpretable canonical-view aggregation for quotient transport evidence.
+
+    The canonical feature is a reliability-weighted representative of all valid
+    per-view features for the same query. Reliability is computed from physical
+    geometry only, not from feature content:
+
+      high boundary margin, low corrected depth, and low sigma are preferred.
+
+    A zero-initialized residual adapter can then make a small correction around
+    the canonical feature without changing initial behavior.
+    """
+
+    def __init__(
+        self,
+        feature_dim: int,
+        geom_dim: int = 8,
+        hidden_dim: int = 128,
+        temperature: float = 1.0,
+        residual_epsilon: float = 0.1,
+        zero_init: bool = True,
+    ) -> None:
+        super().__init__()
+        if feature_dim <= 0:
+            raise ValueError(f"feature_dim must be positive, got {feature_dim}")
+        if geom_dim != 8:
+            raise ValueError(f"CanonicalReliabilityAggregator expects compact geom_dim=8, got {geom_dim}")
+        if hidden_dim <= 0:
+            raise ValueError(f"hidden_dim must be positive, got {hidden_dim}")
+        if temperature <= 0:
+            raise ValueError(f"temperature must be positive, got {temperature}")
+        if residual_epsilon < 0:
+            raise ValueError(f"residual_epsilon must be non-negative, got {residual_epsilon}")
+
+        self.feature_dim = int(feature_dim)
+        self.geom_dim = int(geom_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.temperature = float(temperature)
+        self.residual_epsilon = float(residual_epsilon)
+        self.residual = nn.Sequential(
+            nn.Linear(self.feature_dim + self.geom_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Linear(self.hidden_dim, self.feature_dim),
+        )
+        if zero_init:
+            nn.init.zeros_(self.residual[-1].weight)
+            nn.init.zeros_(self.residual[-1].bias)
+
+    @staticmethod
+    def _safe_softmax(logits: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+        valid_bool = valid.to(dtype=torch.bool, device=logits.device)
+        has_valid = valid_bool.any(dim=-1, keepdim=True)
+        masked = logits.masked_fill(~valid_bool, -1.0e4)
+        safe = torch.where(has_valid, masked, torch.zeros_like(masked))
+        weights = torch.softmax(safe, dim=-1)
+        weights = torch.where(has_valid, weights, torch.zeros_like(weights))
+        weights = weights * valid_bool.to(dtype=weights.dtype)
+        denom = weights.sum(dim=-1, keepdim=True).clamp_min(1.0e-12)
+        weights = torch.where(has_valid, weights / denom, weights)
+        return torch.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def forward(
+        self,
+        f_view: torch.Tensor,
+        geom_view: torch.Tensor,
+        valid: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+        """Build a canonical feature from valid per-view evidence.
+
+        Args:
+            f_view: [B,N,V,C] per-view PTFA evidence.
+            geom_view: [B,N,V,8] compact geometry features:
+                grid_x, grid_y, boundary_margin, depth_eff_norm, sigma_norm,
+                sin(angle), cos(angle), valid_float.
+            valid: [B,N,V] boolean view mask.
+
+        Returns:
+            f_out: [B,N,C] canonical feature plus residual correction.
+            weights: [B,N,V] interpretable reliability weights.
+            stats: diagnostic tensors.
+        """
+        if f_view.dim() != 4:
+            raise ValueError(f"f_view must be [B,N,V,C], got {tuple(f_view.shape)}")
+        if geom_view.dim() != 4 or geom_view.shape[-1] != self.geom_dim:
+            raise ValueError(
+                f"geom_view must be [B,N,V,{self.geom_dim}], got {tuple(geom_view.shape)}"
+            )
+        if valid.dim() != 3 or valid.shape != f_view.shape[:3]:
+            raise ValueError(f"valid shape {tuple(valid.shape)} incompatible with {tuple(f_view.shape)}")
+        if geom_view.shape[:3] != f_view.shape[:3]:
+            raise ValueError(
+                f"geom_view shape {tuple(geom_view.shape)} incompatible with "
+                f"f_view {tuple(f_view.shape)}"
+            )
+        if f_view.shape[-1] != self.feature_dim:
+            raise ValueError(f"expected feature_dim={self.feature_dim}, got {f_view.shape[-1]}")
+
+        geom = geom_view.to(device=f_view.device, dtype=f_view.dtype)
+        geom = torch.nan_to_num(geom, nan=0.0, posinf=0.0, neginf=0.0)
+        grid_x = geom[..., 0]
+        grid_y = geom[..., 1]
+        boundary_margin = geom[..., 2].clamp(0.0, 1.0)
+        depth_eff_norm = geom[..., 3].clamp(0.0, 1.0)
+        sigma_norm = geom[..., 4].clamp(0.0, 1.0)
+        center_distance = torch.sqrt((grid_x.square() + grid_y.square()).clamp_min(0.0))
+
+        reliability = (
+            boundary_margin
+            + (1.0 - depth_eff_norm)
+            + (1.0 - sigma_norm)
+            - 0.25 * center_distance
+        )
+        weights = self._safe_softmax(reliability / self.temperature, valid)
+        f_canonical = (f_view * weights.unsqueeze(-1)).sum(dim=2)
+        geom_canonical = (geom * weights.unsqueeze(-1)).sum(dim=2)
+        adapter_input = torch.cat([f_canonical, geom_canonical], dim=-1)
+        adapter_input = torch.nan_to_num(adapter_input, nan=0.0, posinf=0.0, neginf=0.0)
+        delta = self.residual(adapter_input)
+        f_out = f_canonical + self.residual_epsilon * delta
+        f_out = torch.nan_to_num(f_out, nan=0.0, posinf=0.0, neginf=0.0)
+
+        valid_bool = valid.to(dtype=torch.bool, device=f_view.device)
+        valid_weights = weights[valid_bool]
+        if valid_weights.numel() == 0:
+            valid_weights = weights.new_zeros(1)
+        entropy = -(weights * torch.log(weights.clamp_min(1.0e-12))).sum(dim=-1)
+        stats = {
+            "weights": weights,
+            "f_canonical": f_canonical,
+            "delta": delta,
+            "reliability": reliability,
+            "weight_mean": valid_weights.detach().mean(),
+            "weight_std": valid_weights.detach().std(unbiased=False),
+            "weight_min": valid_weights.detach().min(),
+            "weight_max": valid_weights.detach().max(),
+            "weight_entropy": entropy.detach().mean(),
+            "canonical_norm": f_canonical.detach().norm(dim=-1).mean(),
+            "adapter_delta_norm": delta.detach().norm(dim=-1).mean(),
+            "adapter_epsilon_delta_norm": (self.residual_epsilon * delta.detach()).norm(dim=-1).mean(),
+        }
+        return f_out, weights, stats

@@ -3,7 +3,50 @@
 from __future__ import annotations
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
+
+
+class PCFSSigmaCalibrator(nn.Module):
+    """Small zero-init calibration MLP for corrected exit-depth sigma generation."""
+
+    def __init__(
+        self,
+        geom_dim: int,
+        hidden_dim: int = 64,
+        delta_max: float = 0.1,
+        norm: str = "layernorm",
+        zero_init: bool = True,
+    ) -> None:
+        super().__init__()
+        self.delta_max = float(delta_max)
+        if self.delta_max < 0:
+            raise ValueError(f"delta_max must be non-negative, got {delta_max}")
+        layers: list[nn.Module] = []
+        if norm == "layernorm":
+            layers.append(nn.LayerNorm(geom_dim))
+        elif norm not in {"none", ""}:
+            raise ValueError(f"Unsupported PCFS norm: {norm}")
+        layers.extend(
+            [
+                nn.Linear(geom_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, 1),
+            ]
+        )
+        self.net = nn.Sequential(*layers)
+        if zero_init:
+            last = self.net[-1]
+            if isinstance(last, nn.Linear):
+                nn.init.zeros_(last.weight)
+                nn.init.zeros_(last.bias)
+
+    def forward(self, geom: torch.Tensor) -> torch.Tensor:
+        """Return bounded delta_h [B,N,V] in normalized sigma-depth space."""
+        delta = torch.tanh(self.net(geom)).squeeze(-1)
+        return self.delta_max * delta
 
 
 def ptfa_sample_fixed_gaussian(
@@ -281,6 +324,61 @@ def ptfa_sample_corrected_exit_depth_gaussian(
     return features, stats
 
 
+def ptfa_sample_pcfs_corrected_exit_depth_gaussian(
+    feature_map: torch.Tensor,
+    center_grid: torch.Tensor,
+    valid_mask: torch.Tensor,
+    depth_maps: torch.Tensor,
+    query_depth: torch.Tensor,
+    sigma_min: float,
+    sigma_max: float,
+    exit_depth_max: float,
+    window: int,
+    delta_h: torch.Tensor,
+    alpha: float,
+    invert_depth: bool = True,
+    base_stats: dict[str, torch.Tensor] | None = None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Corrected exit-depth PTFA with a bounded learned sigma calibration.
+
+    The base path is identical to E8-cED when ``alpha == 0`` or the calibrator is
+    zero-initialized: h = depth_eff / exit_depth_max and sigma is mapped linearly.
+    """
+    stats = (
+        compute_exit_depth_sigma(
+            center_grid=center_grid,
+            depth_maps=depth_maps.to(feature_map.device),
+            query_depth=query_depth,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            exit_depth_max=exit_depth_max,
+            invert_depth=invert_depth,
+        )
+        if base_stats is None
+        else base_stats
+    )
+    h0 = (stats["depth_eff_mm"] / float(exit_depth_max)).clamp(0.0, 1.0)
+    if delta_h.shape != h0.shape:
+        raise ValueError(f"delta_h shape {tuple(delta_h.shape)} != h0 shape {tuple(h0.shape)}")
+    delta_h = torch.nan_to_num(delta_h.to(device=h0.device, dtype=h0.dtype), nan=0.0)
+    h = (h0 + float(alpha) * delta_h).clamp(0.0, 1.0)
+    sigma_px = float(sigma_min) + (float(sigma_max) - float(sigma_min)) * h
+    sigma_px = sigma_px.clamp(float(sigma_min), float(sigma_max))
+
+    features = _ptfa_sample_gaussian_with_sigma(
+        feature_map, center_grid, valid_mask, window, sigma_px
+    )
+    stats = {
+        **stats,
+        "h0_norm": h0,
+        "delta_h": delta_h,
+        "pcfs_alpha": torch.as_tensor(float(alpha), device=h0.device, dtype=h0.dtype),
+        "h_calibrated_norm": h,
+        "sigma_px": sigma_px,
+    }
+    return features, stats
+
+
 def _ptfa_sample_gaussian_with_sigma(
     feature_map: torch.Tensor,
     center_grid: torch.Tensor,
@@ -317,62 +415,51 @@ def _ptfa_sample_gaussian_with_sigma(
     offsets = torch.arange(-radius, radius + 1, device=device, dtype=dtype)
     dy, dx = torch.meshgrid(offsets, offsets, indexing="ij")
     offsets_xy = torch.stack([dx.reshape(-1), dy.reshape(-1)], dim=-1)
+    K = offsets_xy.shape[0]
 
     base_x = torch.round(center_x)
     base_y = torch.round(center_y)
-    out = torch.zeros(B * V, N, C, device=device, dtype=dtype)
-    denom = torch.zeros(B * V, N, device=device, dtype=dtype)
-    min_scaled_dist = torch.full((B * V, N), torch.inf, device=device, dtype=dtype)
 
-    for offset_x, offset_y in offsets_xy:
-        sample_x = base_x + offset_x
-        sample_y = base_y + offset_y
-        inside = (
-            (sample_x >= 0)
-            & (sample_x <= W - 1)
-            & (sample_y >= 0)
-            & (sample_y <= H - 1)
-            & view_valid
-        )
-        dist2 = (sample_x - center_x).square() + (sample_y - center_y).square()
-        scaled_dist = dist2 / (2.0 * sigma.square())
-        min_scaled_dist = torch.minimum(
-            min_scaled_dist, torch.where(inside, scaled_dist, min_scaled_dist)
-        )
+    sample_x = base_x.unsqueeze(-1) + offsets_xy[:, 0].view(1, 1, K)
+    sample_y = base_y.unsqueeze(-1) + offsets_xy[:, 1].view(1, 1, K)
+    inside = (
+        (sample_x >= 0)
+        & (sample_x <= W - 1)
+        & (sample_y >= 0)
+        & (sample_y <= H - 1)
+        & view_valid.unsqueeze(-1)
+    )
+    dist2 = (sample_x - center_x.unsqueeze(-1)).square() + (
+        sample_y - center_y.unsqueeze(-1)
+    ).square()
+    scaled_dist = dist2 / (2.0 * sigma.unsqueeze(-1).square())
+    masked_scaled_dist = torch.where(inside, scaled_dist, torch.full_like(scaled_dist, torch.inf))
+    min_scaled_dist = masked_scaled_dist.amin(dim=-1, keepdim=True)
+    min_scaled_dist = torch.where(
+        torch.isfinite(min_scaled_dist), min_scaled_dist, torch.zeros_like(min_scaled_dist)
+    )
+    weight = torch.exp(-(scaled_dist - min_scaled_dist)).to(dtype=dtype)
+    weight = weight * inside.to(dtype=dtype)
 
-    for offset_x, offset_y in offsets_xy:
-        sample_x = base_x + offset_x
-        sample_y = base_y + offset_y
-        inside = (
-            (sample_x >= 0)
-            & (sample_x <= W - 1)
-            & (sample_y >= 0)
-            & (sample_y <= H - 1)
-            & view_valid
-        )
-        dist2 = (sample_x - center_x).square() + (sample_y - center_y).square()
-        scaled_dist = dist2 / (2.0 * sigma.square())
-        weight = torch.exp(-(scaled_dist - min_scaled_dist)).to(dtype=dtype)
-        weight = weight * inside.to(dtype=dtype)
-
-        if W > 1:
-            grid_x = sample_x / (W - 1) * 2.0 - 1.0
-        else:
-            grid_x = torch.zeros_like(sample_x)
-        if H > 1:
-            grid_y = sample_y / (H - 1) * 2.0 - 1.0
-        else:
-            grid_y = torch.zeros_like(sample_y)
-        grid = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(1)
-        sampled = F.grid_sample(
-            feat_flat,
-            grid,
-            mode="bilinear",
-            padding_mode="zeros",
-            align_corners=True,
-        ).squeeze(2)
-        out = out + sampled.permute(0, 2, 1) * weight.unsqueeze(-1)
-        denom = denom + weight
+    if W > 1:
+        grid_x = sample_x / (W - 1) * 2.0 - 1.0
+    else:
+        grid_x = torch.zeros_like(sample_x)
+    if H > 1:
+        grid_y = sample_y / (H - 1) * 2.0 - 1.0
+    else:
+        grid_y = torch.zeros_like(sample_y)
+    grid = torch.stack([grid_x, grid_y], dim=-1).reshape(B * V, 1, N * K, 2)
+    sampled = F.grid_sample(
+        feat_flat,
+        grid,
+        mode="bilinear",
+        padding_mode="zeros",
+        align_corners=True,
+    ).squeeze(2)
+    sampled = sampled.permute(0, 2, 1).reshape(B * V, N, K, C)
+    out = (sampled * weight.unsqueeze(-1)).sum(dim=2)
+    denom = weight.sum(dim=2)
 
     out = torch.where(denom.unsqueeze(-1) > 0, out / denom.clamp_min(1.0e-12).unsqueeze(-1), out)
     return out.reshape(B, V, N, C).permute(0, 2, 1, 3)

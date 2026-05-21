@@ -1,18 +1,15 @@
-import torch
 import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from skimage.metrics import structural_similarity as ssim
 
 
-class ScatterLightLoss(nn.Module):
+class AuxProjectionLightLoss(nn.Module):
     def __init__(
         self,
-        # 散射校正损失参数
-        init_scatter_weight=1.0,  # 初始权重（训练初期）
-        target_scatter_weight=0.5,  # 目标权重（训练后期）
+        # Auxiliary projection / descatter supervision parameters
+        init_scatter_weight=1.0,  # legacy name; auxiliary projection initial weight
+        target_scatter_weight=0.5,  # legacy name; auxiliary projection target weight
         start_decay_epoch=200,  # 开始衰减的epoch
         decay_epochs=100,  # 衰减持续epoch（200→300逐步衰减）
         # SparseLightLoss参数
@@ -21,8 +18,8 @@ class ScatterLightLoss(nn.Module):
         lambda_dice=0.3,  # Soft Dice loss 权重
     ):
         super().__init__()
-        self.init_scatter_weight = init_scatter_weight
-        self.target_scatter_weight = target_scatter_weight
+        self.init_aux_projection_weight = init_scatter_weight
+        self.target_aux_projection_weight = target_scatter_weight
         self.start_decay_epoch = start_decay_epoch
         self.decay_epochs = decay_epochs
         self.current_epoch = 0  # 需外部传入当前epoch
@@ -35,23 +32,34 @@ class ScatterLightLoss(nn.Module):
         """训练循环中调用，更新当前epoch（用于权重调度）"""
         self.current_epoch = epoch
 
-    def get_dynamic_scatter_weight(self):
-        """根据当前epoch计算动态散射校正权重"""
+    def get_dynamic_aux_projection_weight(self):
+        """Compute the epoch-scheduled auxiliary projection weight."""
         if self.current_epoch < self.start_decay_epoch:
             # 训练初期：保持初始权重（优先校正）
-            return self.init_scatter_weight
+            return self.init_aux_projection_weight
         elif self.current_epoch < self.start_decay_epoch + self.decay_epochs:
             # 衰减阶段：线性降低权重
             decay_ratio = (self.current_epoch - self.start_decay_epoch) / self.decay_epochs
-            return self.init_scatter_weight - decay_ratio * (
-                self.init_scatter_weight - self.target_scatter_weight
+            return self.init_aux_projection_weight - decay_ratio * (
+                self.init_aux_projection_weight - self.target_aux_projection_weight
             )
         else:
             # 训练后期：保持目标权重（优先光源预测）
-            return self.target_scatter_weight
+            return self.target_aux_projection_weight
 
-    def scatter_correction_loss(self, pred_scatter: dict, gt_scatter: dict):
-        """散射校正损失（L1+SSIM，均为可微）"""
+    def get_dynamic_scatter_weight(self):
+        """Backward-compatible alias for older diagnostic scripts."""
+        return self.get_dynamic_aux_projection_weight()
+
+    def aux_projection_loss(self, pred_aux: dict | None, target_aux: dict | None, device):
+        """Auxiliary projection supervision loss.
+
+        When descatter targets are unavailable, the auxiliary branch is left unsupervised
+        and contributes a zero loss. This keeps new datasets without descatter labels
+        compatible without training the branch against the raw input projection.
+        """
+        if not pred_aux or target_aux is None:
+            return torch.zeros((), dtype=torch.float32, device=device)
 
         def ssim_torch(x, y, data_range=1.0, window_size=11, K1=0.01, K2=0.03, eps=1e-6):
             # x, y: [B, C, H, W] or [B, H, W], float32, 0~1
@@ -91,35 +99,51 @@ class ScatterLightLoss(nn.Module):
 
             return ssim_map.mean(dim=[1, 2, 3])  # [B]
 
-        total_scatter_loss = 0.0
-        for angle in pred_scatter.keys():
-            pred = pred_scatter[angle]
-            gt = gt_scatter[str(angle)]
+        total_aux_loss = torch.zeros((), dtype=torch.float32, device=device)
+        matched = 0
+        for angle in pred_aux.keys():
+            key = str(angle)
+            if key not in target_aux:
+                continue
+            pred = pred_aux[angle]
+            gt = target_aux[key]
             l1 = self.l1_loss(pred, gt)
             # SSIM损失（可微）
             # ssim_loss = 1 - ssim_torch(pred, gt).mean()
-            # total_scatter_loss += l1 + ssim_loss
-            total_scatter_loss += l1
-        return total_scatter_loss / len(pred_scatter)
+            # total_aux_loss += l1 + ssim_loss
+            total_aux_loss = total_aux_loss + l1
+            matched += 1
+        if matched == 0:
+            return torch.zeros((), dtype=torch.float32, device=device)
+        return total_aux_loss / matched
 
-    def forward(self, pred_scatter, gt_scatter, pred_density, gt_density):
+    def scatter_correction_loss(self, pred_scatter: dict, gt_scatter: dict):
+        """Backward-compatible alias for older diagnostic scripts."""
+        device = next(iter(pred_scatter.values())).device
+        return self.aux_projection_loss(pred_scatter, gt_scatter, device)
+
+    def forward(self, pred_aux, target_aux, pred_density, gt_density):
         # 1. 获取动态权重
-        scatter_weight = self.get_dynamic_scatter_weight()
+        aux_weight = self.get_dynamic_aux_projection_weight()
 
         # 2. 计算各部分损失
-        scatter_loss = self.scatter_correction_loss(pred_scatter, gt_scatter)
+        aux_loss = self.aux_projection_loss(pred_aux, target_aux, pred_density.device)
         light_loss = self.sparse_light_loss(pred_density, gt_density)
 
         # 3. 加权组合总损失
-        total_loss = scatter_weight * scatter_loss + light_loss
+        total_loss = aux_weight * aux_loss + light_loss
 
         # 返回损失及当前权重（便于监控）
         return {
             "total_loss": total_loss,
-            "scatter_loss": scatter_loss,
+            "aux_projection_loss": aux_loss,
             "light_loss": light_loss,
-            "scatter_weight": scatter_weight,  # 监控权重变化
+            "aux_projection_weight": aux_weight,
         }
+
+
+# Backward-compatible public name used by older scripts/configs.
+ScatterLightLoss = AuxProjectionLightLoss
 
 
 class SparseLightLoss(nn.Module):
@@ -142,7 +166,8 @@ class SparseLightLoss(nn.Module):
         self.sparse_weight = sparse_weight  # 稀疏性约束权重
         self.attn_weight = attn_weight  # 注意力约束权重
 
-        # 兼容保留：lambda_dice 已弃用（原 soft dice 权重）；若用户仅调了 lambda_dice，则映射到 lambda_tv。
+        # 兼容保留：lambda_dice 已弃用（原 soft dice 权重）。
+        # 若用户仅调了 lambda_dice，则映射到 lambda_tv。
         self.lambda_dice = lambda_dice
         self.lambda_tv = lambda_tv if not (lambda_tv == 0.3 and lambda_dice != 0.3) else lambda_dice
 

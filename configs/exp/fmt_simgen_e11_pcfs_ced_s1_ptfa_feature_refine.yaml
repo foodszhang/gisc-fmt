@@ -1,0 +1,36 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e8_ced_s1_ptfa_feature_refine
+  - _self_
+
+name: fmt_simgen_e11_pcfs_ced_s1_ptfa_feature_refine
+description: E11 PCFS calibrated corrected-exit-depth s1 PTFA feature refinement
+
+model:
+  residual_scorer:
+    enabled: false
+
+  feature_refinement:
+    enabled: true
+    input_mode: s1_ptfa
+    ptfa_view_aggregation: masked_mean
+    hidden_dim: 128
+    geom_dim: 5
+    zero_init: true
+
+  ptfa:
+    enabled: true
+    scales: ["s1"]
+    mode: pcfs_corrected_exit_depth_gaussian
+    window: 5
+    sigma_min: 0.6
+    sigma_max: 1.5
+    exit_depth_max_mm: 20.8
+    invert_depth: true
+    pcfs:
+      hidden_dim: 64
+      delta_max: 0.1
+      warmup_epochs: 10
+      norm: layernorm
+      zero_init: true

@@ -22,11 +22,15 @@ from ..network.fusion import (
 )
 from ..network.feature_refinement import FeatureRefinement
 from ..network.ptfa import (
+    PCFSSigmaCalibrator,
+    compute_exit_depth_sigma,
     ptfa_sample_corrected_exit_depth_gaussian,
     ptfa_sample_exit_depth_gaussian,
     ptfa_sample_fixed_gaussian,
+    ptfa_sample_pcfs_corrected_exit_depth_gaussian,
 )
 from ..network.query_aggregation import (
+    CanonicalReliabilityAggregator,
     ConsensusResidualGate,
     GeometryViewGate,
     MeanPriorResidualGate,
@@ -227,6 +231,12 @@ class PointDensityNet(nn.Module):
         self.ptfa_sigma_max = float(ptfa_params["sigma_max"])
         self.ptfa_exit_depth_max_mm = float(ptfa_params["exit_depth_max_mm"])
         self.ptfa_invert_depth = bool(ptfa_params["invert_depth"])
+        pcfs_params = ptfa_params["pcfs"]
+        self.pcfs_hidden_dim = int(pcfs_params["hidden_dim"])
+        self.pcfs_delta_max = float(pcfs_params["delta_max"])
+        self.pcfs_warmup_epochs = int(pcfs_params["warmup_epochs"])
+        self.pcfs_norm = str(pcfs_params["norm"])
+        self.pcfs_current_epoch = 0
         self.aggregation_mode = str(query_agg_params["aggregation_mode"])
         self.residual_scorer_enabled = bool(residual_scorer_params["enabled"])
         self.residual_scorer_lambda = float(residual_scorer_params["lambda_r"])
@@ -240,6 +250,9 @@ class PointDensityNet(nn.Module):
         self.feature_dim = feature_dim
         self.num_views = num_views
         self.config = config
+        self.store_forward_debug = bool(
+            ConfigExtractor._model_cfg(config).get("store_forward_debug", False)
+        )
 
         assert len(self.view_list) == num_views, (
             f"view_list length {len(self.view_list)} != num_views {num_views}"
@@ -491,11 +504,30 @@ class PointDensityNet(nn.Module):
                     include_dev_norm=bool(tca_cfg["include_dev_norm"]),
                     zero_init=bool(tca_cfg["zero_init"]),
                 )
+            elif self.feature_refinement_ptfa_view_aggregation == "canonical_reliability":
+                canonical_cfg = refinement_params["canonical_reliability"]
+                self.canonical_reliability_aggregator = CanonicalReliabilityAggregator(
+                    feature_dim=feature_dim,
+                    geom_dim=8,
+                    hidden_dim=int(canonical_cfg["hidden_dim"]),
+                    temperature=float(canonical_cfg["temperature"]),
+                    residual_epsilon=float(canonical_cfg["residual_epsilon"]),
+                    zero_init=bool(canonical_cfg["zero_init"]),
+                )
             elif self.feature_refinement_ptfa_view_aggregation != "masked_mean":
                 raise NotImplementedError(
                     "Unknown feature_refinement.ptfa_view_aggregation: "
                     f"{self.feature_refinement_ptfa_view_aggregation}"
                 )
+
+        if self.ptfa_mode == "pcfs_corrected_exit_depth_gaussian":
+            self.pcfs_sigma_calibrator = PCFSSigmaCalibrator(
+                geom_dim=8,
+                hidden_dim=self.pcfs_hidden_dim,
+                delta_max=self.pcfs_delta_max,
+                norm=self.pcfs_norm,
+                zero_init=bool(pcfs_params["zero_init"]),
+            )
 
         if self.aggregation_mode == "corrected_exit_ptfa_geom_gate":
             self.query_view_gate = GeometryViewGate(
@@ -525,6 +557,7 @@ class PointDensityNet(nn.Module):
     def set_training_epoch(self, epoch: int) -> None:
         """Expose Lightning's epoch to modules with epoch-dependent warmup."""
         self.mean_prior_current_epoch = int(epoch)
+        self.pcfs_current_epoch = int(epoch)
 
     def _mean_prior_alpha(self) -> float:
         warmup = max(int(getattr(self, "mean_prior_warmup_epochs", 0)), 0)
@@ -533,6 +566,13 @@ class PointDensityNet(nn.Module):
             return alpha_max
         epoch = max(int(getattr(self, "mean_prior_current_epoch", 0)), 0)
         return alpha_max * min(1.0, float(epoch) / float(warmup))
+
+    def _pcfs_alpha(self) -> float:
+        warmup = max(int(getattr(self, "pcfs_warmup_epochs", 0)), 0)
+        if warmup <= 0:
+            return 1.0
+        epoch = max(int(getattr(self, "pcfs_current_epoch", 0)), 0)
+        return min(1.0, float(epoch) / float(warmup))
 
     def _forward_shared_unet(self, multi_view_images):
         """向量化执行共享U-Net"""
@@ -850,6 +890,82 @@ class PointDensityNet(nn.Module):
         )
         return sampled, stats
 
+    def _build_pcfs_geometry_features(
+        self,
+        projection_pack: dict[str, torch.Tensor],
+        ptfa_stats: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Build PCFS calibration geometry [B,N,V,8]."""
+        grid = projection_pack["grid"]
+        dtype = grid.dtype
+        device = grid.device
+        grid_x = grid[..., 0]
+        grid_y = grid[..., 1]
+        boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
+        depth_eff_norm = (
+            ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)
+        ).clamp(0.0, 1.0)
+        raw_depth_like_norm = (
+            ptfa_stats["raw_depth_like_mm"] / float(self.ptfa_exit_depth_max_mm)
+        ).clamp(0.0, 1.0)
+        angles = torch.tensor(
+            [float(v) for v in self.view_list], device=device, dtype=dtype
+        ) * torch.pi / 180.0
+        shape = [1] * (grid_x.dim() - 1) + [len(self.view_list)]
+        sin_a = torch.sin(angles).view(*shape).expand_as(grid_x)
+        cos_a = torch.cos(angles).view(*shape).expand_as(grid_x)
+        valid_float = projection_pack["valid"].to(device=device, dtype=dtype)
+        geom = torch.stack(
+            [
+                depth_eff_norm,
+                raw_depth_like_norm,
+                boundary_margin,
+                grid_x,
+                grid_y,
+                sin_a,
+                cos_a,
+                valid_float,
+            ],
+            dim=-1,
+        )
+        return torch.nan_to_num(geom, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _ptfa_sample_pcfs_corrected_exit_depth_gaussian(
+        self,
+        view_features,
+        projection_pack: dict[str, torch.Tensor],
+        depth_maps: torch.Tensor,
+    ):
+        """Sample view features with PCFS-calibrated corrected exit-depth sigma."""
+        feature_map = self._view_feature_dict_to_tensor(view_features)
+        base_stats = compute_exit_depth_sigma(
+            center_grid=projection_pack["grid"],
+            depth_maps=depth_maps.to(feature_map.device),
+            query_depth=projection_pack["depth"],
+            sigma_min=self.ptfa_sigma_min,
+            sigma_max=self.ptfa_sigma_max,
+            exit_depth_max=self.ptfa_exit_depth_max_mm,
+            invert_depth=self.ptfa_invert_depth,
+        )
+        geom = self._build_pcfs_geometry_features(projection_pack, base_stats)
+        delta_h = self.pcfs_sigma_calibrator(geom)
+        sampled, stats = ptfa_sample_pcfs_corrected_exit_depth_gaussian(
+            feature_map,
+            projection_pack["grid"],
+            projection_pack["valid"],
+            depth_maps,
+            projection_pack["depth"],
+            sigma_min=self.ptfa_sigma_min,
+            sigma_max=self.ptfa_sigma_max,
+            exit_depth_max=self.ptfa_exit_depth_max_mm,
+            window=self.ptfa_window,
+            delta_h=delta_h,
+            alpha=self._pcfs_alpha(),
+            invert_depth=self.ptfa_invert_depth,
+            base_stats=base_stats,
+        )
+        return sampled, stats
+
     def _build_query_geometry_features(
         self,
         projection_pack: dict[str, torch.Tensor],
@@ -958,6 +1074,45 @@ class PointDensityNet(nn.Module):
                 ],
                 dim=-1,
             )
+        return torch.nan_to_num(geom, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _build_canonical_reliability_geometry_features(
+        self,
+        projection_pack: dict[str, torch.Tensor],
+        ptfa_stats: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Build compact interpretable geometry features [B,N,V,8]."""
+        grid = projection_pack["grid"]
+        dtype = grid.dtype
+        device = grid.device
+        grid_x = grid[..., 0]
+        grid_y = grid[..., 1]
+        boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
+        depth_eff_norm = (
+            ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)
+        ).clamp(0.0, 1.0)
+        denom = max(self.ptfa_sigma_max - self.ptfa_sigma_min, 1.0e-12)
+        sigma_norm = ((ptfa_stats["sigma_px"] - self.ptfa_sigma_min) / denom).clamp(0.0, 1.0)
+        valid_float = projection_pack["valid"].to(dtype=dtype)
+        angles = torch.as_tensor(
+            [float(v) for v in self.view_list], device=device, dtype=dtype
+        ) * (torch.pi / 180.0)
+        angle_feat = torch.stack([torch.sin(angles), torch.cos(angles)], dim=-1).view(
+            1, 1, self.num_views, 2
+        )
+        angle_feat = angle_feat.expand(grid.shape[0], grid.shape[1], -1, -1)
+        geom = torch.cat(
+            [
+                grid_x.unsqueeze(-1),
+                grid_y.unsqueeze(-1),
+                boundary_margin.unsqueeze(-1),
+                depth_eff_norm.unsqueeze(-1),
+                sigma_norm.unsqueeze(-1),
+                angle_feat,
+                valid_float.unsqueeze(-1),
+            ],
+            dim=-1,
+        )
         return torch.nan_to_num(geom, nan=0.0, posinf=0.0, neginf=0.0)
 
     def _build_consensus_residual_gate_input(
@@ -1133,6 +1288,15 @@ class PointDensityNet(nn.Module):
                 features_s1_dict, projection_pack, depth_maps
             )
             self.last_ptfa_stats = {k: v.detach() for k, v in ptfa_stats.items()}
+        elif self.ptfa_mode == "pcfs_corrected_exit_depth_gaussian":
+            if depth_maps is None:
+                raise ValueError(
+                    "model.ptfa.mode=pcfs_corrected_exit_depth_gaussian requires batch depth_maps"
+                )
+            s1_ptfa, ptfa_stats = self._ptfa_sample_pcfs_corrected_exit_depth_gaussian(
+                features_s1_dict, projection_pack, depth_maps
+            )
+            self.last_ptfa_stats = {k: v.detach() for k, v in ptfa_stats.items()}
         else:
             raise NotImplementedError(f"Unsupported s1 PTFA evidence mode: {self.ptfa_mode}")
 
@@ -1233,6 +1397,31 @@ class PointDensityNet(nn.Module):
             self.last_consensus_residual_gate_stats = {}
             self.last_mean_prior_residual_gate_stats = {}
             self.last_feature_refinement_anchor_loss = None
+        elif self.feature_refinement_ptfa_view_aggregation == "canonical_reliability":
+            if self.ptfa_mode not in {
+                "corrected_exit_depth_gaussian",
+                "pcfs_corrected_exit_depth_gaussian",
+            }:
+                raise ValueError(
+                    "canonical_reliability aggregation requires corrected or PCFS "
+                    "corrected-exit-depth PTFA"
+                )
+            geom_view = self._build_canonical_reliability_geometry_features(
+                projection_pack, ptfa_stats
+            )
+            s1_evidence, weights, canonical_stats = self.canonical_reliability_aggregator(
+                s1_ptfa, geom_view, projection_pack["valid"]
+            )
+            self.last_reliability_gate_weights = weights.detach()
+            self.last_reliability_gate_stats = {
+                k: v.detach() if torch.is_tensor(v) else v
+                for k, v in canonical_stats.items()
+                if k != "weights"
+            }
+            self.last_consensus_residual_gate_stats = {}
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+            self.last_feature_refinement_anchor_loss = None
         else:
             raise NotImplementedError(
                 "Unknown feature_refinement.ptfa_view_aggregation: "
@@ -1300,7 +1489,7 @@ class PointDensityNet(nn.Module):
 
         Returns:
             logits: [B, N, 1] 密度预测
-            views_no_projections: dict 辅助输出
+            aux_projections: dict auxiliary per-view projection outputs
         """
         B, N, _ = x3d.shape
 
@@ -1310,12 +1499,12 @@ class PointDensityNet(nn.Module):
         )
 
         # 门控融合辅助输出（用final尺度特征）
-        views_no_projections = {}
+        aux_projections = {}
         for v_idx, view_name in enumerate(self.view_list):
             if view_name in features_s1_dict:
                 feat = features_s1_dict[view_name]  # [B, C, H, W]
                 gate_out = self.gate_fusions[v_idx](feat)
-                views_no_projections[view_name] = gate_out.squeeze(1)
+                aux_projections[view_name] = gate_out.squeeze(1)
 
         projection_pack = None
         if points_mm is not None and self.use_fmt_simgen_projection:
@@ -1400,9 +1589,9 @@ class PointDensityNet(nn.Module):
 
                     background_logits = self.background_head(gamma_x, fused_feat_bg)
                     extra["background_logits"] = background_logits
-                    return logits, views_no_projections, extra
+                    return logits, aux_projections, extra
 
-                return logits, views_no_projections
+                return logits, aux_projections
 
             f_s1 = self._vectorized_grid_sample_fmt_pack(features_s1_dict, projection_pack)
             f_s2 = self._vectorized_grid_sample_fmt_pack(features_s2_dict, projection_pack)
@@ -1458,12 +1647,18 @@ class PointDensityNet(nn.Module):
                 raise ValueError("feature_refinement requires FMT-SimGen points_mm projection_pack")
             if not (
                 self.ptfa_enabled
-                and self.ptfa_mode in {"fixed_gaussian", "corrected_exit_depth_gaussian"}
+                and self.ptfa_mode
+                in {
+                    "fixed_gaussian",
+                    "corrected_exit_depth_gaussian",
+                    "pcfs_corrected_exit_depth_gaussian",
+                }
                 and "s1" in self.ptfa_scales
             ):
                 raise ValueError(
                     "feature_refinement requires model.ptfa.enabled=true, "
-                    "mode=fixed_gaussian or corrected_exit_depth_gaussian, "
+                    "mode=fixed_gaussian, corrected_exit_depth_gaussian, "
+                    "or pcfs_corrected_exit_depth_gaussian, "
                     "and scales containing 's1'"
                 )
             s1_evidence = self._s1_ptfa_evidence(features_s1_dict, projection_pack, depth_maps)
@@ -1475,11 +1670,14 @@ class PointDensityNet(nn.Module):
                 "delta_norm": (refined_feat.detach() - fused_feat.detach()).norm(),
                 "refined_norm": refined_feat.detach().norm(),
             }
-            self.last_feature_refinement_debug = {
-                "f_base": fused_feat.detach(),
-                "f_ptfa": s1_evidence.detach(),
-                "f_refined": refined_feat.detach(),
-            }
+            if self.store_forward_debug:
+                self.last_feature_refinement_debug = {
+                    "f_base": fused_feat.detach(),
+                    "f_ptfa": s1_evidence.detach(),
+                    "f_refined": refined_feat.detach(),
+                }
+            else:
+                self.last_feature_refinement_debug = {}
             fused_feat = refined_feat
         else:
             self.last_feature_refinement_stats = {}
@@ -1515,9 +1713,9 @@ class PointDensityNet(nn.Module):
 
             background_logits = self.background_head(gamma_x, fused_feat_bg)  # [B, N, 1]
             extra["background_logits"] = background_logits
-            return logits, views_no_projections, extra
+            return logits, aux_projections, extra
 
-        return logits, views_no_projections
+        return logits, aux_projections
 
     def _simple_pos_encoding(self, x, d_model):
         """Transformer风格的位置编码"""
