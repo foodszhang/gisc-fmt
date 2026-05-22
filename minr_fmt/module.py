@@ -11,7 +11,7 @@ from omegaconf import DictConfig
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from .loss import AuxProjectionLightLoss, compute_dice, dice_coefficient
+from .loss import AuxProjectionLightLoss, VoxelReconstructionLoss, compute_dice, dice_coefficient
 from .model_factory import ModelFactory
 from .utils.utils import get_psnr_3d, get_ssim_3d
 
@@ -146,6 +146,11 @@ class TrainingLightningModule(LightningModule):
             sparse_weight=loss_cfg.sparse_weight,
             lambda_dice=loss_cfg.dice_weight,
         )
+        self.voxel_loss_func = VoxelReconstructionLoss(
+            pos_weight=loss_cfg.pos_weight,
+            sparse_weight=loss_cfg.sparse_weight,
+            lambda_dice=loss_cfg.dice_weight,
+        )
 
     def forward(self, projections, points, points_mm=None, depth_maps=None):
         """Forward pass."""
@@ -159,9 +164,60 @@ class TrainingLightningModule(LightningModule):
             return out[0], out[1]
         raise RuntimeError(f"Unexpected model output: {type(out)}")
 
+    def _is_voxel_model(self) -> bool:
+        return str(getattr(self.cfg.model, "output_type", "")).lower() == "voxel" or str(
+            getattr(self.net, "output_type", "")
+        ).lower() == "voxel"
+
+    def _call_voxel_model(self, projections, batch):
+        if hasattr(self.net, "set_training_epoch"):
+            self.net.set_training_epoch(int(self.current_epoch))
+        out = self.net(
+            projections,
+            points=batch.get("points"),
+            points_mm=batch.get("points_mm"),
+            depth_maps=batch.get("depth_maps"),
+        )
+        if isinstance(out, dict) and "pred_voxel" in out:
+            return out["pred_voxel"], out.get("aux_outputs", {})
+        if torch.is_tensor(out):
+            return out, {}
+        raise RuntimeError(f"Unexpected voxel model output: {type(out)}")
+
+    def _voxel_target(self, batch) -> torch.Tensor:
+        if "gt_voxels" in batch:
+            return batch["gt_voxels"].float()
+        point_densities = batch["point_densities"]
+        voxel_shape = batch["feasible_voxel_shape"]
+        shape = self._shape_tuple_from_batch(voxel_shape, point_densities.shape[0])
+        if int(np.prod(shape[1:])) != point_densities.shape[1]:
+            raise ValueError("Voxel baseline requires batch.gt_voxels or full-grid point labels")
+        return point_densities.reshape(shape).float()
+
+    def _standardize_pred_voxel(self, pred_voxel, target_voxel):
+        if pred_voxel.dim() == 5 and pred_voxel.size(1) == 1:
+            pred_voxel = pred_voxel[:, 0]
+        if target_voxel.dim() == 5 and target_voxel.size(1) == 1:
+            target_voxel = target_voxel[:, 0]
+        if pred_voxel.shape[1:] != target_voxel.shape[1:]:
+            pred_voxel = torch.nn.functional.interpolate(
+                pred_voxel.unsqueeze(1),
+                size=target_voxel.shape[1:],
+                mode="trilinear",
+                align_corners=False,
+            )[:, 0]
+        return pred_voxel, target_voxel
+
     def _prepare_projection_input(self, batch):
         projections = batch["projections"]
-        if self.cfg.model.name in {"minr_fmt", "gisc_fmt"} and "projections_packed" in batch:
+        if self.cfg.model.name in {
+            "minr_fmt",
+            "gisc_fmt",
+            "point_cqr",
+            "fixed_footprint_cqr",
+            "depth_footprint_cqr",
+            "unconstrained_adaptive_cqr",
+        } and "projections_packed" in batch:
             p = batch["projections_packed"]  # [B,V,1,H,W]
             B, V = p.shape[0], p.shape[1]
             # GISC-FMT expects view-major flattening: [V*B,1,H,W]
@@ -234,6 +290,25 @@ class TrainingLightningModule(LightningModule):
         """
         projections, proj_in = self._prepare_projection_input(batch)
 
+        if self._is_voxel_model():
+            pred_voxel, aux_outputs = self._call_voxel_model(projections, batch)
+            target_voxel = self._voxel_target(batch)
+            loss_dict = self.voxel_loss_func(pred_voxel, target_voxel, aux_outputs)
+            total_loss = loss_dict["total_loss"]
+            self.log(
+                "train_loss",
+                total_loss,
+                prog_bar=True,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            for key, value in loss_dict.items():
+                if key != "total_loss" and isinstance(value, torch.Tensor):
+                    self.log(f"train_{key}", value, on_step=False, on_epoch=True, sync_dist=True)
+            self.loss_func.update_epoch(self.current_epoch)
+            return total_loss
+
         points = batch["points"]
         points_mm = batch.get("points_mm")
         depth_maps = batch.get("depth_maps")
@@ -296,6 +371,33 @@ class TrainingLightningModule(LightningModule):
             Dictionary with metrics
         """
         _projections, proj_in = self._prepare_projection_input(batch)
+
+        if self._is_voxel_model():
+            projections = batch["projections"]
+            target_voxel = self._voxel_target(batch)
+            pred_voxel, _ = self._call_voxel_model(projections, batch)
+            pred_voxel, target_voxel = self._standardize_pred_voxel(pred_voxel, target_voxel)
+            dice = dice_coefficient(
+                torch.sigmoid(pred_voxel),
+                (target_voxel > 0.0).float(),
+            )
+            self.log(
+                "val_full_dice",
+                dice,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                "val_dice",
+                dice,
+                prog_bar=True,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            return {"dice": dice}
 
         points = batch["points"]
         points_mm = batch.get("points_mm")
@@ -729,6 +831,49 @@ class TrainingLightningModule(LightningModule):
         hd95 = float(np.percentile(d, 95))
         return assd, hd95
 
+    def _volume_metrics(self, pred, gt, gt_bin, threshold: float) -> dict[str, torch.Tensor]:
+        pred_bin = (pred >= threshold).float()
+        intersection = (pred_bin * gt_bin).sum(dim=(1, 2, 3))
+        union = ((pred_bin + gt_bin) > 0).float().sum(dim=(1, 2, 3))
+        iou = ((intersection + 1e-8) / (union + 1e-8)).mean()
+
+        nrmse = (
+            torch.sqrt(torch.mean((pred - gt).square(), dim=(1, 2, 3)))
+            / (gt.amax(dim=(1, 2, 3)) - gt.amin(dim=(1, 2, 3))).clamp_min(1e-8)
+        ).mean()
+        volume_error = (
+            (pred_bin.sum(dim=(1, 2, 3)) - gt_bin.sum(dim=(1, 2, 3))).abs()
+            / gt_bin.sum(dim=(1, 2, 3)).clamp_min(1.0)
+        ).mean()
+
+        coords = torch.stack(
+            torch.meshgrid(
+                torch.arange(pred.shape[1], device=pred.device, dtype=pred.dtype),
+                torch.arange(pred.shape[2], device=pred.device, dtype=pred.dtype),
+                torch.arange(pred.shape[3], device=pred.device, dtype=pred.dtype),
+                indexing="ij",
+            ),
+            dim=-1,
+        )
+        flat_coords = coords.reshape(-1, 3)
+        pred_w = pred.reshape(pred.shape[0], -1).clamp_min(0.0)
+        gt_w = gt.reshape(gt.shape[0], -1).clamp_min(0.0)
+        pred_centroid = pred_w @ flat_coords / pred_w.sum(dim=1, keepdim=True).clamp_min(1e-8)
+        gt_centroid = gt_w @ flat_coords / gt_w.sum(dim=1, keepdim=True).clamp_min(1e-8)
+        cle = torch.linalg.norm(pred_centroid - gt_centroid, dim=1).mean()
+
+        pred_peak = flat_coords[pred.reshape(pred.shape[0], -1).argmax(dim=1)]
+        gt_peak = flat_coords[gt.reshape(gt.shape[0], -1).argmax(dim=1)]
+        ple = torch.linalg.norm(pred_peak - gt_peak, dim=1).mean()
+
+        return {
+            "iou": iou,
+            "nrmse": nrmse,
+            "volume_error": volume_error,
+            "cle": cle,
+            "ple": ple,
+        }
+
     @rank_zero_only
     def _save_proj_compare(self, gt_img, pred_img, out_path: Path, title: str):
         import matplotlib
@@ -771,19 +916,35 @@ class TrainingLightningModule(LightningModule):
         voxel_shape = batch["feasible_voxel_shape"]
 
         B = points.shape[0]
-        pred_density, _aux_projections = self._call_model(
-            proj_in, points, points_mm=points_mm, depth_maps=depth_maps
-        )
-        voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
-        full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
-        if full_grid:
-            density_gt = point_densities.reshape(voxel_shape_tuple)
+        if self._is_voxel_model():
+            target_voxel = self._voxel_target(batch)
+            pred_voxel, _aux_projections = self._call_voxel_model(projections, batch)
+            density_pred, density_gt = self._standardize_pred_voxel(pred_voxel, target_voxel)
+            density_pred = torch.sigmoid(density_pred)
             density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
-            density_pred = pred_density.reshape(voxel_shape_tuple)
+            full_grid = True
             dice = dice_coefficient(
                 density_pred, density_gt_bin, threshold=self._test_pred_threshold
             )
         else:
+            pred_density, _aux_projections = self._call_model(
+                proj_in, points, points_mm=points_mm, depth_maps=depth_maps
+            )
+            voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
+            full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+            if full_grid:
+                density_gt = point_densities.reshape(voxel_shape_tuple)
+                density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+                density_pred = pred_density.reshape(voxel_shape_tuple)
+                dice = dice_coefficient(
+                    density_pred, density_gt_bin, threshold=self._test_pred_threshold
+                )
+            else:
+                density_gt = None
+                density_gt_bin = None
+                density_pred = pred_density
+
+        if not full_grid:
             pred_bin = (pred_density.squeeze(-1) >= self._test_pred_threshold).float()
             gt_bin = (point_densities > 0.0).float()
             intersection = (pred_bin * gt_bin).sum(dim=1)
@@ -801,6 +962,12 @@ class TrainingLightningModule(LightningModule):
         )
         if not full_grid:
             return {"dice": dice}
+
+        extra_metrics = self._volume_metrics(
+            density_pred, density_gt, density_gt_bin, self._test_pred_threshold
+        )
+        for name, value in extra_metrics.items():
+            self.log(f"test_{name}", value, on_step=False, on_epoch=True, sync_dist=True)
 
         # Reconstruction metrics (PSNR/SSIM) on [0,1] via gt-based min-max normalization.
         gt_min = density_gt.amin(dim=(1, 2, 3), keepdim=True)
@@ -1009,7 +1176,6 @@ class TrainingLightningModule(LightningModule):
                             }
                         )
                     else:
-                        print("!!!!!!!", batch["range_x"])
                         rx = self._as_pair(batch["range_x"][i])
                         ry = self._as_pair(batch["range_y"][i])
                         rz = self._as_pair(batch["range_z"][i])
@@ -1103,6 +1269,12 @@ class TrainingLightningModule(LightningModule):
         # Per-sample + grouped summaries
         try:
             import csv
+
+            with open(self._test_out_dir / "metrics.csv", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["metric", "value"])
+                w.writeheader()
+                for key in sorted(metrics):
+                    w.writerow({"metric": key, "value": metrics[key]})
 
             rows = list(getattr(self, "_test_sample_metrics", []) or [])
             if rows:

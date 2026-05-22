@@ -305,6 +305,7 @@ class FmtSimGenProjDataset(Dataset):
             "projections": projections,
             "projections_packed": projections_packed,
             "depth_maps": depth_maps,
+            "gt_voxels": torch.tensor(gt, dtype=torch.float32, device=self.device),
             "points": torch.tensor(points_norm, dtype=torch.float32, device=self.device),
             "point_densities": torch.tensor(
                 point_densities, dtype=torch.float32, device=self.device
@@ -314,6 +315,9 @@ class FmtSimGenProjDataset(Dataset):
             "query_src_tag": torch.tensor(query_src_tag, dtype=torch.long, device=self.device),
             "global_voxel_shape": tuple(int(v) for v in gt.shape),
             "feasible_voxel_shape": tuple(int(v) for v in gt.shape),
+            "range_x": (0, int(gt.shape[0])),
+            "range_y": (0, int(gt.shape[1])),
+            "range_z": (0, int(gt.shape[2])),
             "projection_scales": projection_scales,
             "num_foci": num_foci,
         }

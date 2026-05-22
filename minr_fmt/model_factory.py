@@ -62,6 +62,34 @@ class ModelFactory:
         model = VoxDMRN(config=config)
         
         return model
+
+    @staticmethod
+    def create_voxel_baseline_model(model_type: str, config: Optional[Any] = None, **kwargs):
+        """Create an adapted voxel-domain baseline."""
+        if config is None:
+            raise ValueError("Voxel baseline 模型需要配置对象")
+        from .models.voxel_baselines import (
+            D2RecSTAdapted,
+            DSPGNAdapted,
+            FEM2VoxUNet,
+            FMTReconNetAdapted,
+            GenericVoxelBaseline,
+            MAPPGANAdapted,
+            PGDPNNAdapted,
+            TwoStageDeepFMTAdapted,
+        )
+
+        registry = {
+            "map_pgan": MAPPGANAdapted,
+            "d2_recst": D2RecSTAdapted,
+            "two_stage_deepfmt": TwoStageDeepFMTAdapted,
+            "fmt_reconnet": FMTReconNetAdapted,
+            "pgdpnn": PGDPNNAdapted,
+            "dspgn": DSPGNAdapted,
+            "fem2vox_unet": FEM2VoxUNet,
+        }
+        cls = registry.get(model_type, GenericVoxelBaseline)
+        return cls(config)
     
     @staticmethod
     def create_gisc_fmt_model(config: Optional[Any] = None, **kwargs):
@@ -94,12 +122,29 @@ class ModelFactory:
         
         model_type = model_type.lower()
         
-        if model_type in {"gisc_fmt", "minr_fmt"}:
+        if model_type in {
+            "gisc_fmt",
+            "minr_fmt",
+            "point_cqr",
+            "fixed_footprint_cqr",
+            "depth_footprint_cqr",
+            "unconstrained_adaptive_cqr",
+        }:
             # Prefer the new name; keep legacy alias for older configs.
             return ModelFactory.create_gisc_fmt_model(config, **kwargs)
         elif model_type == "uhr_deepfmt":
             return ModelFactory.create_uhr_deepfmt_model(config, **kwargs)
         elif model_type == "vox_dmrn":
             return ModelFactory.create_vox_dmrn_model(config, **kwargs)
+        elif model_type in {
+            "map_pgan",
+            "d2_recst",
+            "two_stage_deepfmt",
+            "fmt_reconnet",
+            "pgdpnn",
+            "dspgn",
+            "fem2vox_unet",
+        }:
+            return ModelFactory.create_voxel_baseline_model(model_type, config, **kwargs)
         else:
             raise ValueError(f"Unknown model type: {model_type}")

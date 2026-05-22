@@ -274,7 +274,7 @@ class UHRDeepFMT3DUNet(nn.Module):
 
         return volume_3d
 
-    def forward(self, projections_dict, points=None, target_proj_hw=None):
+    def forward(self, projections_dict, points=None, target_proj_hw=None, **kwargs):
         """
         Args:
             projections_dict: dict {view_name: [B, H, W]}
@@ -286,7 +286,10 @@ class UHRDeepFMT3DUNet(nn.Module):
             aux_output: dict
         """
         # 转换投影到3D（默认对齐 ROI 的 x/y 尺寸）
-        if target_proj_hw is None and points is not None:
+        if target_proj_hw is None and (
+            points is not None
+            or str(getattr(self.config.model, "output_type", "query")).lower() == "voxel"
+        ):
             target_proj_hw = (self.roi_x, self.roi_y)
         x = self._reshape_projections_to_3d(projections_dict, target_hw=target_proj_hw)
 
@@ -299,6 +302,11 @@ class UHRDeepFMT3DUNet(nn.Module):
 
         # 激活和重塑
         output = self.output_activation(output)
+        if str(getattr(self.config.model, "output_type", "query")).lower() == "voxel":
+            # Decoder is [B,1,z,x,y]; FMT-SimGen GT is indexed [x,y,z].
+            pred_voxel = output.permute(0, 1, 3, 4, 2).contiguous()
+            aux_output = {k: v for k, v in projections_dict.items()}
+            return {"pred_voxel": pred_voxel, "aux_outputs": aux_output}
         B, _, D, H, W = output.shape
         output_flat = output.view(B, -1, 1)
 

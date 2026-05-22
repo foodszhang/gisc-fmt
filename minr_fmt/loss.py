@@ -214,6 +214,62 @@ class SparseLightLoss(nn.Module):
         return total_loss
 
 
+class VoxelReconstructionLoss(nn.Module):
+    """Voxel-domain reconstruction loss for projection-to-volume baselines.
+
+    This is intentionally model-agnostic: adapted baselines expose logits in
+    ``pred_voxel`` and the LightningModule supplies the same FMT-SimGen voxel GT.
+    """
+
+    def __init__(self, pos_weight=2.0, sparse_weight=0.05, lambda_dice=0.5):
+        super().__init__()
+        self.sparse_light_loss = SparseLightLoss(
+            pos_weight=pos_weight,
+            sparse_weight=sparse_weight,
+            lambda_dice=lambda_dice,
+        )
+        self.l1_loss = nn.L1Loss()
+
+    def forward(self, pred_voxel, target_voxel, aux_outputs=None):
+        if pred_voxel.dim() == 5 and pred_voxel.size(1) == 1:
+            pred = pred_voxel[:, 0]
+        else:
+            pred = pred_voxel
+        if target_voxel.dim() == 5 and target_voxel.size(1) == 1:
+            target = target_voxel[:, 0]
+        else:
+            target = target_voxel
+        target = target.to(device=pred.device, dtype=pred.dtype)
+
+        if pred.shape[1:] != target.shape[1:]:
+            pred = F.interpolate(
+                pred.unsqueeze(1),
+                size=target.shape[1:],
+                mode="trilinear",
+                align_corners=False,
+            )[:, 0]
+
+        flat_pred = pred.reshape(pred.shape[0], -1, 1)
+        flat_target = target.reshape(target.shape[0], -1, 1)
+        light_loss = self.sparse_light_loss(flat_pred, flat_target)
+        rec_l1 = self.l1_loss(torch.sigmoid(pred), target)
+        total = light_loss + rec_l1
+
+        extra_loss = torch.zeros((), dtype=pred.dtype, device=pred.device)
+        if isinstance(aux_outputs, dict):
+            for key in ("projection_loss", "perceptual_loss", "distribution_loss"):
+                value = aux_outputs.get(key)
+                if torch.is_tensor(value):
+                    extra_loss = extra_loss + value
+        total = total + extra_loss
+        return {
+            "total_loss": total,
+            "voxel_light_loss": light_loss,
+            "voxel_l1_loss": rec_l1,
+            "voxel_aux_loss": extra_loss,
+        }
+
+
 def dice_coefficient(pred, target, threshold=0.5, eps=1e-8):
     """
     计算三维体素二分类的Dice系数
