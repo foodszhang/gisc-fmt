@@ -141,6 +141,10 @@ def sample_metadata(sample_dir: Path, stats: dict[str, dict[str, str]]) -> dict[
         "depth_tier": row.get("depth_tier", ""),
         "source_type": row.get("source_type", ""),
         "shape_set": "",
+        "shape_class": "unknown",
+        "has_sphere": 0,
+        "has_ellipsoid": 0,
+        "has_irregular": 0,
     }
     tumor_path = sample_dir / "tumor_params.json"
     if tumor_path.exists():
@@ -150,7 +154,16 @@ def sample_metadata(sample_dir: Path, stats: dict[str, dict[str, str]]) -> dict[
         meta["source_type"] = obj.get("source_type", meta["source_type"])
         shapes = [str(f.get("shape", "unknown")) for f in obj.get("foci", [])]
         if shapes:
-            meta["shape_set"] = "+".join(sorted(set(shapes)))
+            unique_shapes = sorted(set(shapes))
+            meta["shape_set"] = "+".join(unique_shapes)
+            for shape in ["sphere", "ellipsoid", "irregular"]:
+                meta[f"has_{shape}"] = int(shape in unique_shapes)
+            if len(unique_shapes) == 1:
+                meta["shape_class"] = unique_shapes[0]
+            elif len(unique_shapes) == 2:
+                meta["shape_class"] = "mixed_two_shape"
+            else:
+                meta["shape_class"] = "mixed_three_shape"
     return meta
 
 
@@ -356,6 +369,22 @@ def grouped(rows: list[dict[str, Any]], group_key: str) -> list[dict[str, Any]]:
     return out
 
 
+def grouped_multi(rows: list[dict[str, Any]], group_keys: list[str]) -> list[dict[str, Any]]:
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        parts = []
+        for key in group_keys:
+            value = row.get(key, "")
+            parts.append(f"{key}={value if value not in {'', None} else 'unknown'}")
+        buckets.setdefault(" | ".join(parts), []).append(row)
+    out = []
+    for value, group_rows in sorted(buckets.items()):
+        summary = summarize(group_rows)
+        summary.update({"group_key": " x ".join(group_keys), "group_value": value})
+        out.append(summary)
+    return out
+
+
 def write_csv(path: Path, rows: list[dict[str, Any]], fields: list[str]) -> None:
     with path.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -381,6 +410,10 @@ def write_outputs(rows: list[dict[str, Any]], save_dir: Path, run_meta: dict[str
         "depth_tier",
         "source_type",
         "shape_set",
+        "shape_class",
+        "has_sphere",
+        "has_ellipsoid",
+        "has_irregular",
         *METRIC_KEYS,
         "pred_positive_count",
         "gt_positive_count",
@@ -390,6 +423,11 @@ def write_outputs(rows: list[dict[str, Any]], save_dir: Path, run_meta: dict[str
     grouped_payload = {
         "num_foci": grouped(rows, "num_foci"),
         "depth_tier": grouped(rows, "depth_tier"),
+        "shape_set": grouped(rows, "shape_set"),
+        "shape_class": grouped(rows, "shape_class"),
+        "num_foci_depth_tier": grouped_multi(rows, ["num_foci", "depth_tier"]),
+        "shape_set_num_foci": grouped_multi(rows, ["shape_set", "num_foci"]),
+        "shape_set_depth_tier": grouped_multi(rows, ["shape_set", "depth_tier"]),
     }
     (save_dir / "metrics_grouped.json").write_text(json.dumps(grouped_payload, indent=2))
     group_fields = ["group_key", "group_value", "num_samples"]

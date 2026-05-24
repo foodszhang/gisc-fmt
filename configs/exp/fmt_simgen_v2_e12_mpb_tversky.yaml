@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e12_mpb
+  - _self_
+
+name: fmt_simgen_v2_e12_mpb_tversky
+description: GISC E12 MPB sampler with recall-oriented Tversky loss on FMT-SimGen v2
+
+loss:
+  use_tversky: true
+  tversky_alpha: 0.3
+  tversky_beta: 0.7
+  tversky_gamma: 1.0
+  tversky_weight: 0.3

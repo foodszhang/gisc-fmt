@@ -145,11 +145,21 @@ class TrainingLightningModule(LightningModule):
             pos_weight=loss_cfg.pos_weight,
             sparse_weight=loss_cfg.sparse_weight,
             lambda_dice=loss_cfg.dice_weight,
+            use_tversky=loss_cfg.get("use_tversky", True),
+            tversky_alpha=loss_cfg.get("tversky_alpha", 0.6),
+            tversky_beta=loss_cfg.get("tversky_beta", 0.4),
+            tversky_gamma=loss_cfg.get("tversky_gamma", 1.33),
+            tversky_weight=loss_cfg.get("tversky_weight", None),
         )
         self.voxel_loss_func = VoxelReconstructionLoss(
             pos_weight=loss_cfg.pos_weight,
             sparse_weight=loss_cfg.sparse_weight,
             lambda_dice=loss_cfg.dice_weight,
+            use_tversky=loss_cfg.get("use_tversky", True),
+            tversky_alpha=loss_cfg.get("tversky_alpha", 0.6),
+            tversky_beta=loss_cfg.get("tversky_beta", 0.4),
+            tversky_gamma=loss_cfg.get("tversky_gamma", 1.33),
+            tversky_weight=loss_cfg.get("tversky_weight", None),
         )
 
     def forward(self, projections, points, points_mm=None, depth_maps=None):
@@ -245,6 +255,14 @@ class TrainingLightningModule(LightningModule):
             on_epoch=True,
             sync_dist=True,
         )
+        self.log(
+            f"{prefix}_pos_count",
+            (point_densities > 0.0).float().sum().detach(),
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
 
         query_src_tag = batch.get("query_src_tag")
         if query_src_tag is None:
@@ -254,6 +272,7 @@ class TrainingLightningModule(LightningModule):
         denom = valid.float().sum().clamp_min(1.0)
         trunk_ratio = ((tags == 0).float().sum() / denom).detach()
         proposal_ratio = ((tags == 1).float().sum() / denom).detach()
+        peak_ratio = ((tags == 2).float().sum() / denom).detach()
         self.log(
             f"{prefix}_query_trunk_ratio",
             trunk_ratio,
@@ -262,6 +281,31 @@ class TrainingLightningModule(LightningModule):
             on_epoch=True,
             sync_dist=True,
         )
+        self.log(
+            f"{prefix}_query_peak_balanced_ratio",
+            peak_ratio,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        for tag_value, tag_name in (
+            (0, "trunk"),
+            (1, "meas_proposal"),
+            (2, "peak_balanced"),
+        ):
+            mask = tags == tag_value
+            tag_denom = mask.float().sum().clamp_min(1.0)
+            tag_pos_ratio = ((point_densities > 0.0).float()[mask].sum() / tag_denom).detach()
+            self.log(
+                f"{prefix}_{tag_name}_pos_ratio",
+                tag_pos_ratio,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
         self.log(
             f"{prefix}_query_proposal_ratio",
             proposal_ratio,

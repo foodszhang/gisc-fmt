@@ -16,6 +16,11 @@ class AuxProjectionLightLoss(nn.Module):
         pos_weight=150.0,
         sparse_weight=0.01,
         lambda_dice=0.3,  # Soft Dice loss 权重
+        use_tversky: bool = True,
+        tversky_alpha: float = 0.6,
+        tversky_beta: float = 0.4,
+        tversky_gamma: float = 1.33,
+        tversky_weight: float | None = None,
     ):
         super().__init__()
         self.init_aux_projection_weight = init_scatter_weight
@@ -25,7 +30,16 @@ class AuxProjectionLightLoss(nn.Module):
         self.current_epoch = 0  # 需外部传入当前epoch
 
         # 初始化子损失
-        self.sparse_light_loss = SparseLightLoss(pos_weight, sparse_weight, lambda_dice=lambda_dice)
+        self.sparse_light_loss = SparseLightLoss(
+            pos_weight,
+            sparse_weight,
+            lambda_dice=lambda_dice,
+            use_tversky=use_tversky,
+            alpha=tversky_alpha,
+            beta=tversky_beta,
+            gamma=tversky_gamma,
+            lambda_tv=lambda_dice if tversky_weight is None else tversky_weight,
+        )
         self.l1_loss = nn.L1Loss()
 
     def update_epoch(self, epoch):
@@ -155,6 +169,7 @@ class SparseLightLoss(nn.Module):
         sparse_weight=0.01,
         attn_weight=0.1,
         lambda_dice=0.3,
+        use_tversky: bool = True,
         # Focal Tversky loss 参数
         alpha: float = 0.6,
         beta: float = 0.4,
@@ -165,6 +180,7 @@ class SparseLightLoss(nn.Module):
         self.pos_weight = pos_weight  # 正样本（光源）权重
         self.sparse_weight = sparse_weight  # 稀疏性约束权重
         self.attn_weight = attn_weight  # 注意力约束权重
+        self.use_tversky = bool(use_tversky)
 
         # 兼容保留：lambda_dice 已弃用（原 soft dice 权重）。
         # 若用户仅调了 lambda_dice，则映射到 lambda_tv。
@@ -199,15 +215,17 @@ class SparseLightLoss(nn.Module):
         sparse_loss = self.sparse_weight * torch.mean(p * (1.0 - gt_density))
 
         # 3) Focal Tversky loss（按样本分别算，再 batch 平均）
-        eps = 1e-6
-        TP_b = (p * gt_density).sum(dim=1)
-        FP_b = (p * (1.0 - gt_density)).sum(dim=1)
-        FN_b = ((1.0 - p) * gt_density).sum(dim=1)
+        focal_tversky_loss = torch.zeros((), dtype=pred_density.dtype, device=pred_density.device)
+        if self.use_tversky and self.lambda_tv > 0:
+            eps = 1e-6
+            TP_b = (p * gt_density).sum(dim=1)
+            FP_b = (p * (1.0 - gt_density)).sum(dim=1)
+            FN_b = ((1.0 - p) * gt_density).sum(dim=1)
 
-        TI_b = (TP_b + eps) / (TP_b + self.alpha * FP_b + self.beta * FN_b + eps)
-        tversky_loss_b = 1.0 - TI_b
-        focal_tversky_loss_b = torch.clamp(tversky_loss_b, 0.0, 1.0).pow(self.gamma)
-        focal_tversky_loss = focal_tversky_loss_b.mean()
+            TI_b = (TP_b + eps) / (TP_b + self.alpha * FP_b + self.beta * FN_b + eps)
+            tversky_loss_b = 1.0 - TI_b
+            focal_tversky_loss_b = torch.clamp(tversky_loss_b, 0.0, 1.0).pow(self.gamma)
+            focal_tversky_loss = focal_tversky_loss_b.mean()
 
         # 4) 总损失
         total_loss = bce_loss + sparse_loss + self.lambda_tv * focal_tversky_loss
@@ -221,12 +239,27 @@ class VoxelReconstructionLoss(nn.Module):
     ``pred_voxel`` and the LightningModule supplies the same FMT-SimGen voxel GT.
     """
 
-    def __init__(self, pos_weight=2.0, sparse_weight=0.05, lambda_dice=0.5):
+    def __init__(
+        self,
+        pos_weight=2.0,
+        sparse_weight=0.05,
+        lambda_dice=0.5,
+        use_tversky: bool = True,
+        tversky_alpha: float = 0.6,
+        tversky_beta: float = 0.4,
+        tversky_gamma: float = 1.33,
+        tversky_weight: float | None = None,
+    ):
         super().__init__()
         self.sparse_light_loss = SparseLightLoss(
             pos_weight=pos_weight,
             sparse_weight=sparse_weight,
             lambda_dice=lambda_dice,
+            use_tversky=use_tversky,
+            alpha=tversky_alpha,
+            beta=tversky_beta,
+            gamma=tversky_gamma,
+            lambda_tv=lambda_dice if tversky_weight is None else tversky_weight,
         )
         self.l1_loss = nn.L1Loss()
 

@@ -305,3 +305,37 @@ Future result tables should separate:
 - `candidate_dice`: checkpoint-level candidate-domain metric.
 - `outside_fp_rate`: false-positive rate outside the measurement candidate domain.
 - Limited full-trunk sanity metrics, when affordable.
+
+### v2 multi-source improvement track
+
+The next v2 improvement track targets the observed recall drop on three-source and mixed-shape
+samples. The first two conservative variants are:
+
+```bash
+uv run python train.py fit model=gisc_fmt exp=fmt_simgen_v2_e12_mpb data.dataset_type=fmt_simgen
+uv run python train.py fit model=gisc_fmt exp=fmt_simgen_v2_e12_mpb_tversky data.dataset_type=fmt_simgen
+```
+
+`fmt_simgen_v2_e12_mpb` keeps the E12 network unchanged and changes only Non-GT sampling to
+`0.30` trunk-uniform, `0.40` measurement-proposal probability sampling, and `0.30` multi-peak
+balanced proposal sampling. The peak-balanced branch detects multiple peaks from
+`proposal/meas_backproj_heatmap.npy` only; it does not use GT boxes, GT foreground, source
+centers, or tumor metadata. Query source tags are logged as trunk, measurement proposal, and
+peak-balanced ratios with per-branch positive ratios.
+
+`fmt_simgen_v2_e12_mpb_tversky` adds recall-oriented Tversky settings on top of MPB:
+`alpha=0.3`, `beta=0.7`, `gamma=1.0`, and `weight=0.3`.
+
+Component-level evaluation is available after full-volume evaluation with saved predictions:
+
+```bash
+uv run python scripts/eval_components_fmt_simgen.py \
+  --eval_dir outputs/fmt_simgen_v2_3k_20k/test/gisc_fmt \
+  --data_dir /home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k \
+  --split test
+```
+
+For the current GISC v2 baseline on test300, component recall is `0.852` overall and `0.726` for
+`num_foci=3`. The three-source stratum averages `0.807` missed components per sample and `0.312`
+merge events per sample, confirming that the main failure mode is missed or merged secondary
+sources rather than depth-specific degradation.
