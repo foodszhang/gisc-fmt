@@ -25,6 +25,7 @@ EXPERIMENTS = [
     ("e12_mpb", "fmt_simgen_v2_e12_mpb"),
     ("e12_mpb_tversky", "fmt_simgen_v2_e12_mpb_tversky"),
 ]
+MAX_EPOCHS = 60
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,10 +71,39 @@ def selected_summary_path(name: str) -> Path:
     return SELECTION_ROOT / f"{name}_selection_summary.json"
 
 
-def train(name: str, exp: str, args: argparse.Namespace) -> None:
+def checkpoint_epoch(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    try:
+        import torch
+
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    except Exception as exc:
+        print(f"[WARN] could not read checkpoint epoch from {path}: {exc}", flush=True)
+        return None
+    epoch = ckpt.get("epoch")
+    return int(epoch) if epoch is not None else None
+
+
+def last_checkpoint(name: str) -> Path | None:
     ckpt_dir = run_dir(name) / "checkpoints"
-    if ckpt_dir.exists() and list(ckpt_dir.glob("*.ckpt")) and not args.force:
-        print(f"[SKIP] train {name}: existing checkpoints", flush=True)
+    last = ckpt_dir / "last.ckpt"
+    if last.exists():
+        return last
+    ckpts = sorted(ckpt_dir.glob("*.ckpt"), key=lambda p: p.stat().st_mtime)
+    return ckpts[-1] if ckpts else None
+
+
+def training_complete(name: str) -> bool:
+    last = last_checkpoint(name)
+    epoch = checkpoint_epoch(last) if last is not None else None
+    return epoch is not None and epoch >= MAX_EPOCHS - 1
+
+
+def train(name: str, exp: str, args: argparse.Namespace) -> None:
+    resume_ckpt = last_checkpoint(name)
+    if resume_ckpt is not None and training_complete(name) and not args.force:
+        print(f"[SKIP] train {name}: completed checkpoint {resume_ckpt}", flush=True)
         return
     cmd = [
         *PYTHON_CMD,
@@ -91,8 +121,11 @@ def train(name: str, exp: str, args: argparse.Namespace) -> None:
         "data.sample_num=32768",
         "data.eval_sample_num=32768",
         "trainer.accumulate_grad_batches=2",
-        "trainer.max_epochs=60",
+        f"trainer.max_epochs={MAX_EPOCHS}",
     ]
+    if resume_ckpt is not None and not args.force:
+        print(f"[RESUME] train {name}: {resume_ckpt}", flush=True)
+        cmd.append(f"ckpt_path={resume_ckpt}")
     run_cmd(cmd, f"{name}_train", dry_run=args.dry_run)
 
 
