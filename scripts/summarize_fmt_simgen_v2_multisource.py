@@ -141,6 +141,7 @@ def table_shape(method_rows: list[tuple[str, str, Path]]) -> list[dict[str, Any]
         grouped = read_grouped(root / "metrics_grouped.csv")
         if not grouped:
             continue
+        grouped = {**shape_class_fallback(root), **grouped}
         row: dict[str, Any] = {"method": label, "method_key": key}
         for shape in [
             "ellipsoid",
