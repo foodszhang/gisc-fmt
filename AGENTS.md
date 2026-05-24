@@ -36,3 +36,11 @@ The current history uses concise imperative commit messages, for example `Add sp
 ## Security & Configuration Tips
 
 Do not commit private datasets, generated `outputs/`, API keys, or unsplit large checkpoints unless intentionally part of a release. Prefer Hydra command-line overrides for local paths, such as `data.train_dir=/abs/path/to/train`, instead of hard-coding machine-specific paths in tracked configs.
+
+## Current FMT-SimGen v2 Findings
+
+Use `/home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k` for the v2 full comparison unless the user requests a different dataset. The fixed split keeps `train.txt` at 2400 samples and splits the original 600 validation samples into `val.txt` 300 and `test.txt` 300 with stratification by `(num_foci, depth_tier)`. The dataset includes descattered projections, and GISC-FMT should use `proj_noscatter.npz` where configured.
+
+The active comparison set excludes the CQR ablation series by user request and focuses on GISC-FMT plus paper baselines: `fem2vox_unet`, `uhr_deepfmt`, `vox_dmrn`, `two_stage_deepfmt`, `fmt_reconnet`, `pgdpnn`, `map_pgan`, `d2_recst`, and `dspgn`. Keep all comparison models on the shared Hydra/Lightning entrypoint and common v2 exp config.
+
+Latest test300 result for `gisc_fmt` selected `epoch=44-val_dice=0.6930.ckpt` by candidate Dice. Test Dice is about 0.662, IoU about 0.512, ASSD about 0.579, and HD95 about 2.123 at threshold 0.5. The main GISC-FMT weakness is multi-source recovery, not depth. By `num_foci`, Dice is about 0.761 for one focus, 0.673 for two foci, and 0.579 for three foci. Recall drops from about 0.866 to 0.558 from one to three foci, while precision drops less, indicating missed or incomplete secondary foci rather than only false positives. Depth is secondary: deep, medium, and shallow Dice are about 0.674, 0.665, and 0.647.

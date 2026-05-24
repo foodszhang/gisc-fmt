@@ -148,14 +148,17 @@ def process_sample(sample_dir: Path, params: dict[str, Any]) -> dict[str, Any]:
     heatmap_path = out_dir / "meas_backproj_heatmap.npy"
     meta_path = out_dir / "meas_backproj_meta.json"
     if heatmap_path.exists() and meta_path.exists() and not params["overwrite"]:
-        heat = np.load(heatmap_path)
-        return {
-            "sample_id": sample_dir.name,
-            "status": "skipped",
-            "min": float(heat.min()),
-            "max": float(heat.max()),
-            "mean": float(heat.mean()),
-        }
+        try:
+            heat = np.load(heatmap_path)
+            return {
+                "sample_id": sample_dir.name,
+                "status": "skipped",
+                "min": float(heat.min()),
+                "max": float(heat.max()),
+                "mean": float(heat.mean()),
+            }
+        except Exception as exc:
+            print(f"[WARN] Recomputing unreadable proposal for {sample_dir.name}: {exc}")
 
     heat, meta = compute_heatmap(sample_dir, params)
     tmp_heatmap = heatmap_path.with_suffix(".tmp.npy")

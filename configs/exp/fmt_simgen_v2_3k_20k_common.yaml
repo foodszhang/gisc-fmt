@@ -1,0 +1,81 @@
+# @package _global_
+
+name: fmt_simgen_v2_3k_20k_common
+description: Common FMT-SimGen v2 3k 20k training and evaluation protocol
+test_after_training: false
+log_config: true
+log_git_info: true
+
+data:
+  dataset_type: fmt_simgen
+  data_dir: /home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k
+  train_dir: /home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k
+  val_dir: /home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k
+  test_dir: /home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k
+  block_dir: null
+
+  sample_num: 32768
+  num_queries: 32768
+  eval_sample_num: 32768
+  voxel_size_mm: 0.2
+  view_angles: [-90, -60, -30, 0, 30, 60, 90]
+  projection_norm: per_view_max
+  projection_eps: 1.0e-8
+  descatter_target_file: proj_noscatter.npz
+  descatter_target_files: [proj_noscatter.npz, no_proj.npz]
+  descatter_target_scale: null
+
+  use_nongt_sampler: true
+  proposal_subdir: proposal
+  proposal_filename: meas_backproj_heatmap.npy
+  proposal_meta_filename: meas_backproj_meta.json
+  trunk_size_mm: [38.0, 40.0, 20.8]
+  query_sampling:
+    type: nongt_mixed
+    num_queries: ${data.num_queries}
+    trunk_uniform_ratio: 0.5
+    meas_proposal_ratio: 0.5
+    use_gt_bbox: false
+    use_gt_foreground_oversampling: false
+    use_body_mask: false
+    use_depth_silhouette_mask: false
+
+  train_max_samples: null
+  val_max_samples: null
+  test_max_samples: null
+  subset_policy: first
+  subset_seed: ${seed}
+
+  batch_size: 2
+  eval_batch_size: 1
+  num_workers: 2
+  shuffle: true
+  pin_memory: false
+  persistent_workers: false
+  prefetch_factor: 1
+  resample_queries_each_epoch: true
+  query_epoch_seed_stride: 1000003
+
+model:
+  geometry:
+    camera_distance: 200.0
+    fov_mm: 80.0
+    detector_size: [80.0, 80.0]
+    detector_resolution: [256, 256]
+    global_voxel_shape: [190, 200, 104]
+    volume_center_world: [19.0, 20.0, 10.4]
+    use_fmt_simgen_projection: true
+    transpose_feature_map_for_sampling: false
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  accumulate_grad_batches: 2
+  max_epochs: 60
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: 0
+
+test:
+  pred_threshold: 0.5
+  voxel_spacing: [0.2, 0.2, 0.2]

@@ -15,7 +15,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_SCRIPT = ROOT / "scripts" / "eval_candidate_dense_fmt_simgen.py"
 
@@ -34,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--chunk_size", type=int, default=32768)
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("overrides", nargs="*", help="Hydra overrides, e.g. model=point_cqr")
     return parser.parse_args()
 
 
@@ -96,6 +96,7 @@ def run_eval(args: argparse.Namespace, ckpt: Path, save_dir: Path, max_samples: 
         f"eval.threshold={args.threshold}",
         f"eval.seed={args.seed}",
         f"eval.save_dir={save_dir}",
+        *args.overrides,
     ]
     if max_samples is not None:
         cmd.append(f"eval.max_samples={max_samples}")

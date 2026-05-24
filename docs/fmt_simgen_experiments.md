@@ -231,6 +231,74 @@ GT ROI, GT foreground, tumor parameters, or body masks. Candidate metrics report
 inside measurement-derived cells, while outside metrics uniformly sample trunk voxels outside
 the candidate cells to estimate false positives.
 
+For controlled FMT-SimGen datasets such as `fmt_simgen_v2_3k_20k`, candidate evaluation also
+writes grouped reporting files:
+
+- `metrics_per_sample.csv`: per-sample metrics plus reporting metadata such as `depth_tier`,
+  `num_foci`, `shape_set`, and per-shape flags.
+- `metrics_grouped.json` / `metrics_grouped.csv`: metric means/stds grouped by depth tier,
+  focus count, shape combination, and shape presence.
+
+These metadata fields are used only after candidate/outside points are fixed. They are not used
+for candidate construction, sampling, model input, or loss computation.
+
+## FMT-SimGen v2 3k 20k protocol
+
+Dataset path:
+
+```bash
+/home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k
+```
+
+The fixed split keeps the original 2400-sample train split, backs up the original 600-sample
+validation split as `splits/val_full_600.txt`, and stratifies it by `(num_foci, depth_tier)` with
+seed `20260522` into `splits/val.txt` (300) and `splits/test.txt` (300). Regenerate and audit it
+with:
+
+```bash
+uv run python scripts/prepare_fmt_simgen_v2_split.py
+```
+
+The shared exp is `exp=fmt_simgen_v2_3k_20k_common`. It fixes the v2 data path, FMT-SimGen
+geometry `[190, 200, 104]`, seven views `[-90, -60, -30, 0, 30, 60, 90]`, non-GT mixed query
+sampling, and descatter supervision through `proj_noscatter.npz` with `no_proj.npz` fallback.
+GISC E12 uses `exp=fmt_simgen_v2_3k_20k_gisc_e12`, which layers PCFS/canonical reliability on top
+of the common exp. Baselines should use the common exp so they do not inherit E12
+`feature_refinement` or PCFS settings.
+
+Measurement proposals are required before training with the common exp:
+
+```bash
+uv run python scripts/precompute_measurement_proposal.py \
+  --data_dir /home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k \
+  --num_workers 1
+```
+
+Training commands:
+
+```bash
+uv run python train.py fit model=gisc_fmt exp=fmt_simgen_v2_3k_20k_gisc_e12 data.dataset_type=fmt_simgen
+uv run python train.py fit model=uhr_deepfmt exp=fmt_simgen_v2_3k_20k_common data.dataset_type=fmt_simgen
+uv run python train.py fit model=vox_dmrn exp=fmt_simgen_v2_3k_20k_common data.dataset_type=fmt_simgen
+```
+
+Use the same common exp for `point_cqr`, `fixed_footprint_cqr`, `depth_footprint_cqr`,
+`unconstrained_adaptive_cqr`, `fem2vox_unet`, `two_stage_deepfmt`, `fmt_reconnet`, `pgdpnn`,
+`map_pgan`, `d2_recst`, and `dspgn`.
+
+Final full-volume evaluation uses a fixed threshold of `0.5` and writes `metrics.csv`,
+`metrics_per_sample.csv`, `metrics_grouped.csv`, `metrics_grouped.json`, and optional
+`predictions/*.npz`:
+
+```bash
+uv run python scripts/eval_full_volume_fmt_simgen.py \
+  model=gisc_fmt exp=fmt_simgen_v2_3k_20k_gisc_e12 data.dataset_type=fmt_simgen \
+  --ckpt_path /path/to/checkpoint.ckpt \
+  --split test \
+  --threshold 0.5 \
+  --save_predictions
+```
+
 Future result tables should separate:
 
 - `val_query_dice`: fast sampled-query training monitor.

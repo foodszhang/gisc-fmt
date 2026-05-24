@@ -3,6 +3,9 @@
 
 Candidate allocation uses only measurement-derived proposal heatmaps. GT voxels are read only
 after candidate/outside points are fixed, to compute labels and metrics.
+
+Reporting metadata such as depth tier, focus count, and shape labels is read only after
+candidate/outside points are fixed. It is used exclusively for grouped metric summaries.
 """
 
 from __future__ import annotations
@@ -143,6 +146,46 @@ def load_gt(sample_dir: Path) -> np.ndarray:
     if gt_max > 0:
         gt = gt / gt_max
     return gt
+
+
+def load_sample_statistics(data_dir: Path) -> dict[str, dict[str, str]]:
+    """Load generation-control metadata for grouped reporting only."""
+    stats_path = data_dir / "sample_statistics.csv"
+    if not stats_path.exists():
+        return {}
+    with stats_path.open(newline="") as f:
+        return {row["sample_id"]: row for row in csv.DictReader(f)}
+
+
+def sample_report_metadata(sample_dir: Path, stats: dict[str, dict[str, str]]) -> dict[str, Any]:
+    """Return non-allocation metadata used only in metrics CSV/grouped summaries."""
+    row = dict(stats.get(sample_dir.name, {}))
+    meta: dict[str, Any] = {
+        "num_foci": row.get("num_foci", ""),
+        "depth_tier": row.get("depth_tier", ""),
+        "depth_mm": row.get("depth_mm", ""),
+        "source_type": row.get("source_type", ""),
+        "shape_set": "",
+        "shape_counts": "",
+        "has_sphere": 0,
+        "has_ellipsoid": 0,
+        "has_irregular": 0,
+    }
+    tumor_path = sample_dir / "tumor_params.json"
+    if tumor_path.exists():
+        obj = json.loads(tumor_path.read_text())
+        meta["num_foci"] = obj.get("num_foci", meta["num_foci"])
+        meta["depth_tier"] = obj.get("depth_tier", meta["depth_tier"])
+        meta["depth_mm"] = obj.get("depth_mm", meta["depth_mm"])
+        meta["source_type"] = obj.get("source_type", meta["source_type"])
+        shapes = [str(f.get("shape", "unknown")) for f in obj.get("foci", [])]
+        if shapes:
+            counts = {shape: shapes.count(shape) for shape in sorted(set(shapes))}
+            meta["shape_set"] = "+".join(sorted(set(shapes)))
+            meta["shape_counts"] = ";".join(f"{k}:{v}" for k, v in counts.items())
+            for shape in ["sphere", "ellipsoid", "irregular"]:
+                meta[f"has_{shape}"] = int(shape in counts)
+    return meta
 
 
 def candidate_cells(
@@ -347,6 +390,7 @@ def evaluate_sample(
     device: torch.device,
     idx: int,
     save_dir: Path,
+    stats: dict[str, dict[str, str]],
 ):
     rng = np.random.default_rng(int(ev["seed"]) + idx)
     loader = FmtSimGenProjDataset(
@@ -414,6 +458,7 @@ def evaluate_sample(
     row.update(
         {
             "sample_id": sample_dir.name,
+            **sample_report_metadata(sample_dir, stats),
             "outside_fp_rate": float((outside_pred >= ev["threshold"]).mean()),
             "outside_mean_pred": float(outside_pred.mean()),
             "outside_max_pred": float(outside_pred.max()),
@@ -440,6 +485,15 @@ def write_outputs(rows: list[dict[str, Any]], summary: dict[str, Any], save_dir:
     save_dir.mkdir(parents=True, exist_ok=True)
     fields = [
         "sample_id",
+        "num_foci",
+        "depth_tier",
+        "depth_mm",
+        "source_type",
+        "shape_set",
+        "shape_counts",
+        "has_sphere",
+        "has_ellipsoid",
+        "has_irregular",
         "candidate_dice",
         "candidate_precision",
         "candidate_recall",
@@ -461,11 +515,82 @@ def write_outputs(rows: list[dict[str, Any]], summary: dict[str, Any], save_dir:
         writer.writeheader()
         writer.writerows(rows)
     (save_dir / "metrics_summary.json").write_text(json.dumps(summary, indent=2))
+    grouped = grouped_summaries(rows)
+    (save_dir / "metrics_grouped.json").write_text(json.dumps(grouped, indent=2))
+    write_grouped_csv(grouped, save_dir / "metrics_grouped.csv")
 
 
 def mean_std(rows: list[dict[str, Any]], key: str) -> tuple[float, float]:
     values = np.asarray([float(row[key]) for row in rows], dtype=np.float64)
     return float(values.mean()), float(values.std())
+
+
+def grouped_summaries(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for key in [
+        "depth_tier",
+        "num_foci",
+        "shape_set",
+        "has_sphere",
+        "has_ellipsoid",
+        "has_irregular",
+    ]:
+        buckets: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            value = row.get(key, "")
+            if value in {"", None}:
+                value = "unknown"
+            buckets.setdefault(str(value), []).append(row)
+        groups[key] = [summarize_group(key, value, bucket) for value, bucket in sorted(buckets.items())]
+    return groups
+
+
+def summarize_group(group_key: str, group_value: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "group_key": group_key,
+        "group_value": group_value,
+        "num_samples": len(rows),
+    }
+    for key in [
+        "candidate_dice",
+        "candidate_precision",
+        "candidate_recall",
+        "outside_fp_rate",
+        "outside_p95_pred",
+        "candidate_positive_ratio",
+        "candidate_num_points",
+    ]:
+        mean, std = mean_std(rows, key)
+        out[f"mean_{key}"] = mean
+        out[f"std_{key}"] = std
+    return out
+
+
+def write_grouped_csv(grouped: dict[str, list[dict[str, Any]]], path: Path) -> None:
+    fields = [
+        "group_key",
+        "group_value",
+        "num_samples",
+        "mean_candidate_dice",
+        "std_candidate_dice",
+        "mean_candidate_precision",
+        "std_candidate_precision",
+        "mean_candidate_recall",
+        "std_candidate_recall",
+        "mean_outside_fp_rate",
+        "std_outside_fp_rate",
+        "mean_outside_p95_pred",
+        "std_outside_p95_pred",
+        "mean_candidate_positive_ratio",
+        "std_candidate_positive_ratio",
+        "mean_candidate_num_points",
+        "std_candidate_num_points",
+    ]
+    rows = [row for group_rows in grouped.values() for row in group_rows]
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def main() -> None:
@@ -490,6 +615,7 @@ def main() -> None:
     net = load_net(cfg, Path(ev["ckpt_path"]), device)
     data_dir = str(cfg.data.val_dir if ev["split"] == "val" else cfg.data.test_dir)
     sample_dirs = sample_dirs_for_split(data_dir, cfg, ev["split"], ev["max_samples"])
+    stats = load_sample_statistics(Path(data_dir))
     save_dir = Path(
         ev["save_dir"] or (Path(cfg.paths.output_dir) / f"candidate_eval_{ev['split']}")
     )
@@ -497,7 +623,7 @@ def main() -> None:
 
     rows = []
     for i, sample_dir in enumerate(sample_dirs):
-        row = evaluate_sample(sample_dir, net, cfg, ev, device, i, save_dir)
+        row = evaluate_sample(sample_dir, net, cfg, ev, device, i, save_dir, stats)
         rows.append(row)
         print(
             f"{row['sample_id']}: candidate_dice={row['candidate_dice']:.4f} "

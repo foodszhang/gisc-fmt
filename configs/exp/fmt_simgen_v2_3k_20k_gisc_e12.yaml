@@ -1,0 +1,46 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_3k_20k_common
+  - _self_
+
+name: fmt_simgen_v2_3k_20k_gisc_e12
+description: GISC E12 canonical PCFS protocol on FMT-SimGen v2 3k 20k
+
+optim:
+  scheduler:
+    warmup_epochs: 5
+    warmup_start_factor: 0.05
+
+model:
+  residual_scorer:
+    enabled: false
+
+  feature_refinement:
+    enabled: true
+    input_mode: s1_ptfa
+    ptfa_view_aggregation: canonical_reliability
+    hidden_dim: 128
+    geom_dim: 5
+    zero_init: true
+    canonical_reliability:
+      hidden_dim: 128
+      temperature: 1.0
+      residual_epsilon: 0.1
+      zero_init: true
+
+  ptfa:
+    enabled: true
+    scales: ["s1"]
+    mode: pcfs_corrected_exit_depth_gaussian
+    window: 5
+    sigma_min: 0.6
+    sigma_max: 1.5
+    exit_depth_max_mm: 20.8
+    invert_depth: true
+    pcfs:
+      hidden_dim: 64
+      delta_max: 0.1
+      warmup_epochs: 10
+      norm: layernorm
+      zero_init: true
