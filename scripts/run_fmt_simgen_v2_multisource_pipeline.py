@@ -129,6 +129,13 @@ def train(name: str, exp: str, args: argparse.Namespace) -> None:
         f"trainer.max_epochs={MAX_EPOCHS}",
         f"trainer.check_val_every_n_epoch={CHECK_VAL_EVERY_N_EPOCH}",
         f"callbacks.checkpoint.every_n_epochs={CHECK_VAL_EVERY_N_EPOCH}",
+        "callbacks.checkpoint.save_last=false",
+        "+callbacks.last_checkpoint._target_=pytorch_lightning.callbacks.ModelCheckpoint",
+        f"+callbacks.last_checkpoint.dirpath={run_dir(name) / 'checkpoints'}",
+        "+callbacks.last_checkpoint.save_top_k=0",
+        "+callbacks.last_checkpoint.save_last=true",
+        "+callbacks.last_checkpoint.every_n_epochs=1",
+        "+callbacks.last_checkpoint.save_on_train_epoch_end=true",
     ]
     if resume_ckpt is not None and not args.force:
         print(f"[RESUME] train {name}: {resume_ckpt}", flush=True)
