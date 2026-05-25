@@ -26,6 +26,7 @@ EXPERIMENTS = [
     ("e12_mpb_tversky", "fmt_simgen_v2_e12_mpb_tversky"),
 ]
 MAX_EPOCHS = 60
+CHECK_VAL_EVERY_N_EPOCH = 5
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,6 +96,8 @@ def last_checkpoint(name: str) -> Path | None:
 
 
 def training_complete(name: str) -> bool:
+    if (TEST_ROOT / name / "metrics.csv").exists():
+        return True
     last = last_checkpoint(name)
     epoch = checkpoint_epoch(last) if last is not None else None
     return epoch is not None and epoch >= MAX_EPOCHS - 1
@@ -122,6 +125,8 @@ def train(name: str, exp: str, args: argparse.Namespace) -> None:
         "data.eval_sample_num=32768",
         "trainer.accumulate_grad_batches=2",
         f"trainer.max_epochs={MAX_EPOCHS}",
+        f"trainer.check_val_every_n_epoch={CHECK_VAL_EVERY_N_EPOCH}",
+        f"callbacks.checkpoint.every_n_epochs={CHECK_VAL_EVERY_N_EPOCH}",
     ]
     if resume_ckpt is not None and not args.force:
         print(f"[RESUME] train {name}: {resume_ckpt}", flush=True)
