@@ -88,10 +88,12 @@ def checkpoint_epoch(path: Path) -> int | None:
 
 def last_checkpoint(name: str) -> Path | None:
     ckpt_dir = run_dir(name) / "checkpoints"
-    last = ckpt_dir / "last.ckpt"
-    if last.exists():
-        return last
-    ckpts = sorted(ckpt_dir.glob("*.ckpt"), key=lambda p: p.stat().st_mtime)
+    last_ckpts = list(ckpt_dir.glob("last*.ckpt"))
+    if last_ckpts:
+        return sorted(last_ckpts, key=lambda p: (checkpoint_epoch(p) or -1, p.stat().st_mtime))[-1]
+    ckpts = sorted(
+        ckpt_dir.glob("*.ckpt"), key=lambda p: (checkpoint_epoch(p) or -1, p.stat().st_mtime)
+    )
     return ckpts[-1] if ckpts else None
 
 
