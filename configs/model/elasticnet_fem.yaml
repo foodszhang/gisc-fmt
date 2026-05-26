@@ -1,0 +1,12 @@
+name: elasticnet_fem
+output_type: voxel
+num_views: 7
+fem:
+  shared_dir: /home/foods/pro/FMT-SimGen/output/shared_mesh_20k
+elasticnet_fem:
+  lambda_l1: 1.0e-4
+  lambda_l2: 1.0e-3
+  num_iters: 200
+  step_size: 0.0
+  nonnegative: true
+  select_lambda_on_val: true

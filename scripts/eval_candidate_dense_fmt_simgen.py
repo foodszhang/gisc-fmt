@@ -330,6 +330,7 @@ def forward_points(
     net,
     proj_in: torch.Tensor,
     depth_maps: torch.Tensor,
+    source_hypotheses: dict[str, torch.Tensor] | None,
     ijk: np.ndarray,
     points_mm: np.ndarray,
     gt_shape: tuple[int, int, int],
@@ -342,12 +343,40 @@ def forward_points(
             end = min(start + chunk_size, len(ijk))
             points = points_to_norm(ijk[start:end], gt_shape).to(device)
             mm = torch.tensor(points_mm[start:end], dtype=torch.float32).unsqueeze(0).to(device)
-            pred, _aux = net(proj_in, points, points_mm=mm, depth_maps=depth_maps)
+            pred, _aux = net(
+                proj_in,
+                points,
+                points_mm=mm,
+                depth_maps=depth_maps,
+                source_hypotheses=source_hypotheses,
+            )
             value = torch.sigmoid(pred.squeeze(0).squeeze(-1))
             if not torch.isfinite(value).all():
                 raise RuntimeError("Model prediction contains NaN/Inf")
             preds.append(value.detach().cpu().numpy())
     return np.concatenate(preds, axis=0)
+
+
+def source_hypotheses_for_sample(
+    loader: FmtSimGenProjDataset,
+    sample_dir: Path,
+    device: torch.device,
+) -> dict[str, torch.Tensor] | None:
+    if not getattr(loader, "source_hypothesis_enabled", False):
+        return None
+    source_hyp = loader._load_source_hypotheses(sample_dir)
+    return {
+        "centers": torch.tensor(
+            source_hyp["centers"], dtype=torch.float32, device=device
+        ).unsqueeze(0),
+        "peak_scores": torch.tensor(
+            source_hyp["peak_scores"], dtype=torch.float32, device=device
+        ).unsqueeze(0),
+        "scales": torch.tensor(
+            source_hyp["scales"], dtype=torch.float32, device=device
+        ).unsqueeze(0),
+        "valid": torch.tensor(source_hyp["valid"], dtype=torch.float32, device=device).unsqueeze(0),
+    }
 
 
 def binary_metrics(pred: np.ndarray, label: np.ndarray, threshold: float) -> dict[str, float]:
@@ -402,6 +431,7 @@ def evaluate_sample(
     )
     proj_in = pack_projection_input(projections_packed).to(device)
     depth_maps = depth_maps_tensor.unsqueeze(0).to(device)
+    source_hypotheses = source_hypotheses_for_sample(loader, sample_dir, device)
 
     gt_shape = tuple(int(v) for v in cfg.model.geometry.global_voxel_shape)
     cells, _heatmap, meta = candidate_cells(
@@ -419,6 +449,7 @@ def evaluate_sample(
         net,
         proj_in,
         depth_maps,
+        source_hypotheses,
         cand_ijk,
         cand_mm,
         gt_shape,
@@ -443,6 +474,7 @@ def evaluate_sample(
         net,
         proj_in,
         depth_maps,
+        source_hypotheses,
         out_ijk,
         out_mm,
         gt_shape,

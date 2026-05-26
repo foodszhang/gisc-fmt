@@ -1,0 +1,12 @@
+name: gaicn
+output_type: voxel
+num_views: 7
+fem:
+  shared_dir: /home/foods/pro/FMT-SimGen/output/shared_mesh_20k
+gaicn:
+  num_phases: 6
+  hidden_channels: 8
+  beta_init: 1.0e-2
+  rho_init: 1.0e-3
+  threshold_init: 1.0e-3
+  use_stage1_as_init: true

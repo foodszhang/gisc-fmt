@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,7 +30,19 @@ def _projection_tensor(projections) -> torch.Tensor:
             return projections.squeeze(2)
         return projections
     keys = sorted(projections.keys(), key=lambda x: float(x))
-    return torch.stack([projections[k] for k in keys], dim=1)
+    x = torch.stack([projections[k] for k in keys], dim=1)
+    if x.dim() == 5 and x.size(2) == 1:
+        x = x.squeeze(2)
+    return x
+
+
+def _identity_affine(device, dtype, batch_size: int) -> torch.Tensor:
+    theta = torch.tensor(
+        [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
+        device=device,
+        dtype=dtype,
+    )
+    return theta.view(1, 3, 4).expand(batch_size, -1, -1).contiguous()
 
 
 class ConvBlock3d(nn.Module):
@@ -47,27 +61,45 @@ class ConvBlock3d(nn.Module):
         return self.net(x)
 
 
-class SmallVNet(nn.Module):
+class VNet3D(nn.Module):
+    """V-Net style encoder-decoder with 3 pooling and 3 transposed upsampling layers."""
+
     def __init__(self, in_ch: int, base_ch: int, out_ch: int = 1):
         super().__init__()
         self.enc1 = ConvBlock3d(in_ch, base_ch)
+        self.down1 = nn.MaxPool3d(2, ceil_mode=True)
         self.enc2 = ConvBlock3d(base_ch, base_ch * 2)
-        self.mid = ConvBlock3d(base_ch * 2, base_ch * 4)
-        self.dec2 = ConvBlock3d(base_ch * 4 + base_ch * 2, base_ch * 2)
-        self.dec1 = ConvBlock3d(base_ch * 2 + base_ch, base_ch)
+        self.down2 = nn.MaxPool3d(2, ceil_mode=True)
+        self.enc3 = ConvBlock3d(base_ch * 2, base_ch * 4)
+        self.down3 = nn.MaxPool3d(2, ceil_mode=True)
+        self.mid = ConvBlock3d(base_ch * 4, base_ch * 8)
+        self.up3 = nn.ConvTranspose3d(base_ch * 8, base_ch * 4, 2, stride=2)
+        self.dec3 = ConvBlock3d(base_ch * 8, base_ch * 4)
+        self.up2 = nn.ConvTranspose3d(base_ch * 4, base_ch * 2, 2, stride=2)
+        self.dec2 = ConvBlock3d(base_ch * 4, base_ch * 2)
+        self.up1 = nn.ConvTranspose3d(base_ch * 2, base_ch, 2, stride=2)
+        self.dec1 = ConvBlock3d(base_ch * 2, base_ch)
         self.out = nn.Conv3d(base_ch, out_ch, 1)
+
+    def _match(self, x: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+        if x.shape[2:] == ref.shape[2:]:
+            return x
+        return F.interpolate(x, size=ref.shape[2:], mode="trilinear", align_corners=False)
 
     def forward(self, x, return_features: bool = False):
         e1 = self.enc1(x)
-        e2 = self.enc2(F.avg_pool3d(e1, 2, ceil_mode=True))
-        m = self.mid(F.avg_pool3d(e2, 2, ceil_mode=True))
-        d2 = F.interpolate(m, size=e2.shape[2:], mode="trilinear", align_corners=False)
+        e2 = self.enc2(self.down1(e1))
+        e3 = self.enc3(self.down2(e2))
+        m = self.mid(self.down3(e3))
+        d3 = self._match(self.up3(m), e3)
+        d3 = self.dec3(torch.cat([d3, e3], dim=1))
+        d2 = self._match(self.up2(d3), e2)
         d2 = self.dec2(torch.cat([d2, e2], dim=1))
-        d1 = F.interpolate(d2, size=e1.shape[2:], mode="trilinear", align_corners=False)
+        d1 = self._match(self.up1(d2), e1)
         d1 = self.dec1(torch.cat([d1, e1], dim=1))
         out = self.out(d1)
         if return_features:
-            return out, [e1, e2, m, d2, d1]
+            return out, [e1, e2, e3, m, d3, d2, d1]
         return out
 
 
@@ -92,7 +124,7 @@ class ProjectionEncoder2D(nn.Module):
 
 
 class ProjectionToVoxelNet(nn.Module):
-    """Shared projection-to-volume backbone used only by adapted voxel baselines."""
+    """Simple generic projection-to-volume backbone kept for non-priority baselines."""
 
     output_type = "voxel"
 
@@ -106,12 +138,10 @@ class ProjectionToVoxelNet(nn.Module):
         latent = int(getattr(params, "latent_channels", base * 4))
         self.encoder = ProjectionEncoder2D(self.num_views, base)
         self.fc = nn.Linear(self.encoder.out_channels, latent)
-        self.decoder = SmallVNet(latent, base)
+        self.decoder = VNet3D(latent, base)
 
     def projection_features(self, projections):
-        x = _projection_tensor(projections)
-        feat = self.encoder(x)
-        return feat
+        return self.encoder(_projection_tensor(projections))
 
     def coarse_volume(self, projections):
         feat = self.projection_features(projections)
@@ -122,6 +152,441 @@ class ProjectionToVoxelNet(nn.Module):
     def forward(self, projections, *args, **kwargs):
         pred = self.decoder(self.coarse_volume(projections))
         return {"pred_voxel": pred, "aux_outputs": {}}
+
+
+class CNN3DBaseline(nn.Module):
+    """Light 3D-CNN baseline using boundary-shell projection embedding."""
+
+    output_type = "voxel"
+
+    def __init__(self, config):
+        super().__init__()
+        params = _model_section(config, "cnn3d_baseline")
+        self.config = config
+        self.roi_shape = _roi_shape(config)
+        base = int(getattr(params, "base_channels", 8))
+        self.builder = SurfaceVolumeBuilder(self.roi_shape, config.data.view_angles)
+        self.net = VNet3D(1, base, 1)
+
+    def forward(self, projections, *args, **kwargs):
+        logits = self.net(self.builder(projections))
+        return {"pred_voxel": logits, "aux_outputs": {"output_space": "full_voxel"}}
+
+
+class TransformerBottleneck3D(nn.Module):
+    def __init__(self, channels: int, num_heads: int = 4, max_tokens: int = 512):
+        super().__init__()
+        heads = max(1, min(num_heads, channels))
+        while channels % heads != 0 and heads > 1:
+            heads -= 1
+        self.max_tokens = int(max_tokens)
+        self.norm = nn.LayerNorm(channels)
+        self.attn = nn.MultiheadAttention(channels, heads, batch_first=True)
+        self.ffn = nn.Sequential(
+            nn.LayerNorm(channels),
+            nn.Linear(channels, channels * 4),
+            nn.GELU(),
+            nn.Linear(channels * 4, channels),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, d, h, w = x.shape
+        pooled_size = None
+        if d * h * w > self.max_tokens:
+            scale = (self.max_tokens / float(d * h * w)) ** (1.0 / 3.0)
+            pooled_size = (
+                max(1, int(round(d * scale))),
+                max(1, int(round(h * scale))),
+                max(1, int(round(w * scale))),
+            )
+            y = F.adaptive_avg_pool3d(x, pooled_size)
+        else:
+            y = x
+        tokens = y.flatten(2).transpose(1, 2)
+        attn_in = self.norm(tokens)
+        tokens = tokens + self.attn(attn_in, attn_in, attn_in, need_weights=False)[0]
+        tokens = tokens + self.ffn(tokens)
+        y = tokens.transpose(1, 2).view(b, c, *y.shape[2:])
+        if pooled_size is not None:
+            y = F.interpolate(y, size=(d, h, w), mode="trilinear", align_corners=False)
+        return x + y
+
+
+class TransUNet3DBaseline(nn.Module):
+    """3D-TransUNet style baseline, intentionally separate from PAH2T-Former."""
+
+    output_type = "voxel"
+
+    def __init__(self, config):
+        super().__init__()
+        params = _model_section(config, "transunet3d_baseline")
+        self.roi_shape = _roi_shape(config)
+        base = int(getattr(params, "base_channels", 8))
+        heads = int(getattr(params, "num_heads", 4))
+        max_tokens = int(getattr(params, "max_tokens", 512))
+        self.builder = SurfaceVolumeBuilder(self.roi_shape, config.data.view_angles)
+        self.enc1 = ConvBlock3d(1, base)
+        self.down1 = nn.MaxPool3d(2, ceil_mode=True)
+        self.enc2 = ConvBlock3d(base, base * 2)
+        self.down2 = nn.MaxPool3d(2, ceil_mode=True)
+        self.enc3 = ConvBlock3d(base * 2, base * 4)
+        self.trans = TransformerBottleneck3D(base * 4, heads, max_tokens)
+        self.up2 = nn.ConvTranspose3d(base * 4, base * 2, 2, stride=2)
+        self.dec2 = ConvBlock3d(base * 4, base * 2)
+        self.up1 = nn.ConvTranspose3d(base * 2, base, 2, stride=2)
+        self.dec1 = ConvBlock3d(base * 2, base)
+        self.out = nn.Conv3d(base, 1, 1)
+
+    @staticmethod
+    def _match(x, ref):
+        if x.shape[2:] == ref.shape[2:]:
+            return x
+        return F.interpolate(x, size=ref.shape[2:], mode="trilinear", align_corners=False)
+
+    def forward(self, projections, *args, **kwargs):
+        x = self.builder(projections)
+        e1 = self.enc1(x)
+        e2 = self.enc2(self.down1(e1))
+        e3 = self.trans(self.enc3(self.down2(e2)))
+        d2 = self._match(self.up2(e3), e2)
+        d2 = self.dec2(torch.cat([d2, e2], dim=1))
+        d1 = self._match(self.up1(d2), e1)
+        d1 = self.dec1(torch.cat([d1, e1], dim=1))
+        return {"pred_voxel": self.out(d1), "aux_outputs": {"output_space": "full_voxel"}}
+
+
+class SurfaceVolumeBuilder(nn.Module):
+    """Embed sparse-view projections onto a 3D cube boundary shell.
+
+    Projections are resized and splatted onto cube faces according to view angle.
+    Intermediate oblique views contribute to adjacent x/y faces using cosine weights.
+    No global pooling or latent expansion is used.
+    """
+
+    def __init__(self, roi_shape: tuple[int, int, int], view_angles):
+        super().__init__()
+        self.roi_shape = tuple(int(v) for v in roi_shape)
+        self.view_angles = [int(v) for v in view_angles]
+
+    @staticmethod
+    def _norm_projection(x: torch.Tensor) -> torch.Tensor:
+        x = torch.nan_to_num(x.float(), nan=0.0, posinf=0.0, neginf=0.0)
+        amin = x.amin(dim=(-2, -1), keepdim=True)
+        amax = x.amax(dim=(-2, -1), keepdim=True)
+        return ((x - amin) / (amax - amin).clamp_min(1e-6)).clamp(0.0, 1.0)
+
+    def _add_y_face(self, vol, weight, image, y_index: int):
+        x, _y, z = self.roi_shape
+        face = F.interpolate(image, size=(x, z), mode="bilinear", align_corners=False)
+        vol[:, :, :, y_index, :] += weight * face
+
+    def _add_x_face(self, vol, weight, image, x_index: int):
+        _x, y, z = self.roi_shape
+        face = F.interpolate(image, size=(y, z), mode="bilinear", align_corners=False)
+        vol[:, :, x_index, :, :] += weight * face
+
+    def forward(self, projections) -> torch.Tensor:
+        p = self._norm_projection(_projection_tensor(projections))
+        b = p.shape[0]
+        x, y, z = self.roi_shape
+        vol = p.new_zeros((b, 1, x, y, z))
+        weight = p.new_zeros((b, 1, x, y, z))
+        for idx, angle in enumerate(self.view_angles):
+            image = p[:, idx : idx + 1]
+            rad = math.radians(float(angle))
+            wx = abs(math.sin(rad))
+            wy = abs(math.cos(rad))
+            if wx == 0 and wy == 0:
+                wy = 1.0
+            norm = max(wx + wy, 1e-6)
+            wx, wy = wx / norm, wy / norm
+            if wy > 0:
+                yi = 0 if math.cos(rad) >= 0 else y - 1
+                self._add_y_face(vol, wy, image, yi)
+                self._add_y_face(weight, wy, torch.ones_like(image), yi)
+            if wx > 0:
+                xi = 0 if math.sin(rad) < 0 else x - 1
+                self._add_x_face(vol, wx, image, xi)
+                self._add_x_face(weight, wx, torch.ones_like(image), xi)
+        return vol / weight.clamp_min(1e-6)
+
+
+class TemplateFeatureExtractor(nn.Module):
+    """Radiomics-like features for nearest-template selection."""
+
+    def forward(self, volume: torch.Tensor) -> torch.Tensor:
+        b = volume.shape[0]
+        flat = volume.reshape(b, -1)
+        prob = flat.clamp_min(0.0)
+        total = prob.sum(dim=1, keepdim=True).clamp_min(1e-6)
+        coords = torch.stack(
+            torch.meshgrid(
+                torch.linspace(0, 1, volume.shape[2], device=volume.device, dtype=volume.dtype),
+                torch.linspace(0, 1, volume.shape[3], device=volume.device, dtype=volume.dtype),
+                torch.linspace(0, 1, volume.shape[4], device=volume.device, dtype=volume.dtype),
+                indexing="ij",
+            ),
+            dim=-1,
+        ).reshape(-1, 3)
+        center = prob @ coords / total
+        centered = coords.unsqueeze(0) - center.unsqueeze(1)
+        spread = (prob.unsqueeze(-1) * centered.square()).sum(dim=1) / total
+        hist = torch.stack(
+            [
+                flat.mean(dim=1),
+                flat.std(dim=1, unbiased=False),
+                flat.amax(dim=1),
+                torch.quantile(flat, 0.95, dim=1),
+                (flat.square()).mean(dim=1),
+                (flat > 0).float().mean(dim=1),
+            ],
+            dim=1,
+        )
+        return torch.cat([hist, center, spread], dim=1)
+
+
+class AffineSTN3D(nn.Module):
+    """4 conv blocks + 4 max-pooling layers + 3-layer MLP affine regressor."""
+
+    def __init__(self, in_ch: int, base_ch: int):
+        super().__init__()
+        self.conv = nn.Sequential(
+            ConvBlock3d(in_ch, base_ch),
+            nn.MaxPool3d(2, ceil_mode=True),
+            ConvBlock3d(base_ch, base_ch * 2),
+            nn.MaxPool3d(2, ceil_mode=True),
+            ConvBlock3d(base_ch * 2, base_ch * 4),
+            nn.MaxPool3d(2, ceil_mode=True),
+            ConvBlock3d(base_ch * 4, base_ch * 8),
+            nn.MaxPool3d(2, ceil_mode=True),
+            nn.AdaptiveAvgPool3d(1),
+            nn.Flatten(),
+        )
+        self.mlp = nn.Sequential(
+            nn.Linear(base_ch * 8, base_ch * 8),
+            nn.SiLU(inplace=True),
+            nn.Linear(base_ch * 8, base_ch * 4),
+            nn.SiLU(inplace=True),
+            nn.Linear(base_ch * 4, 12),
+        )
+        nn.init.zeros_(self.mlp[-1].weight)
+        self.mlp[-1].bias.data.copy_(
+            torch.tensor([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=torch.float32)
+        )
+
+    def forward(self, x):
+        return self.mlp(self.conv(x)).view(-1, 3, 4).to(dtype=x.dtype)
+
+
+class TemplateSTNVNetBase(nn.Module):
+    """PGDPNN/FMT-ReconNet style template selection, affine STN, and V-Net refinement."""
+
+    output_type = "voxel"
+
+    def __init__(self, config, section: str):
+        super().__init__()
+        params = _model_section(config, section)
+        self.config = config
+        self.section = section
+        self.roi_shape = _roi_shape(config)
+        self.num_views = int(getattr(config.model, "num_views", len(config.data.view_angles)))
+        self.builder = SurfaceVolumeBuilder(self.roi_shape, config.data.view_angles)
+        self.feature_extractor = TemplateFeatureExtractor()
+        base = int(getattr(params, "base_channels", 12))
+        self.stn = AffineSTN3D(2, base)
+        self.vnet = VNet3D(2, base)
+        self.alpha = float(getattr(params, "alpha", 1.0))
+        self.stage_a_epochs = int(getattr(params, "stage_a_epochs", 10))
+        self.stage_b_epochs = int(getattr(params, "stage_b_epochs", 20))
+        self.current_epoch = 0
+        self.template_path = str(getattr(params, "template_path", "") or "")
+        self.template_features_norm = None
+        self._load_templates()
+        self._apply_stage_freeze()
+
+    def _load_templates(self):
+        if not self.template_path:
+            self.register_buffer("surface_templates", torch.empty(0), persistent=False)
+            self.register_buffer("source_templates", torch.empty(0), persistent=False)
+            self.register_buffer("template_features", torch.empty(0), persistent=False)
+            self.template_case_ids = []
+            return
+        path = Path(self.template_path).expanduser()
+        if not path.exists():
+            raise FileNotFoundError(f"{self.section}.template_path does not exist: {path}")
+        z = np.load(path, allow_pickle=True)
+        self.register_buffer(
+            "surface_templates",
+            torch.from_numpy(z["surface_templates"].astype(np.float32)),
+            persistent=False,
+        )
+        self.register_buffer(
+            "source_templates",
+            torch.from_numpy(z["source_templates"].astype(np.float32)),
+            persistent=False,
+        )
+        self.register_buffer(
+            "template_features",
+            torch.from_numpy(z["template_features"].astype(np.float32)),
+            persistent=False,
+        )
+        self.template_case_ids = [str(v) for v in z["template_case_ids"].tolist()]
+
+    def set_training_epoch(self, epoch: int):
+        self.current_epoch = int(epoch)
+        self._apply_stage_freeze()
+
+    def _apply_stage_freeze(self):
+        if self.current_epoch < self.stage_a_epochs:
+            stn_train, vnet_train = True, False
+        elif self.current_epoch < self.stage_a_epochs + self.stage_b_epochs:
+            stn_train, vnet_train = False, True
+        else:
+            stn_train, vnet_train = True, True
+        for param in self.stn.parameters():
+            param.requires_grad = stn_train
+        for param in self.vnet.parameters():
+            param.requires_grad = vnet_train
+
+    def _fallback_templates(self, x_tr: torch.Tensor):
+        b = x_tr.shape[0]
+        ids = torch.zeros(b, dtype=torch.long, device=x_tr.device)
+        return x_tr.detach(), torch.zeros_like(x_tr), ids
+
+    def _select_templates(self, x_tr: torch.Tensor):
+        if self.surface_templates.numel() == 0:
+            return self._fallback_templates(x_tr)
+        features = self.feature_extractor(x_tr)
+        template_features = self.template_features.to(device=x_tr.device, dtype=x_tr.dtype)
+        mean = template_features.mean(dim=0, keepdim=True)
+        std = template_features.std(dim=0, keepdim=True, unbiased=False).clamp_min(1e-6)
+        dist = torch.cdist((features - mean) / std, (template_features - mean) / std)
+        ids = dist.argmin(dim=1)
+        x_tp = self.surface_templates.to(device=x_tr.device, dtype=x_tr.dtype)[ids]
+        y_tp = self.source_templates.to(device=x_tr.device, dtype=x_tr.dtype)[ids]
+        return x_tp, y_tp, ids
+
+    @staticmethod
+    def _warp(x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+        grid = F.affine_grid(theta, x.shape, align_corners=False)
+        return F.grid_sample(x, grid, align_corners=False)
+
+    def forward(self, projections, *args, **kwargs):
+        x_tr = self.builder(projections)
+        x_tp, y_tp, template_ids = self._select_templates(x_tr)
+        theta = self.stn(torch.cat([x_tr, x_tp], dim=1))
+        x_tp_def = self._warp(x_tp, theta)
+        y_tp_def = self._warp(y_tp, theta)
+        pred = self.vnet(torch.cat([x_tr, y_tp_def], dim=1))
+        ident = _identity_affine(theta.device, theta.dtype, theta.shape[0])
+        stn_align = F.mse_loss(x_tp_def.clamp(0.0, 1.0), x_tr.clamp(0.0, 1.0))
+        stn_l2 = (theta - ident).square().mean()
+        aux = {
+            "stn_loss": stn_align + 0.01 * stn_l2,
+            "voxel_loss_weight": self.alpha,
+            "selected_template_id": template_ids.detach(),
+            "theta": theta.detach(),
+            "debug": {
+                "x_tr": x_tr.detach(),
+                "x_tp": x_tp.detach(),
+                "x_tp_def": x_tp_def.detach(),
+                "y_tp": y_tp.detach(),
+                "y_tp_def": y_tp_def.detach(),
+                "pred_voxel": pred.detach(),
+            },
+        }
+        return {"pred_voxel": pred, "aux_outputs": aux}
+
+
+class FMTReconNetAdapted(TemplateSTNVNetBase):
+    def __init__(self, config):
+        super().__init__(config, "fmt_reconnet")
+
+
+class PGDPNNAdapted(TemplateSTNVNetBase):
+    def __init__(self, config):
+        super().__init__(config, "pgdpnn")
+
+
+class ProjectionRestorationNet(nn.Module):
+    def __init__(self, views: int, base: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(views, base, 3, padding=1),
+            nn.SiLU(inplace=True),
+            nn.Conv2d(base, base, 3, padding=1),
+            nn.SiLU(inplace=True),
+            nn.Conv2d(base, views, 3, padding=1),
+        )
+
+    def forward(self, x):
+        return x + self.net(x)
+
+
+class SliceIRadonNet(nn.Module):
+    """Slice-wise profile-to-transverse reconstruction network."""
+
+    def __init__(self, views: int, input_h: int, roi_shape: tuple[int, int, int], hidden: int):
+        super().__init__()
+        x, y, _z = roi_shape
+        self.roi_shape = roi_shape
+        self.views = int(views)
+        self.input_h = int(input_h)
+        self.fc1 = nn.Linear(self.views * self.input_h, hidden)
+        self.fc2 = nn.Linear(hidden, x * y)
+        self.refine = nn.Sequential(
+            nn.Conv2d(1, 16, 3, padding=1),
+            nn.SiLU(inplace=True),
+            nn.Conv2d(16, 16, 3, padding=1),
+            nn.SiLU(inplace=True),
+            nn.Conv2d(16, 1, 3, padding=1),
+        )
+
+    def forward(self, restored: torch.Tensor) -> torch.Tensor:
+        b, v, h, _w = restored.shape
+        x, y, z = self.roi_shape
+        profiles = restored.mean(dim=-1)
+        profiles = F.interpolate(
+            profiles.unsqueeze(1), size=(v, self.input_h), mode="bilinear", align_corners=False
+        ).squeeze(1)
+        profiles = profiles[:, None].expand(b, z, v, self.input_h).reshape(b * z, v * self.input_h)
+        slices = self.fc2(F.silu(self.fc1(profiles))).view(b * z, 1, x, y)
+        slices = self.refine(slices)
+        return slices.view(b, z, 1, x, y).permute(0, 2, 3, 4, 1).contiguous()
+
+
+class TwoStageDeepFMTAdapted(nn.Module):
+    """Restoration-Net followed by slice-wise iRadon-Net, without latent expand."""
+
+    output_type = "voxel"
+
+    def __init__(self, config):
+        super().__init__()
+        params = _model_section(config, "two_stage_deepfmt")
+        self.config = config
+        self.roi_shape = _roi_shape(config)
+        self.num_views = int(getattr(config.model, "num_views", len(config.data.view_angles)))
+        base = int(getattr(params, "base_channels", 16))
+        hidden = int(getattr(params, "iradon_hidden_dim", 512))
+        input_h = int(getattr(params, "profile_bins", self.roi_shape[0]))
+        self.lambda_proj = float(getattr(params, "lambda_proj", 0.0))
+        self.restorer = ProjectionRestorationNet(self.num_views, base)
+        self.iradon = SliceIRadonNet(self.num_views, input_h, self.roi_shape, hidden)
+
+    def forward(self, projections, *args, **kwargs):
+        x = _projection_tensor(projections)
+        restored = self.restorer(x)
+        pred = self.iradon(restored)
+        proj_loss = pred.new_zeros(())
+        if self.lambda_proj > 0:
+            proj_loss = self.lambda_proj * F.l1_loss(torch.sigmoid(restored), x.clamp(0.0, 1.0))
+        return {
+            "pred_voxel": pred,
+            "aux_outputs": {
+                "restored_projections": restored,
+                "projection_loss": proj_loss,
+            },
+        }
 
 
 class AttentionFusion(nn.Module):
@@ -183,79 +648,10 @@ class D2RecSTAdapted(ProjectionToVoxelNet):
     def forward(self, projections, *args, **kwargs):
         pred, features = self.decoder(self.coarse_volume(projections), return_features=True)
         perceptual = sum(f.abs().mean() * 0.0 for f in features)
-        return {"pred_voxel": pred, "aux_outputs": {"features": features, "perceptual_loss": perceptual}}
-
-
-class ProjectionRestorationNet(nn.Module):
-    def __init__(self, views: int, base: int):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(views, base, 3, padding=1),
-            nn.SiLU(inplace=True),
-            nn.Conv2d(base, base, 3, padding=1),
-            nn.SiLU(inplace=True),
-            nn.Conv2d(base, views, 3, padding=1),
-        )
-
-    def forward(self, x):
-        return x + self.net(x)
-
-
-class TwoStageDeepFMTAdapted(ProjectionToVoxelNet):
-    def __init__(self, config):
-        super().__init__(config, "two_stage_deepfmt")
-        params = _model_section(config, "two_stage_deepfmt")
-        self.restorer = ProjectionRestorationNet(self.num_views, int(getattr(params, "base_channels", 16)))
-
-    def forward(self, projections, *args, **kwargs):
-        x = _projection_tensor(projections)
-        restored = self.restorer(x)
-        pred = self.decoder(self.coarse_volume(restored))
-        proj_loss = F.l1_loss(torch.sigmoid(restored), x.clamp(0.0, 1.0)) * 0.0
-        return {"pred_voxel": pred, "aux_outputs": {"restored_projections": restored, "projection_loss": proj_loss}}
-
-
-class SpatialTransformer3D(nn.Module):
-    def __init__(self, in_ch: int):
-        super().__init__()
-        self.loc = nn.Sequential(
-            nn.AdaptiveAvgPool3d(1),
-            nn.Flatten(),
-            nn.Linear(in_ch, 32),
-            nn.SiLU(inplace=True),
-            nn.Linear(32, 12),
-        )
-        nn.init.zeros_(self.loc[-1].weight)
-        self.loc[-1].bias.data.copy_(torch.tensor([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=torch.float32))
-
-    def forward(self, x):
-        theta = self.loc(x).view(-1, 3, 4).to(dtype=x.dtype)
-        grid = F.affine_grid(theta, x.shape, align_corners=False)
-        return F.grid_sample(x, grid, align_corners=False)
-
-
-class FMTReconNetAdapted(ProjectionToVoxelNet):
-    def __init__(self, config):
-        super().__init__(config, "fmt_reconnet")
-        latent = self.fc.out_features
-        self.stn = SpatialTransformer3D(latent)
-
-    def forward(self, projections, *args, **kwargs):
-        prior = self.coarse_volume(projections)
-        pred = self.decoder(self.stn(prior))
-        return {"pred_voxel": pred, "aux_outputs": {"prior_source": "mean_projection_backprojection"}}
-
-
-class PGDPNNAdapted(ProjectionToVoxelNet):
-    def __init__(self, config):
-        super().__init__(config, "pgdpnn")
-        self.distribution_head = nn.Conv3d(self.fc.out_features, 1, 1)
-
-    def forward(self, projections, *args, **kwargs):
-        prior = self.coarse_volume(projections)
-        pred_dist = self.distribution_head(prior)
-        pred = self.decoder(prior)
-        return {"pred_voxel": pred, "aux_outputs": {"pred_distribution": pred_dist}}
+        return {
+            "pred_voxel": pred,
+            "aux_outputs": {"features": features, "perceptual_loss": perceptual},
+        }
 
 
 class DSPGNAdapted(ProjectionToVoxelNet):
@@ -267,8 +663,12 @@ class DSPGNAdapted(ProjectionToVoxelNet):
         latent = self.fc.out_features
         self.num_nodes = int(getattr(params, "num_nodes", 64))
         self.k = int(getattr(params, "k_neighbors", 6))
-        self.node_mlp = nn.Sequential(nn.Linear(latent + 3, latent), nn.SiLU(), nn.Linear(latent, latent))
-        self.msg_mlp = nn.Sequential(nn.Linear(latent * 2 + 3, latent), nn.SiLU(), nn.Linear(latent, latent))
+        self.node_mlp = nn.Sequential(
+            nn.Linear(latent + 3, latent), nn.SiLU(), nn.Linear(latent, latent)
+        )
+        self.msg_mlp = nn.Sequential(
+            nn.Linear(latent * 2 + 3, latent), nn.SiLU(), nn.Linear(latent, latent)
+        )
 
     def forward(self, projections, *args, **kwargs):
         vol = self.coarse_volume(projections)
@@ -295,11 +695,68 @@ class DSPGNAdapted(ProjectionToVoxelNet):
         return {"pred_voxel": pred, "aux_outputs": {"graph_nodes": node}}
 
 
-class FEM2VoxUNet(ProjectionToVoxelNet):
-    """Coarse-prior-to-voxel U-Net baseline without query projection."""
+class Stage1VolumeMixin:
+    stage1_key_candidates = ("stage1_voxel", "fem_prior", "coarse_prior", "stage1_recon")
+
+    def _stage1_from_kwargs(self, kwargs) -> torch.Tensor | None:
+        batch = kwargs.get("batch")
+        if isinstance(batch, dict):
+            for key in self.stage1_key_candidates:
+                value = batch.get(key)
+                if torch.is_tensor(value):
+                    return value
+        return None
+
+
+class FEM2VoxUNet(Stage1VolumeMixin, ProjectionToVoxelNet):
+    """Stage1/FEM-prior + 3D U-Net baseline when a real stage1 volume is present."""
 
     def __init__(self, config):
-        super().__init__(config, "fem2vox_unet")
+        if str(getattr(config.model, "name", "")) == "stage1_unet":
+            section = "stage1_unet"
+        else:
+            section = "fem2vox_unet"
+        super().__init__(config, section)
+        params = _model_section(config, section)
+        base = int(getattr(params, "base_channels", 16))
+        self.unet = VNet3D(1, base)
+        self.allow_projection_fallback = bool(getattr(params, "allow_projection_fallback", False))
+
+    def forward(self, projections, *args, **kwargs):
+        stage1 = self._stage1_from_kwargs(kwargs)
+        if stage1 is None:
+            if not self.allow_projection_fallback:
+                raise ValueError(
+                    "fem2vox_unet requires a real stage1/FEM prior in the batch; "
+                    "set allow_projection_fallback=true only for smoke tests."
+                )
+            return super().forward(projections, *args, **kwargs)
+        if stage1.dim() == 4:
+            stage1 = stage1.unsqueeze(1)
+        pred = self.unet(stage1.float())
+        return {"pred_voxel": pred, "aux_outputs": {"prior_source": "stage1"}}
+
+
+class Stage1InterpolationBaseline(Stage1VolumeMixin, nn.Module):
+    output_type = "voxel"
+
+    def __init__(self, config):
+        super().__init__()
+        self.roi_shape = _roi_shape(config)
+
+    def forward(self, projections, *args, **kwargs):
+        stage1 = self._stage1_from_kwargs(kwargs)
+        if stage1 is None:
+            raise ValueError("stage1_interpolation requires a real stage1/FEM prior in the batch")
+        if stage1.dim() == 4:
+            stage1 = stage1.unsqueeze(1)
+        pred = F.interpolate(
+            stage1.float(),
+            size=self.roi_shape,
+            mode="trilinear",
+            align_corners=False,
+        )
+        return {"pred_voxel": pred, "aux_outputs": {"prior_source": "stage1_interpolation"}}
 
 
 class GenericVoxelBaseline(ProjectionToVoxelNet):

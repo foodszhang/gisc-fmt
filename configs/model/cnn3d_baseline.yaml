@@ -1,0 +1,5 @@
+name: cnn3d_baseline
+output_type: voxel
+num_views: 7
+cnn3d_baseline:
+  base_channels: 8

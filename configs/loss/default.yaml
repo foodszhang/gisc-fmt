@@ -5,3 +5,4 @@ decay_epochs: 200
 pos_weight: 2
 sparse_weight: 0.05
 dice_weight: 0.5
+light_weight: 1.0

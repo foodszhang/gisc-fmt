@@ -57,3 +57,12 @@ Use E15 for multi-source separation work. The goal is to improve three-focus and
 - Relevant eval slices are full-volume test300, grouped by `num_foci` and shape class, plus component-level recall / missed / merge reporting.
 - Focus metrics: all Dice / Precision / Recall, foci=3 Recall, component recall@3, missed/sample@3, merge/sample@3, mixed-two-shape Dice, and mixed-three-shape Dice.
 - Do not reintroduce experimental-number naming into code-level symbols; name helpers by task semantics only.
+
+## Current Comparison And Training Entry Points
+
+- E15 training configs: `configs/exp/fmt_simgen_v2_e15_center.yaml` and `configs/exp/fmt_simgen_v2_e15_center_distance.yaml`.
+- E15 uses the E13 MPB chain as its base and keeps the main query-density head intact.
+- The auxiliary heads are only supervision helpers; they do not alter non-GT sampling or inference inputs.
+- Use the shared entrypoint for formal runs: `uv run python train.py fit model=gisc_fmt exp=fmt_simgen_v2_e15_center_distance data.dataset_type=fmt_simgen`.
+- For comparison work, keep the paper baselines on the shared v2 protocol and record the selected checkpoint plus grouped metrics.
+- The most relevant comparison slices remain full-volume test300, grouped by `num_foci`, shape class, and depth tier, with component recall / missed / merge reporting.

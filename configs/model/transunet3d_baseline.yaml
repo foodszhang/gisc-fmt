@@ -1,0 +1,7 @@
+name: transunet3d_baseline
+output_type: voxel
+num_views: 7
+transunet3d_baseline:
+  base_channels: 8
+  num_heads: 4
+  max_tokens: 512

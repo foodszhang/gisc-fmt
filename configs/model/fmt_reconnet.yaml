@@ -9,8 +9,10 @@ geometry:
   detector_size: [256, 256]
   global_voxel_shape: [256, 256, 256]
 fmt_reconnet:
-  base_channels: 16
-  latent_channels: 64
+  base_channels: 12
+  alpha: 1.0
+  stage_a_epochs: 10
+  stage_b_epochs: 20
+  template_path: /home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k/templates/pgdpnn_templates_k20.npz
   uses_prior: true
-  prior_source: mean_projection_backprojection
-
+  prior_source: nearest_surface_source_template_stn

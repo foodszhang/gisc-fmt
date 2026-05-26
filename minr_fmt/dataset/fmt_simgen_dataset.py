@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
+from scipy import ndimage
 from torch.utils.data import Dataset
 
 from .query_sampler import NonGTQuerySampler
@@ -58,9 +59,42 @@ class FmtSimGenProjDataset(Dataset):
             target_files = [target_files]
         self.descatter_target_files = [str(p) for p in target_files]
         self.descatter_target_scale = self.config.get("descatter_target_scale")
-        if self.descatter_target_scale is not None:
+        self.descatter_target_scale_mode = "raw_per_view_max"
+        if isinstance(self.descatter_target_scale, str):
+            self.descatter_target_scale_mode = self.descatter_target_scale
+            self.descatter_target_scale = None
+        elif self.descatter_target_scale is not None:
             self.descatter_target_scale = float(self.descatter_target_scale)
+        self.load_stage1_prior = bool(self.config.get("load_stage1_prior", True))
+        self.load_stage1_mesh = bool(self.config.get("load_stage1_mesh", True))
+        stage1_files = self.config.get(
+            "stage1_prior_files",
+            ["stage1_recon.npy", "fem_recon.npy", "coarse_prior.npy", "stage1_voxel.npy"],
+        )
+        if isinstance(stage1_files, str):
+            stage1_files = [stage1_files]
+        self.stage1_prior_files = [str(p) for p in stage1_files]
+        stage1_mesh_files = self.config.get(
+            "stage1_mesh_files",
+            ["coarse_d.npy", "stage1_mesh.npy", "fem_nodes.npy"],
+        )
+        if isinstance(stage1_mesh_files, str):
+            stage1_mesh_files = [stage1_mesh_files]
+        self.stage1_mesh_files = [str(p) for p in stage1_mesh_files]
         self.query_sampler = NonGTQuerySampler(self.config) if self.use_nongt_sampler else None
+        source_hyp_cfg = self.config.get("source_hypothesis", {}) or {}
+        self.source_hypothesis_enabled = bool(source_hyp_cfg.get("enabled", False))
+        self.source_hypothesis_top_m = int(source_hyp_cfg.get("top_m", 5))
+        self.source_hypothesis_blur_sigma = float(source_hyp_cfg.get("blur_sigma", 1.0))
+        self.source_hypothesis_min_distance_cells = int(source_hyp_cfg.get("min_distance_cells", 3))
+        self.source_hypothesis_min_value_ratio = float(source_hyp_cfg.get("min_value_ratio", 0.1))
+        self.proposal_subdir = str(self.config.get("proposal_subdir", "proposal"))
+        self.proposal_filename = str(
+            self.config.get("proposal_filename", "meas_backproj_heatmap.npy")
+        )
+        self.proposal_meta_filename = str(
+            self.config.get("proposal_meta_filename", "meas_backproj_meta.json")
+        )
         self.resample_queries_each_epoch = bool(
             self.config.get("resample_queries_each_epoch", False)
         )
@@ -172,7 +206,9 @@ class FmtSimGenProjDataset(Dataset):
             seed += int(self.current_epoch) * self.query_epoch_seed_stride
         return seed
 
-    def _load_projection(self, sample_dir: Path) -> tuple[
+    def _load_projection(
+        self, sample_dir: Path
+    ) -> tuple[
         dict[str, torch.Tensor],
         torch.Tensor,
         torch.Tensor,
@@ -217,7 +253,16 @@ class FmtSimGenProjDataset(Dataset):
                 )
                 target_scale = self.descatter_target_scale
                 if target_scale is None:
-                    target_scale = scale
+                    if self.descatter_target_scale_mode == "descatter_per_view_max":
+                        target_scale = max(float(np.abs(descatter).max()), self.projection_eps)
+                    elif self.descatter_target_scale_mode == "raw_per_view_max":
+                        target_scale = scale
+                    else:
+                        raise ValueError(
+                            "data.descatter_target_scale must be numeric, "
+                            "'raw_per_view_max', or 'descatter_per_view_max', got "
+                            f"{self.descatter_target_scale_mode!r}"
+                        )
                 descatter = descatter / max(float(target_scale), self.projection_eps)
                 descatter_targets[key] = torch.tensor(
                     descatter, dtype=torch.float32, device=self.device
@@ -253,6 +298,144 @@ class FmtSimGenProjDataset(Dataset):
             gt = gt / gt_max
         return gt
 
+    def _load_stage1_prior(self, sample_dir: Path, target_shape: tuple[int, ...]):
+        for rel_path in self.stage1_prior_files:
+            path = sample_dir / rel_path
+            if not path.exists():
+                continue
+            prior = np.load(path).astype(np.float32)
+            prior = np.nan_to_num(prior, nan=0.0, posinf=0.0, neginf=0.0)
+            prior = np.clip(prior, 0.0, None)
+            prior_max = float(prior.max())
+            if prior_max > 0:
+                prior = prior / prior_max
+            if prior.shape != target_shape:
+                t = torch.tensor(prior, dtype=torch.float32).view(1, 1, *prior.shape)
+                t = torch.nn.functional.interpolate(
+                    t,
+                    size=target_shape,
+                    mode="trilinear",
+                    align_corners=False,
+                )
+                prior = t[0, 0].numpy()
+            return prior, path.name
+        return None, None
+
+    def _load_stage1_mesh(self, sample_dir: Path):
+        for rel_path in self.stage1_mesh_files:
+            path = sample_dir / rel_path
+            if not path.exists():
+                continue
+            values = np.load(path).astype(np.float32)
+            values = np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0).reshape(-1)
+            values = np.clip(values, 0.0, None)
+            vmax = float(values.max())
+            if vmax > 0:
+                values = values / vmax
+            return values, path.name
+        return None, None
+
+    def _load_measurement_b(self, sample_dir: Path):
+        path = sample_dir / "measurement_b.npy"
+        if not path.exists():
+            return None
+        b = np.load(path).astype(np.float32).reshape(-1)
+        b = np.nan_to_num(b, nan=0.0, posinf=0.0, neginf=0.0)
+        b = np.clip(b, 0.0, None)
+        bmax = float(b.max())
+        if bmax > 0:
+            b = b / bmax
+        return b
+
+    def _load_source_hypotheses(self, sample_dir: Path) -> dict[str, np.ndarray]:
+        """Extract measurement-derived source hypotheses from proposal heatmap only."""
+        top_m = max(1, int(self.source_hypothesis_top_m))
+        centers = np.zeros((top_m, 3), dtype=np.float32)
+        peak_scores = np.zeros((top_m,), dtype=np.float32)
+        scales = np.zeros((top_m,), dtype=np.float32)
+        valid = np.zeros((top_m,), dtype=np.float32)
+
+        proposal_dir = sample_dir / self.proposal_subdir
+        heatmap_path = proposal_dir / self.proposal_filename
+        meta_path = proposal_dir / self.proposal_meta_filename
+        if not heatmap_path.exists() or not meta_path.exists():
+            raise FileNotFoundError(
+                f"Source hypothesis proposal heatmap missing for {sample_dir}. "
+                "Run scripts/precompute_measurement_proposal.py first."
+            )
+
+        heatmap = np.load(heatmap_path).astype(np.float64)
+        meta = json.loads(meta_path.read_text())
+        grid_size = tuple(int(v) for v in meta.get("grid_size", heatmap.shape))
+        if heatmap.shape != grid_size:
+            raise ValueError(f"{heatmap_path} shape {heatmap.shape} != meta grid_size {grid_size}")
+
+        heatmap = np.clip(np.nan_to_num(heatmap, nan=0.0, posinf=0.0, neginf=0.0), 0.0, None)
+        if float(heatmap.max()) <= 0.0:
+            return {
+                "centers": centers,
+                "peak_scores": peak_scores,
+                "scales": scales,
+                "valid": valid,
+            }
+
+        smooth = ndimage.gaussian_filter(heatmap, sigma=self.source_hypothesis_blur_sigma)
+        max_value = float(np.max(smooth))
+        if max_value <= 0.0 or not np.isfinite(max_value):
+            return {
+                "centers": centers,
+                "peak_scores": peak_scores,
+                "scales": scales,
+                "valid": valid,
+            }
+
+        min_distance = max(1, int(self.source_hypothesis_min_distance_cells))
+        size = 2 * min_distance + 1
+        local_max = smooth == ndimage.maximum_filter(smooth, size=size, mode="nearest")
+        local_max &= smooth >= (self.source_hypothesis_min_value_ratio * max_value)
+        coords = np.argwhere(local_max)
+        if coords.size == 0:
+            return {
+                "centers": centers,
+                "peak_scores": peak_scores,
+                "scales": scales,
+                "valid": valid,
+            }
+
+        values = smooth[tuple(coords.T)]
+        order = np.argsort(-values)
+        selected: list[tuple[int, int, int]] = []
+        selected_values: list[float] = []
+        for idx in order:
+            cand = tuple(int(v) for v in coords[idx])
+            far_enough = all(
+                np.linalg.norm(np.asarray(cand) - np.asarray(prev)) >= float(min_distance)
+                for prev in selected
+            )
+            if far_enough:
+                selected.append(cand)
+                selected_values.append(float(values[idx]))
+            if len(selected) >= top_m:
+                break
+
+        trunk_size_mm = np.asarray(meta.get("trunk_size_mm", [38.0, 40.0, 20.8]), dtype=np.float32)
+        cell_size_mm = np.asarray(meta.get("cell_size_mm"), dtype=np.float32)
+        if cell_size_mm.shape != (3,):
+            cell_size_mm = trunk_size_mm / np.asarray(grid_size, dtype=np.float32)
+        scale_mm = float(np.linalg.norm(cell_size_mm) * max(1, min_distance))
+
+        for i, (coord, value) in enumerate(zip(selected, selected_values)):
+            centers[i] = (np.asarray(coord, dtype=np.float32) + 0.5) * cell_size_mm
+            peak_scores[i] = float(value / max_value)
+            scales[i] = scale_mm
+            valid[i] = 1.0
+        return {
+            "centers": centers,
+            "peak_scores": peak_scores,
+            "scales": scales,
+            "valid": valid,
+        }
+
     def __getitem__(self, index: int) -> dict[str, Any]:
         sample_dir = self.dirs[index]
         (
@@ -263,6 +446,24 @@ class FmtSimGenProjDataset(Dataset):
             descatter_targets,
         ) = self._load_projection(sample_dir)
         gt = self._load_gt(sample_dir)
+        if self.load_stage1_prior:
+            stage1_prior, stage1_source = self._load_stage1_prior(sample_dir, gt.shape)
+        else:
+            stage1_prior, stage1_source = None, None
+        if self.load_stage1_mesh:
+            stage1_mesh, stage1_mesh_source = self._load_stage1_mesh(sample_dir)
+        else:
+            stage1_mesh, stage1_mesh_source = None, None
+        measurement_b = self._load_measurement_b(sample_dir)
+        gt_nodes_path = sample_dir / "gt_nodes.npy"
+        gt_nodes = None
+        if gt_nodes_path.exists():
+            gt_nodes = np.load(gt_nodes_path).astype(np.float32).reshape(-1)
+            gt_nodes = np.nan_to_num(gt_nodes, nan=0.0, posinf=0.0, neginf=0.0)
+            gt_nodes = np.clip(gt_nodes, 0.0, None)
+            gt_nodes_max = float(gt_nodes.max())
+            if gt_nodes_max > 0:
+                gt_nodes = gt_nodes / gt_nodes_max
         rng = np.random.default_rng(self._query_seed(index))
 
         if self.query_sampler is not None:
@@ -323,4 +524,32 @@ class FmtSimGenProjDataset(Dataset):
         }
         if descatter_targets is not None:
             item["descatter_targets"] = descatter_targets
+        if stage1_prior is not None:
+            item["stage1_voxel"] = torch.tensor(
+                stage1_prior, dtype=torch.float32, device=self.device
+            )
+            item["stage1_source"] = stage1_source
+        if stage1_mesh is not None:
+            item["stage1_mesh"] = torch.tensor(stage1_mesh, dtype=torch.float32, device=self.device)
+            item["stage1_mesh_source"] = stage1_mesh_source
+        if measurement_b is not None:
+            item["measurement_b"] = torch.tensor(
+                measurement_b, dtype=torch.float32, device=self.device
+            )
+        if gt_nodes is not None:
+            item["gt_nodes"] = torch.tensor(gt_nodes, dtype=torch.float32, device=self.device)
+        if self.source_hypothesis_enabled:
+            source_hyp = self._load_source_hypotheses(sample_dir)
+            item["source_hypothesis_centers"] = torch.tensor(
+                source_hyp["centers"], dtype=torch.float32, device=self.device
+            )
+            item["source_hypothesis_peak_scores"] = torch.tensor(
+                source_hyp["peak_scores"], dtype=torch.float32, device=self.device
+            )
+            item["source_hypothesis_scales"] = torch.tensor(
+                source_hyp["scales"], dtype=torch.float32, device=self.device
+            )
+            item["source_hypothesis_valid"] = torch.tensor(
+                source_hyp["valid"], dtype=torch.float32, device=self.device
+            )
         return item

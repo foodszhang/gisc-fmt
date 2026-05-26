@@ -18,6 +18,10 @@ data:
   num_queries: 32768
   eval_sample_num: 32768
   voxel_size_mm: 0.2
+  voxel_ranges:
+    x: [0, 190]
+    y: [0, 200]
+    z: [0, 104]
   view_angles: [-90, -60, -30, 0, 30, 60, 90]
   projection_norm: per_view_max
   projection_eps: 1.0e-8

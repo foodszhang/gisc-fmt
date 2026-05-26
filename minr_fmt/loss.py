@@ -21,6 +21,7 @@ class AuxProjectionLightLoss(nn.Module):
         tversky_beta: float = 0.4,
         tversky_gamma: float = 1.33,
         tversky_weight: float | None = None,
+        light_weight: float = 1.0,
     ):
         super().__init__()
         self.init_aux_projection_weight = init_scatter_weight
@@ -28,6 +29,7 @@ class AuxProjectionLightLoss(nn.Module):
         self.start_decay_epoch = start_decay_epoch
         self.decay_epochs = decay_epochs
         self.current_epoch = 0  # 需外部传入当前epoch
+        self.light_weight = float(light_weight)
 
         # 初始化子损失
         self.sparse_light_loss = SparseLightLoss(
@@ -142,10 +144,13 @@ class AuxProjectionLightLoss(nn.Module):
 
         # 2. 计算各部分损失
         aux_loss = self.aux_projection_loss(pred_aux, target_aux, pred_density.device)
-        light_loss = self.sparse_light_loss(pred_density, gt_density)
+        if self.light_weight == 0.0:
+            light_loss = torch.zeros((), dtype=pred_density.dtype, device=pred_density.device)
+        else:
+            light_loss = self.sparse_light_loss(pred_density, gt_density)
 
         # 3. 加权组合总损失
-        total_loss = aux_weight * aux_loss + light_loss
+        total_loss = aux_weight * aux_loss + self.light_weight * light_loss
 
         # 返回损失及当前权重（便于监控）
         return {
@@ -153,6 +158,9 @@ class AuxProjectionLightLoss(nn.Module):
             "aux_projection_loss": aux_loss,
             "light_loss": light_loss,
             "aux_projection_weight": aux_weight,
+            "light_weight": torch.as_tensor(
+                self.light_weight, dtype=torch.float32, device=pred_density.device
+            ),
         }
 
 
@@ -275,22 +283,47 @@ class VoxelReconstructionLoss(nn.Module):
         target = target.to(device=pred.device, dtype=pred.dtype)
 
         if pred.shape[1:] != target.shape[1:]:
-            pred = F.interpolate(
-                pred.unsqueeze(1),
-                size=target.shape[1:],
-                mode="trilinear",
-                align_corners=False,
-            )[:, 0]
+            raise ValueError(
+                "Voxel prediction and target shapes differ. "
+                f"pred={tuple(pred.shape)}, target={tuple(target.shape)}. "
+                "Use full-volume output, crop the target explicitly, paste ROI predictions, "
+                "or mesh_to_voxel before metrics/loss."
+            )
 
         flat_pred = pred.reshape(pred.shape[0], -1, 1)
         flat_target = target.reshape(target.shape[0], -1, 1)
-        light_loss = self.sparse_light_loss(flat_pred, flat_target)
-        rec_l1 = self.l1_loss(torch.sigmoid(pred), target)
-        total = light_loss + rec_l1
+        voxel_weight = 1.0
+        loss_type = "default"
+        dice_weight = None
+        if isinstance(aux_outputs, dict):
+            voxel_weight = float(aux_outputs.get("voxel_loss_weight", 1.0))
+            loss_type = str(aux_outputs.get("voxel_loss_type", "default")).lower()
+            if "dice_weight" in aux_outputs:
+                dice_weight = float(aux_outputs["dice_weight"])
+
+        if loss_type == "mse":
+            prob = torch.sigmoid(pred)
+            mse_loss = F.mse_loss(prob, target)
+            if dice_weight is None:
+                dice_weight = 0.0
+            prob_flat = prob.reshape(prob.shape[0], -1)
+            target_flat = target.reshape(target.shape[0], -1)
+            intersection = (prob_flat * target_flat).sum(dim=1)
+            dice = (2.0 * intersection + 1e-6) / (
+                prob_flat.sum(dim=1) + target_flat.sum(dim=1) + 1e-6
+            )
+            dice_loss = 1.0 - dice.mean()
+            light_loss = dice_loss
+            rec_l1 = mse_loss
+            total = voxel_weight * (mse_loss + float(dice_weight) * dice_loss)
+        else:
+            light_loss = self.sparse_light_loss(flat_pred, flat_target)
+            rec_l1 = self.l1_loss(torch.sigmoid(pred), target)
+            total = voxel_weight * (light_loss + rec_l1)
 
         extra_loss = torch.zeros((), dtype=pred.dtype, device=pred.device)
         if isinstance(aux_outputs, dict):
-            for key in ("projection_loss", "perceptual_loss", "distribution_loss"):
+            for key in ("projection_loss", "perceptual_loss", "distribution_loss", "stn_loss"):
                 value = aux_outputs.get(key)
                 if torch.is_tensor(value):
                     extra_loss = extra_loss + value

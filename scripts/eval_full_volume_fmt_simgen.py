@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import time
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,6 @@ from typing import Any
 import hydra
 import numpy as np
 import torch
-import torch.nn.functional as F
 from scipy import ndimage
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,9 +36,13 @@ METRIC_KEYS = [
     "ssim",
     "cle",
     "ple",
+    "cnr",
+    "flops_g",
     "volume_error",
     "assd",
     "hd95",
+    "inference_time_ms",
+    "peak_gpu_memory_mb",
 ]
 
 
@@ -46,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("overrides", nargs="*", help="Hydra overrides, e.g. model=gisc_fmt")
     parser.add_argument("--exp", default=None)
-    parser.add_argument("--ckpt_path", required=True)
+    parser.add_argument("--ckpt_path", default=None)
     parser.add_argument("--split", default="test", choices=["val", "test"])
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--chunk_size", type=int, default=65536)
@@ -86,8 +90,11 @@ def split_hydra_args(raw: list[str]) -> tuple[str | None, list[str]]:
     return exp, overrides
 
 
-def load_net(cfg, ckpt_path: Path, device: torch.device):
+def load_net(cfg, ckpt_path: Path | None, device: torch.device):
     net = ModelFactory.create_model(cfg.model.name, config=cfg).to(device)
+    if ckpt_path is None or str(ckpt_path).lower() in {"", "none", "null"}:
+        net.eval()
+        return net
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     state = ckpt.get("state_dict", ckpt)
     net_state = {
@@ -178,6 +185,53 @@ def projection_batch(projections: dict[str, torch.Tensor], device: torch.device)
     return {key: value.unsqueeze(0).to(device) for key, value in projections.items()}
 
 
+def estimate_conv_linear_flops(net, projections, batch, device: torch.device) -> float | None:
+    """Approximate Conv/Linear FLOPs for one voxel-model forward pass.
+
+    This intentionally reports a conservative hook-based estimate. Custom attention
+    matrix multiplications are not fully counted, so the value should be treated as
+    approximate and used alongside measured inference time and peak memory.
+    """
+    flops = 0
+    hooks = []
+
+    def conv_hook(module, inputs, output):
+        nonlocal flops
+        x = inputs[0]
+        if not torch.is_tensor(output):
+            return
+        batch_size = int(output.shape[0])
+        out_channels = int(output.shape[1])
+        out_spatial = int(np.prod(output.shape[2:]))
+        kernel_ops = int(np.prod(module.kernel_size)) * int(module.in_channels // module.groups)
+        flops += batch_size * out_channels * out_spatial * kernel_ops * 2
+
+    def linear_hook(module, inputs, output):
+        nonlocal flops
+        if not torch.is_tensor(output):
+            return
+        out_elems = int(output.numel())
+        flops += out_elems * int(module.in_features) * 2
+
+    for module in net.modules():
+        if isinstance(module, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
+            hooks.append(module.register_forward_hook(conv_hook))
+        elif isinstance(module, torch.nn.Linear):
+            hooks.append(module.register_forward_hook(linear_hook))
+    try:
+        with torch.no_grad():
+            _ = net(projection_batch(projections, device), points=None, batch=batch)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        return float(flops) / 1.0e9
+    except Exception as exc:
+        print(f"[WARN] FLOPs profiling failed: {exc}")
+        return None
+    finally:
+        for hook in hooks:
+            hook.remove()
+
+
 def chunk_indices(shape: tuple[int, int, int], start: int, end: int) -> np.ndarray:
     linear = np.arange(start, end, dtype=np.int64)
     return np.stack(np.unravel_index(linear, shape), axis=-1).astype(np.int64)
@@ -220,11 +274,12 @@ def predict_voxel_volume(
     net,
     cfg,
     projections: dict[str, torch.Tensor],
+    batch: dict[str, Any],
     gt_shape: tuple[int, int, int],
     device: torch.device,
 ) -> np.ndarray:
     with torch.no_grad():
-        out = net(projection_batch(projections, device), points=None)
+        out = net(projection_batch(projections, device), points=None, batch=batch)
     if isinstance(out, dict) and "pred_voxel" in out:
         pred = out["pred_voxel"]
     elif torch.is_tensor(out):
@@ -234,12 +289,19 @@ def predict_voxel_volume(
     if pred.dim() == 5 and pred.size(1) == 1:
         pred = pred[:, 0]
     if tuple(pred.shape[1:]) != gt_shape:
-        pred = F.interpolate(
-            pred.unsqueeze(1),
-            size=gt_shape,
-            mode="trilinear",
-            align_corners=False,
-        )[:, 0]
+        vr = cfg.data.voxel_ranges
+        x0, x1 = int(vr.x[0]), int(vr.x[1])
+        y0, y1 = int(vr.y[0]), int(vr.y[1])
+        z0, z1 = int(vr.z[0]), int(vr.z[1])
+        roi_shape = (x1 - x0, y1 - y0, z1 - z0)
+        if tuple(pred.shape[1:]) != roi_shape:
+            raise ValueError(
+                f"Prediction shape {tuple(pred.shape[1:])} is neither full GT {gt_shape} "
+                f"nor configured ROI {roi_shape}."
+            )
+        full = pred.new_zeros((pred.shape[0], *gt_shape))
+        full[:, x0:x1, y0:y1, z0:z1] = pred
+        pred = full
     values = torch.sigmoid(pred[0])
     if not torch.isfinite(values).all():
         raise RuntimeError("Voxel model prediction contains NaN/Inf")
@@ -320,6 +382,17 @@ def volume_metrics(
     denom = max(gt_max - gt_min, eps)
     gt_norm = np.clip((gt - gt_min) / denom, 0.0, 1.0)
     pred_norm = np.clip((pred - gt_min) / denom, 0.0, 1.0)
+    fg = gt_bin.astype(bool)
+    bg = ~fg
+    if fg.any() and bg.any():
+        fg_vals = pred[fg]
+        bg_vals = pred[bg]
+        cnr = float(
+            abs(float(fg_vals.mean()) - float(bg_vals.mean()))
+            / np.sqrt(float(fg_vals.var()) + float(bg_vals.var()) + eps)
+        )
+    else:
+        cnr = None
     assd, hd95 = assd_hd95(pred_bin, gt_bin, spacing)
     return {
         "dice": float(dice),
@@ -331,6 +404,7 @@ def volume_metrics(
         "ssim": float(get_ssim_3d(pred_norm, gt_norm)),
         "cle": cle,
         "ple": ple,
+        "cnr": cnr,
         "volume_error": volume_error,
         "assd": assd,
         "hd95": hd95,
@@ -452,7 +526,10 @@ def main() -> None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
         device = torch.device(args.device)
-    net = load_net(cfg, Path(args.ckpt_path), device)
+    ckpt_path = None
+    if args.ckpt_path and str(args.ckpt_path).lower() not in {"none", "null", ""}:
+        ckpt_path = Path(args.ckpt_path)
+    net = load_net(cfg, ckpt_path, device)
     voxel_model = is_voxel_model(cfg, net)
     data_dir = Path(str(cfg.data.val_dir if args.split == "val" else cfg.data.test_dir))
     sample_dirs = sample_dirs_for_split(str(data_dir), cfg, args.split, args.max_samples)
@@ -473,6 +550,7 @@ def main() -> None:
     voxel_size_mm = float(getattr(cfg.data, "voxel_size_mm", 0.2))
     spacing = tuple(float(v) for v in args.voxel_spacing)
     rows = []
+    flops_g = None
     for idx, sample_dir in enumerate(sample_dirs):
         gt = load_gt(sample_dir)
         gt_shape = tuple(int(v) for v in gt.shape)
@@ -483,8 +561,41 @@ def main() -> None:
             depth_maps_tensor,
             _descatter_targets,
         ) = loader._load_projection(sample_dir)
+        stage1_prior, stage1_source = loader._load_stage1_prior(sample_dir, gt_shape)
+        stage1_mesh, stage1_mesh_source = loader._load_stage1_mesh(sample_dir)
+        measurement_b = loader._load_measurement_b(sample_dir)
+        batch: dict[str, Any] = {
+            "sample_id": [sample_dir.name],
+            "projections": projection_batch(projections, device),
+            "gt_voxels": torch.from_numpy(gt).unsqueeze(0).to(device),
+            "global_voxel_shape": gt_shape,
+            "feasible_voxel_shape": gt_shape,
+        }
+        if stage1_prior is not None:
+            batch["stage1_voxel"] = torch.from_numpy(stage1_prior).unsqueeze(0).to(device)
+            batch["stage1_source"] = stage1_source
+        if stage1_mesh is not None:
+            batch["stage1_mesh"] = torch.from_numpy(stage1_mesh).unsqueeze(0).to(device)
+            batch["stage1_mesh_source"] = stage1_mesh_source
+        if measurement_b is not None:
+            batch["measurement_b"] = torch.from_numpy(measurement_b).unsqueeze(0).to(device)
+        gt_nodes_path = sample_dir / "gt_nodes.npy"
+        if gt_nodes_path.exists():
+            gt_nodes = np.load(gt_nodes_path).astype(np.float32).reshape(-1)
+            gt_nodes = np.nan_to_num(gt_nodes, nan=0.0, posinf=0.0, neginf=0.0)
+            gt_nodes = np.clip(gt_nodes, 0.0, None)
+            gt_nodes_max = float(gt_nodes.max())
+            if gt_nodes_max > 0:
+                gt_nodes = gt_nodes / gt_nodes_max
+            batch["gt_nodes"] = torch.from_numpy(gt_nodes).unsqueeze(0).to(device)
+        if voxel_model and flops_g is None:
+            flops_g = estimate_conv_linear_flops(net, projections, batch, device)
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(device)
+            torch.cuda.synchronize(device)
+        start_time = time.perf_counter()
         if voxel_model:
-            pred = predict_voxel_volume(net, cfg, projections, gt_shape, device)
+            pred = predict_voxel_volume(net, cfg, projections, batch, gt_shape, device)
         else:
             pred = predict_query_volume(
                 net,
@@ -495,6 +606,12 @@ def main() -> None:
                 args.chunk_size,
                 device,
             )
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+            peak_mem = torch.cuda.max_memory_allocated(device) / (1024.0 * 1024.0)
+        else:
+            peak_mem = None
+        inference_time_ms = (time.perf_counter() - start_time) * 1000.0
         row = {
             "sample_id": sample_dir.name,
             **sample_metadata(sample_dir, stats),
@@ -506,6 +623,9 @@ def main() -> None:
                 args.min_region_size,
                 args.cc_connectivity,
             ),
+            "flops_g": flops_g,
+            "inference_time_ms": float(inference_time_ms),
+            "peak_gpu_memory_mb": float(peak_mem) if peak_mem is not None else None,
         }
         rows.append(row)
         print(

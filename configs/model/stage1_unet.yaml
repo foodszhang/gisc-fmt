@@ -1,4 +1,4 @@
-name: fem2vox_unet
+name: stage1_unet
 output_type: voxel
 num_views: 7
 in_channels: 1
@@ -7,8 +7,8 @@ pos_enc_dim: 60
 geometry:
   camera_distance: 200.0
   detector_size: [256, 256]
-  global_voxel_shape: [256, 256, 256]
-fem2vox_unet:
+  global_voxel_shape: [190, 200, 104]
+stage1_unet:
   base_channels: 16
   uses_prior: true
   prior_source: stage1_fem_or_coarse_prior

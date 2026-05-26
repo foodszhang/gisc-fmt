@@ -1,0 +1,10 @@
+name: stage1_to_voxel
+output_type: voxel
+num_views: 7
+fem:
+  shared_dir: /home/foods/pro/FMT-SimGen/output/shared_mesh_20k
+stage1_to_voxel:
+  uses_prior: true
+  prior_source: stage1_mesh
+  mesh_to_voxel: barycentric
+  n_candidates: 32

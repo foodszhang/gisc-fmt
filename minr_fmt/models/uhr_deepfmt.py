@@ -11,7 +11,6 @@ import torch.nn.functional as F
 
 from ..config_extractor import ConfigExtractor
 
-
 # ===== 核心模块 =====
 
 
@@ -182,7 +181,7 @@ class Decoder3D(nn.Module):
 
 class UHRDeepFMT3DUNet(nn.Module):
     """3D U-Net体素重建网络
-    
+
     架构流程：
     1. 投影到3D体积（自动处理H/W不匹配）
     2. 3D编码器下采样
@@ -197,7 +196,7 @@ class UHRDeepFMT3DUNet(nn.Module):
             config: 配置对象，包含所有网络参数
         """
         super().__init__()
-        
+
         if config is None:
             raise ValueError("config 参数为必需项，不能为 None")
 
@@ -210,20 +209,20 @@ class UHRDeepFMT3DUNet(nn.Module):
         num_views = net_params["num_views"]
         base_channels = uhr_params["base_channels"]
         num_levels = uhr_params["num_levels"]
-        
+
         # 几何参数
         self.camera_distance = geo_params["camera_distance"]
         self.detector_size = geo_params["detector_size"]
         self.global_voxel_shape = geo_params["global_voxel_shape"]
         self.config = config
-        
+
         # ROI体积参数：UHR 只回归 ROI（由 data.voxel_ranges 决定）
         vr = config.data.voxel_ranges
         self.roi_x = int(vr.x[1] - vr.x[0])
         self.roi_y = int(vr.y[1] - vr.y[0])
         self.roi_z = int(vr.z[1] - vr.z[0])
         self.voxel_depth = self.roi_z
-        
+
         # 网络参数
         self.in_channels = num_views
         self.base_channels = base_channels
@@ -242,7 +241,7 @@ class UHRDeepFMT3DUNet(nn.Module):
 
     def _reshape_projections_to_3d(self, projections_dict, target_hw=None):
         """将2D投影转换为3D体积张量
-        
+
         自动处理相机H/W与ROI H/W的不匹配
         """
         view_order = ["-90", "-60", "-30", "0", "30", "60", "90"]
@@ -299,6 +298,14 @@ class UHRDeepFMT3DUNet(nn.Module):
         x = self.bottleneck(x)
         skip_features_reversed = skip_features[::-1]
         output = self.decoder(x, skip_features_reversed)
+        target_dhw = (self.roi_z, self.roi_x, self.roi_y)
+        if tuple(output.shape[2:]) != target_dhw:
+            output = F.interpolate(
+                output,
+                size=target_dhw,
+                mode="trilinear",
+                align_corners=False,
+            )
 
         # 激活和重塑
         output = self.output_activation(output)
@@ -314,7 +321,11 @@ class UHRDeepFMT3DUNet(nn.Module):
         if points is not None:
             # points are normalized in global voxel coordinates (x,y,z in [0,1])
             vr = self.config.data.voxel_ranges
-            global_shape = torch.tensor(self.global_voxel_shape, device=points.device, dtype=points.dtype)
+            global_shape = torch.tensor(
+                self.global_voxel_shape,
+                device=points.device,
+                dtype=points.dtype,
+            )
             pts_global = torch.round(points * (global_shape - 1)).long()  # [B,N,3] as (x,y,z)
 
             x0, y0, z0 = int(vr.x[0]), int(vr.y[0]), int(vr.z[0])

@@ -10,13 +10,42 @@ from pathlib import Path
 from typing import Any
 
 METHODS = [
-    ("GISC baseline", "gisc_baseline", "outputs/fmt_simgen_v2_3k_20k/test/gisc_fmt"),
+    (
+        "GISC baseline",
+        "gisc_baseline",
+        "outputs/fmt_simgen_v2_multisource/test/e14_source_field_from_e13_fixed",
+    ),
     ("E12-v2", "e12_v2", "outputs/fmt_simgen_v2_multisource/test/e12_v2"),
     ("E12-MPB", "e12_mpb", "outputs/fmt_simgen_v2_multisource/test/e12_mpb"),
+    (
+        "E12-MPB-AuxNorm",
+        "e12_mpb_auxnorm",
+        "outputs/fmt_simgen_v2_multisource/test/e12_mpb_auxnorm",
+    ),
     (
         "E12-MPB-Tversky",
         "e12_mpb_tversky",
         "outputs/fmt_simgen_v2_multisource/test/e12_mpb_tversky",
+    ),
+    (
+        "E12-MPB-AuxNorm-Tversky",
+        "e12_mpb_auxnorm_tversky",
+        "outputs/fmt_simgen_v2_multisource/test/e12_mpb_auxnorm_tversky",
+    ),
+    (
+        "E13-MSQ",
+        "e13_msq_from_mpb",
+        "outputs/fmt_simgen_v2_multisource/test/e13_msq_from_mpb",
+    ),
+    (
+        "E13-MSQ-fixed",
+        "e13_msq_fixed_from_mpb",
+        "outputs/fmt_simgen_v2_multisource/test/e13_msq_fixed_from_mpb",
+    ),
+    (
+        "E14-SourceField",
+        "e14_source_field_from_e13_fixed",
+        "outputs/fmt_simgen_v2_multisource/test/e14_source_field_from_e13_fixed",
     ),
 ]
 
