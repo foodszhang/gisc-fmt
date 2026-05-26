@@ -82,6 +82,8 @@ class FmtSimGenProjDataset(Dataset):
             stage1_mesh_files = [stage1_mesh_files]
         self.stage1_mesh_files = [str(p) for p in stage1_mesh_files]
         self.query_sampler = NonGTQuerySampler(self.config) if self.use_nongt_sampler else None
+        self.center_distance_targets_enabled = bool(self.config.get("center_distance_targets", False))
+        self._center_distance_cache: dict[str, dict[str, np.ndarray]] = {}
         source_hyp_cfg = self.config.get("source_hypothesis", {}) or {}
         self.source_hypothesis_enabled = bool(source_hyp_cfg.get("enabled", False))
         self.source_hypothesis_top_m = int(source_hyp_cfg.get("top_m", 5))
@@ -436,6 +438,54 @@ class FmtSimGenProjDataset(Dataset):
             "valid": valid,
         }
 
+    def _build_center_distance_targets(self, gt: np.ndarray) -> dict[str, np.ndarray]:
+        structure = ndimage.generate_binary_structure(3, 1)
+        labeled, num = ndimage.label(gt > 0.0, structure=structure)
+        center_target = np.zeros_like(gt, dtype=np.float32)
+        distance_target = np.zeros_like(gt, dtype=np.float32)
+        fg_mask = np.zeros_like(gt, dtype=np.float32)
+        if num <= 0:
+            return {
+                "center_target": center_target,
+                "distance_target": distance_target,
+                "fg_mask": fg_mask,
+            }
+
+        xs = np.arange(gt.shape[0], dtype=np.float32)[:, None, None]
+        ys = np.arange(gt.shape[1], dtype=np.float32)[None, :, None]
+        zs = np.arange(gt.shape[2], dtype=np.float32)[None, None, :]
+        sigma_vox = max(float(self.config.get("center_sigma_mm", 0.5)) / max(self.voxel_size_mm, 1e-6), 1e-6)
+
+        for label_id in range(1, num + 1):
+            mask = labeled == label_id
+            if not mask.any():
+                continue
+            coords = np.argwhere(mask).astype(np.float32)
+            centroid = coords.mean(axis=0)
+            dist_sq = (xs - centroid[0]) ** 2 + (ys - centroid[1]) ** 2 + (zs - centroid[2]) ** 2
+            center_target = np.maximum(center_target, np.exp(-dist_sq / (2.0 * sigma_vox**2)).astype(np.float32))
+            dist_map = ndimage.distance_transform_edt(mask).astype(np.float32)
+            radius = max(float(dist_map[mask].max()), 1.0)
+            fg = mask.astype(np.float32)
+            fg_mask = np.maximum(fg_mask, fg)
+            distance_target = np.maximum(distance_target, np.where(mask, dist_map / radius, 0.0).astype(np.float32))
+
+        return {
+            "center_target": center_target,
+            "distance_target": distance_target,
+            "fg_mask": fg_mask,
+        }
+
+    def _center_distance_targets(self, sample_dir: Path, gt: np.ndarray) -> dict[str, np.ndarray]:
+        if not self.center_distance_targets_enabled:
+            return {}
+        key = sample_dir.name
+        cached = self._center_distance_cache.get(key)
+        if cached is None:
+            cached = self._build_center_distance_targets(gt)
+            self._center_distance_cache[key] = cached
+        return cached
+
     def __getitem__(self, index: int) -> dict[str, Any]:
         sample_dir = self.dirs[index]
         (
@@ -492,6 +542,7 @@ class FmtSimGenProjDataset(Dataset):
             points_ijk[:, 1].astype(np.int64),
             points_ijk[:, 2].astype(np.int64),
         ]
+        center_distance_targets = self._center_distance_targets(sample_dir, gt)
 
         num_foci = -1
         tumor_path = sample_dir / "tumor_params.json"
@@ -522,6 +573,25 @@ class FmtSimGenProjDataset(Dataset):
             "projection_scales": projection_scales,
             "num_foci": num_foci,
         }
+        if center_distance_targets:
+            ix = points_ijk[:, 0].astype(np.int64)
+            iy = points_ijk[:, 1].astype(np.int64)
+            iz = points_ijk[:, 2].astype(np.int64)
+            item["center_target"] = torch.tensor(
+                center_distance_targets["center_target"][ix, iy, iz],
+                dtype=torch.float32,
+                device=self.device,
+            ).unsqueeze(-1)
+            item["distance_target"] = torch.tensor(
+                center_distance_targets["distance_target"][ix, iy, iz],
+                dtype=torch.float32,
+                device=self.device,
+            ).unsqueeze(-1)
+            item["center_distance_fg_mask"] = torch.tensor(
+                center_distance_targets["fg_mask"][ix, iy, iz],
+                dtype=torch.float32,
+                device=self.device,
+            ).unsqueeze(-1)
         if descatter_targets is not None:
             item["descatter_targets"] = descatter_targets
         if stage1_prior is not None:

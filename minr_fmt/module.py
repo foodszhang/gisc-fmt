@@ -392,6 +392,9 @@ class TrainingLightningModule(LightningModule):
         points_mm: torch.Tensor,
         points_ijk: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if "center_target" in batch and "distance_target" in batch and "center_distance_fg_mask" in batch:
+            return batch["center_target"], batch["distance_target"], batch["center_distance_fg_mask"]
+
         gt_voxels = batch.get("gt_voxels")
         if gt_voxels is None:
             raise ValueError("Center-distance auxiliary supervision requires batch.gt_voxels")
@@ -406,10 +409,10 @@ class TrainingLightningModule(LightningModule):
             if not comps:
                 continue
             pts = points_ijk[b].detach().to(device=points_mm.device, dtype=torch.float32)
+            gt_b = gt[b]
             center_vals = []
             dist_vals = []
             fg_vals = []
-            gt_b = gt[b]
             for center_ijk, dist_map_np, radius_vox in comps:
                 center_mm = (center_ijk.to(device=points_mm.device) + 0.5) * voxel_size_mm
                 diff = points_mm[b] - center_mm[None, :]

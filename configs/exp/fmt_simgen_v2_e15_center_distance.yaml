@@ -7,6 +7,9 @@ defaults:
 name: fmt_simgen_v2_e15_center_distance
 description: E15 center and distance auxiliary heads for multi-source separation on FMT-SimGen v2
 
+data:
+  center_distance_targets: true
+
 model:
   aux_heads:
     hidden_dim: 64
