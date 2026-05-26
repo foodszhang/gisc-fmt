@@ -44,3 +44,16 @@ Use `/home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k` for the v2 full compa
 The active comparison set excludes the CQR ablation series by user request and focuses on GISC-FMT plus paper baselines: `fem2vox_unet`, `uhr_deepfmt`, `vox_dmrn`, `two_stage_deepfmt`, `fmt_reconnet`, `pgdpnn`, `map_pgan`, `d2_recst`, and `dspgn`. Keep all comparison models on the shared Hydra/Lightning entrypoint and common v2 exp config.
 
 Latest test300 result for `gisc_fmt` selected `epoch=44-val_dice=0.6930.ckpt` by candidate Dice. Test Dice is about 0.662, IoU about 0.512, ASSD about 0.579, and HD95 about 2.123 at threshold 0.5. The main GISC-FMT weakness is multi-source recovery, not depth. By `num_foci`, Dice is about 0.761 for one focus, 0.673 for two foci, and 0.579 for three foci. Recall drops from about 0.866 to 0.558 from one to three foci, while precision drops less, indicating missed or incomplete secondary foci rather than only false positives. Depth is secondary: deep, medium, and shallow Dice are about 0.674, 0.665, and 0.647.
+
+## E15 Center-Distance Separation
+
+Use E15 for multi-source separation work. The goal is to improve three-focus and mixed-shape cases without changing the E13 main path.
+
+- Keep the main query-density head unchanged.
+- Add only lightweight auxiliary query heads for center heatmap and distance-to-boundary supervision.
+- Generate auxiliary targets from `gt_voxels` only during training; do not feed them into inference or sampling.
+- Keep the non-GT sampler unchanged and avoid GT ROI leakage.
+- Preferred starting config should inherit from the E13 MPB chain and use `model.aux_heads.*` plus `loss.center_*` settings.
+- Relevant eval slices are full-volume test300, grouped by `num_foci` and shape class, plus component-level recall / missed / merge reporting.
+- Focus metrics: all Dice / Precision / Recall, foci=3 Recall, component recall@3, missed/sample@3, merge/sample@3, mixed-two-shape Dice, and mixed-three-shape Dice.
+- Do not reintroduce experimental-number naming into code-level symbols; name helpers by task semantics only.

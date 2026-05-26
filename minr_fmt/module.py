@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from omegaconf import DictConfig
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
@@ -66,6 +67,9 @@ class TrainingLightningModule(LightningModule):
         self._test_save_recon_roi: bool = True
         self._test_save_registered_seg: bool = True
         self._test_save_proj_comparisons: bool = True
+        self._center_distance_sigma_mm: float = 0.5
+        self._center_distance_center_weight: float = 0.2
+        self._center_distance_weight: float = 0.1
 
     def _setup_model(self):
         """Create model from config using ModelFactory"""
@@ -106,11 +110,40 @@ class TrainingLightningModule(LightningModule):
                     net_state[key[len("net.") :]] = value
             if not net_state:
                 net_state = state
+            current_state = self.net.state_dict()
+            skipped = []
+            filtered_state = {}
+            for key, value in net_state.items():
+                current_value = current_state.get(key)
+                if current_value is not None and current_value.shape != value.shape:
+                    if (
+                        value.ndim == 2
+                        and current_value.ndim == 2
+                        and current_value.shape[0] == value.shape[0]
+                        and current_value.shape[1] > value.shape[1]
+                    ):
+                        adapted = torch.zeros_like(current_value)
+                        adapted[:, : value.shape[1]] = value.to(
+                            dtype=current_value.dtype, device=current_value.device
+                        )
+                        filtered_state[key] = adapted
+                        print(
+                            f"[finetune] expanded linear weight {key}: "
+                            f"{tuple(value.shape)} -> {tuple(current_value.shape)}"
+                        )
+                        continue
+                    skipped.append((key, tuple(value.shape), tuple(current_value.shape)))
+                    continue
+                filtered_state[key] = value
+            net_state = filtered_state
             missing, unexpected = self.net.load_state_dict(net_state, strict=False)
             print(
                 f"[finetune] initialized net from {init_from}; "
-                f"missing={len(missing)} unexpected={len(unexpected)}"
+                f"missing={len(missing)} unexpected={len(unexpected)} "
+                f"skipped_shape_mismatch={len(skipped)}"
             )
+            if skipped:
+                print(f"[finetune] skipped shape-mismatched keys: {skipped}")
             if missing:
                 print(f"[finetune] missing keys: {missing}")
             if unexpected:
@@ -133,6 +166,9 @@ class TrainingLightningModule(LightningModule):
     def _setup_loss(self):
         """Create loss function from config"""
         loss_cfg = self.cfg.loss
+        self._center_distance_sigma_mm = float(loss_cfg.get("center_sigma_mm", 0.5))
+        self._center_distance_center_weight = float(loss_cfg.get("center_weight", 0.2))
+        self._center_distance_weight = float(loss_cfg.get("distance_weight", 0.1))
         self.loss_func = AuxProjectionLightLoss(
             init_scatter_weight=loss_cfg.get(
                 "aux_projection_weight", loss_cfg.get("scatter_weight", 1.0)
@@ -150,6 +186,7 @@ class TrainingLightningModule(LightningModule):
             tversky_beta=loss_cfg.get("tversky_beta", 0.4),
             tversky_gamma=loss_cfg.get("tversky_gamma", 1.33),
             tversky_weight=loss_cfg.get("tversky_weight", None),
+            light_weight=loss_cfg.get("light_weight", 1.0),
         )
         self.voxel_loss_func = VoxelReconstructionLoss(
             pos_weight=loss_cfg.pos_weight,
@@ -162,22 +199,102 @@ class TrainingLightningModule(LightningModule):
             tversky_weight=loss_cfg.get("tversky_weight", None),
         )
 
-    def forward(self, projections, points, points_mm=None, depth_maps=None):
+    def forward(
+        self,
+        projections,
+        points,
+        points_mm=None,
+        depth_maps=None,
+        source_hypotheses=None,
+        aux_only: bool = False,
+    ):
         """Forward pass."""
-        return self.net(projections, points, points_mm=points_mm, depth_maps=depth_maps)
+        return self.net(
+            projections,
+            points,
+            points_mm=points_mm,
+            depth_maps=depth_maps,
+            source_hypotheses=source_hypotheses,
+            aux_only=aux_only,
+        )
 
-    def _call_model(self, projections, points, points_mm=None, depth_maps=None):
+    def _call_model(
+        self,
+        projections,
+        points,
+        points_mm=None,
+        depth_maps=None,
+        source_hypotheses=None,
+        aux_only: bool = False,
+    ):
         if hasattr(self.net, "set_training_epoch"):
             self.net.set_training_epoch(int(self.current_epoch))
-        out = self(projections, points, points_mm=points_mm, depth_maps=depth_maps)
+        out = self(
+            projections,
+            points,
+            points_mm=points_mm,
+            depth_maps=depth_maps,
+            source_hypotheses=source_hypotheses,
+            aux_only=aux_only,
+        )
         if isinstance(out, tuple) and len(out) >= 2:
             return out[0], out[1]
         raise RuntimeError(f"Unexpected model output: {type(out)}")
 
+    @staticmethod
+    def _source_hypotheses_from_batch(batch):
+        if "source_hypothesis_centers" not in batch:
+            return None
+        return {
+            "centers": batch["source_hypothesis_centers"],
+            "peak_scores": batch.get("source_hypothesis_peak_scores"),
+            "scales": batch.get("source_hypothesis_scales"),
+            "valid": batch.get("source_hypothesis_valid"),
+        }
+
+    def _log_source_cue_stats(self, prefix: str, batch, point_densities: torch.Tensor) -> None:
+        stats = getattr(self.net, "last_source_cue_stats", None)
+        if stats:
+            for key, value in stats.items():
+                if torch.is_tensor(value):
+                    self.log(
+                        f"{prefix}_source_cue_{key}",
+                        value.detach(),
+                        prog_bar=False,
+                        on_step=False,
+                        on_epoch=True,
+                        sync_dist=True,
+                    )
+        decoder_stats = getattr(self.net, "last_source_decoder_stats", None)
+        if decoder_stats:
+            for key, value in decoder_stats.items():
+                if torch.is_tensor(value):
+                    self.log(
+                        f"{prefix}_source_decoder_{key}",
+                        value.detach(),
+                        prog_bar=False,
+                        on_step=False,
+                        on_epoch=True,
+                        sync_dist=True,
+                    )
+        nearest_dist = getattr(self.net, "last_source_nearest_dist", None)
+        if torch.is_tensor(nearest_dist):
+            mask = point_densities > 0.0
+            if mask.any():
+                self.log(
+                    f"{prefix}_positive_query_nearest_peak_dist",
+                    nearest_dist.to(point_densities.device)[mask].mean().detach(),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+
     def _is_voxel_model(self) -> bool:
-        return str(getattr(self.cfg.model, "output_type", "")).lower() == "voxel" or str(
-            getattr(self.net, "output_type", "")
-        ).lower() == "voxel"
+        return (
+            str(getattr(self.cfg.model, "output_type", "")).lower() == "voxel"
+            or str(getattr(self.net, "output_type", "")).lower() == "voxel"
+        )
 
     def _call_voxel_model(self, projections, batch):
         if hasattr(self.net, "set_training_epoch"):
@@ -187,6 +304,7 @@ class TrainingLightningModule(LightningModule):
             points=batch.get("points"),
             points_mm=batch.get("points_mm"),
             depth_maps=batch.get("depth_maps"),
+            batch=batch,
         )
         if isinstance(out, dict) and "pred_voxel" in out:
             return out["pred_voxel"], out.get("aux_outputs", {})
@@ -210,30 +328,31 @@ class TrainingLightningModule(LightningModule):
         if target_voxel.dim() == 5 and target_voxel.size(1) == 1:
             target_voxel = target_voxel[:, 0]
         if pred_voxel.shape[1:] != target_voxel.shape[1:]:
-            pred_voxel = torch.nn.functional.interpolate(
-                pred_voxel.unsqueeze(1),
-                size=target_voxel.shape[1:],
-                mode="trilinear",
-                align_corners=False,
-            )[:, 0]
+            raise ValueError(
+                "Voxel prediction and target shapes differ during evaluation. "
+                f"pred={tuple(pred_voxel.shape)}, target={tuple(target_voxel.shape)}. "
+                "Use full-volume output, crop_target, paste_pred, or mesh_to_voxel alignment."
+            )
         return pred_voxel, target_voxel
 
     def _prepare_projection_input(self, batch):
         projections = batch["projections"]
-        if self.cfg.model.name in {
-            "minr_fmt",
-            "gisc_fmt",
-            "point_cqr",
-            "fixed_footprint_cqr",
-            "depth_footprint_cqr",
-            "unconstrained_adaptive_cqr",
-        } and "projections_packed" in batch:
+        if (
+            self.cfg.model.name
+            in {
+                "minr_fmt",
+                "gisc_fmt",
+                "point_cqr",
+                "fixed_footprint_cqr",
+                "depth_footprint_cqr",
+                "unconstrained_adaptive_cqr",
+            }
+            and "projections_packed" in batch
+        ):
             p = batch["projections_packed"]  # [B,V,1,H,W]
             B, V = p.shape[0], p.shape[1]
             # GISC-FMT expects view-major flattening: [V*B,1,H,W]
-            return projections, p.permute(1, 0, 2, 3, 4).reshape(
-                B * V, 1, p.shape[-2], p.shape[-1]
-            )
+            return projections, p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
         return projections, projections
 
     def _shape_tuple_from_batch(self, voxel_shape, batch_size: int) -> tuple[int, int, int, int]:
@@ -243,6 +362,108 @@ class TrainingLightningModule(LightningModule):
             int(voxel_shape[1][0].detach().cpu().numpy()),
             int(voxel_shape[2][0].detach().cpu().numpy()),
         )
+
+    @staticmethod
+    def _connected_components_from_voxels(
+        gt_voxels: torch.Tensor,
+    ) -> list[tuple[torch.Tensor, np.ndarray, float]]:
+        from scipy import ndimage
+
+        gt_np = gt_voxels.detach().to(dtype=torch.float32).cpu().numpy()
+        if gt_np.ndim == 4 and gt_np.shape[0] == 1:
+            gt_np = gt_np[0]
+        structure = ndimage.generate_binary_structure(3, 1)
+        labeled, num = ndimage.label(gt_np > 0.0, structure=structure)
+        comps: list[tuple[torch.Tensor, np.ndarray, float]] = []
+        for label_id in range(1, num + 1):
+            mask = labeled == label_id
+            if not mask.any():
+                continue
+            coords = np.argwhere(mask)
+            center = coords.astype(np.float32).mean(axis=0)
+            dist_map = ndimage.distance_transform_edt(mask).astype(np.float32)
+            radius = float(dist_map[mask].max())
+            comps.append((torch.tensor(center, dtype=torch.float32), dist_map, max(radius, 1.0)))
+        return comps
+
+    def _center_distance_query_targets(
+        self,
+        batch: dict,
+        points_mm: torch.Tensor,
+        points_ijk: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        gt_voxels = batch.get("gt_voxels")
+        if gt_voxels is None:
+            raise ValueError("Center-distance auxiliary supervision requires batch.gt_voxels")
+        voxel_size_mm = float(getattr(self.cfg.data, "voxel_size_mm", 0.2))
+        gt = gt_voxels.detach().to(device=points_mm.device, dtype=torch.float32)
+        B, N, _ = points_mm.shape
+        center_targets = torch.zeros((B, N, 1), device=points_mm.device, dtype=torch.float32)
+        distance_targets = torch.zeros((B, N, 1), device=points_mm.device, dtype=torch.float32)
+        fg_mask = torch.zeros((B, N, 1), device=points_mm.device, dtype=torch.float32)
+        for b in range(B):
+            comps = self._connected_components_from_voxels(gt[b])
+            if not comps:
+                continue
+            pts = points_ijk[b].detach().to(device=points_mm.device, dtype=torch.float32)
+            center_vals = []
+            dist_vals = []
+            fg_vals = []
+            gt_b = gt[b]
+            for center_ijk, dist_map_np, radius_vox in comps:
+                center_mm = (center_ijk.to(device=points_mm.device) + 0.5) * voxel_size_mm
+                diff = points_mm[b] - center_mm[None, :]
+                dist_sq = (diff * diff).sum(dim=-1, keepdim=True)
+                center_vals.append(
+                    torch.exp(-dist_sq / (2.0 * (self._center_distance_sigma_mm**2)))
+                )
+                x = pts[:, 0].round().long().clamp(0, gt_b.shape[0] - 1)
+                y = pts[:, 1].round().long().clamp(0, gt_b.shape[1] - 1)
+                z = pts[:, 2].round().long().clamp(0, gt_b.shape[2] - 1)
+                mask = gt_b[x, y, z] > 0.0
+                fg_vals.append(mask.unsqueeze(-1).float())
+                if mask.any():
+                    dist_map = torch.tensor(dist_map_np, device=points_mm.device, dtype=torch.float32)
+                    dist_to_boundary = dist_map[x, y, z].unsqueeze(-1) * voxel_size_mm
+                    dist_vals.append((dist_to_boundary / (radius_vox * voxel_size_mm)).clamp(0.0, 1.0))
+                else:
+                    dist_vals.append(torch.zeros((N, 1), device=points_mm.device, dtype=torch.float32))
+            center_targets[b] = torch.stack(center_vals, dim=0).amax(dim=0)
+            distance_targets[b] = torch.stack(dist_vals, dim=0).amax(dim=0)
+            fg_mask[b] = torch.stack(fg_vals, dim=0).amax(dim=0)
+        return center_targets, distance_targets, fg_mask
+
+    def _center_distance_aux_losses(self, batch, aux_outputs, points_mm, points_ijk):
+        if not isinstance(aux_outputs, dict):
+            return {}
+        center_logits = aux_outputs.get("center_logits")
+        distance_logits = aux_outputs.get("distance_logits")
+        if center_logits is None and distance_logits is None:
+            return {}
+        center_target, distance_target, fg_mask = self._center_distance_query_targets(
+            batch, points_mm, points_ijk
+        )
+        losses = {}
+        if center_logits is not None:
+            center_pred = torch.sigmoid(center_logits)
+            center_loss = F.mse_loss(center_pred, center_target)
+            losses["center_loss"] = center_loss
+            losses["center_target_pos_ratio"] = (center_target > 0.5).float().mean()
+            losses["center_target_mean"] = center_target.mean()
+            losses["pred_center_mean"] = center_pred.mean()
+        if distance_logits is not None:
+            distance_pred = torch.sigmoid(distance_logits)
+            fg = fg_mask > 0.5
+            if fg.any():
+                distance_loss = F.smooth_l1_loss(distance_pred[fg], distance_target[fg])
+                losses["distance_loss"] = distance_loss
+                losses["distance_target_mean_fg"] = distance_target[fg].mean()
+                losses["pred_distance_mean"] = distance_pred[fg].mean()
+            else:
+                losses["distance_loss"] = torch.zeros((), device=points_mm.device)
+                losses["distance_target_mean_fg"] = torch.zeros((), device=points_mm.device)
+                losses["pred_distance_mean"] = torch.zeros((), device=points_mm.device)
+        return losses
 
     def _log_query_sampling_stats(self, prefix: str, batch, point_densities: torch.Tensor) -> None:
         """Log sampled-query composition for stability audits."""
@@ -353,20 +574,49 @@ class TrainingLightningModule(LightningModule):
             self.loss_func.update_epoch(self.current_epoch)
             return total_loss
 
+        aux_only = float(self.cfg.loss.get("light_weight", 1.0)) == 0.0
         points = batch["points"]
         points_mm = batch.get("points_mm")
         depth_maps = batch.get("depth_maps")
+        source_hypotheses = self._source_hypotheses_from_batch(batch)
         density = batch["point_densities"].unsqueeze(-1)
-        self._log_query_sampling_stats("train", batch, batch["point_densities"])
+        if not aux_only:
+            self._log_query_sampling_stats("train", batch, batch["point_densities"])
 
         # Forward pass (use packed tensor when available)
         density_pred, aux_outputs = self._call_model(
-            proj_in, points, points_mm=points_mm, depth_maps=depth_maps
+            proj_in,
+            points,
+            points_mm=points_mm,
+            depth_maps=depth_maps,
+            source_hypotheses=source_hypotheses,
+            aux_only=aux_only,
         )
+        self._log_source_cue_stats("train", batch, batch["point_densities"])
 
         # Compute loss
         descatter_targets = batch.get("descatter_targets")
         loss_dict = self.loss_func(aux_outputs, descatter_targets, density_pred, density)
+        center_distance_losses = self._center_distance_aux_losses(
+            batch, aux_outputs, points_mm, batch["points_ijk"]
+        )
+        if center_distance_losses:
+            total_center_distance = torch.zeros(
+                (), dtype=density_pred.dtype, device=density_pred.device
+            )
+            if "center_loss" in center_distance_losses:
+                total_center_distance = (
+                    total_center_distance
+                    + self._center_distance_center_weight * center_distance_losses["center_loss"]
+                )
+            if "distance_loss" in center_distance_losses:
+                total_center_distance = (
+                    total_center_distance
+                    + self._center_distance_weight * center_distance_losses["distance_loss"]
+                )
+            loss_dict.update(center_distance_losses)
+            loss_dict["center_distance_aux_loss"] = total_center_distance
+            loss_dict["total_loss"] = loss_dict["total_loss"] + total_center_distance
         total_loss = loss_dict["total_loss"]
         anchor_loss = getattr(self.net, "last_feature_refinement_anchor_loss", None)
         if isinstance(anchor_loss, torch.Tensor):
@@ -446,6 +696,7 @@ class TrainingLightningModule(LightningModule):
         points = batch["points"]
         points_mm = batch.get("points_mm")
         depth_maps = batch.get("depth_maps")
+        source_hypotheses = self._source_hypotheses_from_batch(batch)
         point_densities = batch["point_densities"]
         voxel_shape = batch["feasible_voxel_shape"]
         self._log_query_sampling_stats("val", batch, point_densities)
@@ -456,7 +707,13 @@ class TrainingLightningModule(LightningModule):
         voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
 
         # Inference
-        pred, _ = self._call_model(proj_in, points, points_mm=points_mm, depth_maps=depth_maps)
+        pred, _ = self._call_model(
+            proj_in,
+            points,
+            points_mm=points_mm,
+            depth_maps=depth_maps,
+            source_hypotheses=source_hypotheses,
+        )
         full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
         if full_grid:
             density_gt = point_densities.reshape(voxel_shape_tuple)
@@ -469,8 +726,7 @@ class TrainingLightningModule(LightningModule):
             gt_bin = (point_densities > 0.0).float()
             intersection = (pred_bin * gt_bin).sum(dim=1)
             dice = (
-                (2.0 * intersection + 1e-8)
-                / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+                (2.0 * intersection + 1e-8) / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
             ).mean()
             metric_name = "val_query_dice"
 
@@ -972,7 +1228,11 @@ class TrainingLightningModule(LightningModule):
             )
         else:
             pred_density, _aux_projections = self._call_model(
-                proj_in, points, points_mm=points_mm, depth_maps=depth_maps
+                proj_in,
+                points,
+                points_mm=points_mm,
+                depth_maps=depth_maps,
+                source_hypotheses=self._source_hypotheses_from_batch(batch),
             )
             voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
             full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
@@ -993,8 +1253,7 @@ class TrainingLightningModule(LightningModule):
             gt_bin = (point_densities > 0.0).float()
             intersection = (pred_bin * gt_bin).sum(dim=1)
             dice = (
-                (2.0 * intersection + 1e-8)
-                / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+                (2.0 * intersection + 1e-8) / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
             ).mean()
         self.log(
             "test_dice",
@@ -1081,6 +1340,36 @@ class TrainingLightningModule(LightningModule):
                     sid = str(sids[i])
                 else:
                     sid = f"{batch_idx:06d}_{i}"
+                pred_i = density_pred[i]
+                gt_i = density_gt[i]
+                gt_bin_i = density_gt_bin[i]
+                pred_bin_i = (pred_i >= thr).float()
+                intersection_i = (pred_bin_i * gt_bin_i).sum()
+                union_i = ((pred_bin_i + gt_bin_i) > 0).float().sum()
+                iou_i = float(((intersection_i + 1e-8) / (union_i + 1e-8)).detach().cpu())
+                nrmse_i = torch.sqrt(torch.mean((pred_i - gt_i).square())) / (
+                    gt_i.amax() - gt_i.amin()
+                ).clamp_min(1e-8)
+                volume_error_i = (
+                    pred_bin_i.sum() - gt_bin_i.sum()
+                ).abs() / gt_bin_i.sum().clamp_min(1.0)
+                coords_i = torch.stack(
+                    torch.meshgrid(
+                        torch.arange(pred_i.shape[0], device=pred_i.device, dtype=pred_i.dtype),
+                        torch.arange(pred_i.shape[1], device=pred_i.device, dtype=pred_i.dtype),
+                        torch.arange(pred_i.shape[2], device=pred_i.device, dtype=pred_i.dtype),
+                        indexing="ij",
+                    ),
+                    dim=-1,
+                ).reshape(-1, 3)
+                pred_w_i = pred_i.reshape(-1).clamp_min(0.0)
+                gt_w_i = gt_i.reshape(-1).clamp_min(0.0)
+                pred_centroid_i = pred_w_i @ coords_i / pred_w_i.sum().clamp_min(1e-8)
+                gt_centroid_i = gt_w_i @ coords_i / gt_w_i.sum().clamp_min(1e-8)
+                cle_i = torch.linalg.norm(pred_centroid_i - gt_centroid_i)
+                pred_peak_i = coords_i[pred_i.reshape(-1).argmax()]
+                gt_peak_i = coords_i[gt_i.reshape(-1).argmax()]
+                ple_i = torch.linalg.norm(pred_peak_i - gt_peak_i)
                 # Instance-level metrics (only when #lights>1)
                 mr = ms = delta_cc = None
                 if int(n_gt) > 1:
@@ -1114,6 +1403,8 @@ class TrainingLightningModule(LightningModule):
                         "pred_regions": int(n_pred),
                         "gt_regions": int(n_gt),
                         "dice": float(compute_dice(pm_f, gm_f)),
+                        "iou": iou_i,
+                        "nrmse": float(nrmse_i.detach().cpu()),
                         "precision": float(prec),
                         "recall": float(rec),
                         "mr": mr,
@@ -1123,6 +1414,11 @@ class TrainingLightningModule(LightningModule):
                         "hd95": float(h) if np.isfinite(h) else None,
                         "psnr": float(psnr_vals[i]),
                         "ssim": float(ssim_vals[i]),
+                        "cle": float(cle_i.detach().cpu()),
+                        "ple": float(ple_i.detach().cpu()),
+                        "volume_error": float(volume_error_i.detach().cpu()),
+                        "pred_positive_ratio": float(pred_bin_i.mean().detach().cpu()),
+                        "gt_positive_ratio": float(gt_bin_i.mean().detach().cpu()),
                     }
                 )
 
@@ -1314,7 +1610,7 @@ class TrainingLightningModule(LightningModule):
         try:
             import csv
 
-            with open(self._test_out_dir / "metrics.csv", "w", newline="") as f:
+            with open(self._test_out_dir / "metrics_summary.csv", "w", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=["metric", "value"])
                 w.writeheader()
                 for key in sorted(metrics):
@@ -1351,9 +1647,23 @@ class TrainingLightningModule(LightningModule):
                 # 1) per-sample csv
                 keys = [
                     "sample_id",
+                    "case_id",
+                    "Dice",
+                    "IoU",
+                    "NRMSE",
+                    "PSNR",
+                    "SSIM",
+                    "CLE",
+                    "LE",
+                    "PLE",
+                    "Volume Error",
+                    "pred_positive_ratio",
+                    "gt_positive_ratio",
                     "pred_regions",
                     "gt_regions",
                     "dice",
+                    "iou",
+                    "nrmse",
                     "precision",
                     "recall",
                     "mr",
@@ -1363,8 +1673,27 @@ class TrainingLightningModule(LightningModule):
                     "hd95",
                     "psnr",
                     "ssim",
+                    "cle",
+                    "ple",
+                    "volume_error",
                     "warning",
                 ]
+                for r in rows:
+                    r["case_id"] = r.get("sample_id")
+                    r["Dice"] = r.get("dice")
+                    r["IoU"] = r.get("iou")
+                    r["NRMSE"] = r.get("nrmse")
+                    r["PSNR"] = r.get("psnr")
+                    r["SSIM"] = r.get("ssim")
+                    r["CLE"] = r.get("cle")
+                    r["LE"] = r.get("cle")
+                    r["PLE"] = r.get("ple")
+                    r["Volume Error"] = r.get("volume_error")
+                with open(self._test_out_dir / "metrics.csv", "w", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=keys)
+                    w.writeheader()
+                    for r in rows:
+                        w.writerow({k: r.get(k) for k in keys})
                 with open(self._test_out_dir / "metrics_per_sample.csv", "w", newline="") as f:
                     w = csv.DictWriter(f, fieldnames=keys)
                     w.writeheader()

@@ -1,0 +1,31 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e13_msq
+  - _self_
+
+name: fmt_simgen_v2_e15_center
+description: E15 center auxiliary head for multi-source separation on FMT-SimGen v2
+
+model:
+  aux_heads:
+    hidden_dim: 64
+    center:
+      enabled: true
+    distance:
+      enabled: false
+
+loss:
+  center_weight: 0.2
+  distance_weight: 0.0
+  center_sigma_mm: 0.5
+
+optim:
+  lr: 0.0005
+  scheduler:
+    warmup_epochs: 5
+    warmup_start_factor: 0.2
+
+trainer:
+  max_epochs: 80
+  gradient_clip_val: 1.0

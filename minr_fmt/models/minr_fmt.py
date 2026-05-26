@@ -15,12 +15,12 @@ from ..network.encoder import (
     PointFeatureSampler,
     UNet,
 )
+from ..network.feature_refinement import FeatureRefinement
 from ..network.fusion import (
     BackgroundGuidanceInteraction,
     CrossViewResidualFusion,
     ScaleFusionNet,
 )
-from ..network.feature_refinement import FeatureRefinement
 from ..network.ptfa import (
     PCFSSigmaCalibrator,
     compute_exit_depth_sigma,
@@ -141,6 +141,33 @@ class ImplicitSourceField(nn.Module):
         return self.mlp_out(z)
 
 
+class SourceInstanceFieldDecoder(nn.Module):
+    """Shared local implicit source field used by E14 source-instance decoding."""
+
+    def __init__(self, feature_dim: int, hidden_dim: int):
+        super().__init__()
+        local_dim = 6  # rel_xyz, dist, peak_score, ownership
+        self.net = nn.Sequential(
+            nn.Linear(feature_dim * 2 + local_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(
+        self,
+        canonical_feature: torch.Tensor,
+        pcfs_feature: torch.Tensor,
+        local_source_features: torch.Tensor,
+    ) -> torch.Tensor:
+        B, N, K, _ = local_source_features.shape
+        canonical = canonical_feature[:, :, None, :].expand(-1, -1, K, -1)
+        pcfs = pcfs_feature[:, :, None, :].expand(-1, -1, K, -1)
+        decoder_input = torch.cat([canonical, pcfs, local_source_features], dim=-1)
+        return self.net(decoder_input.reshape(B * N * K, -1)).reshape(B, N, K, 1)
+
+
 class ResidualScorer(nn.Module):
     """Small zero-initialized residual scorer for query-level logit correction."""
 
@@ -158,6 +185,21 @@ class ResidualScorer(nn.Module):
 
     def forward(self, scorer_input: torch.Tensor) -> torch.Tensor:
         return self.net(scorer_input)
+
+
+class QueryAuxHead(nn.Module):
+    """Lightweight query-level auxiliary prediction head."""
+
+    def __init__(self, feature_dim: int, hidden_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(feature_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, feature: torch.Tensor) -> torch.Tensor:
+        return self.net(feature)
 
 
 # ===== 主网络 =====
@@ -253,6 +295,34 @@ class PointDensityNet(nn.Module):
         self.store_forward_debug = bool(
             ConfigExtractor._model_cfg(config).get("store_forward_debug", False)
         )
+        source_cue_cfg = ConfigExtractor._model_cfg(config).get("source_instance_cue", {}) or {}
+        self.source_instance_cue_enabled = bool(source_cue_cfg.get("enabled", False))
+        self.source_instance_cue_dim = int(source_cue_cfg.get("dim", 10))
+        self.source_instance_tau_s_mm = float(source_cue_cfg.get("tau_s_mm", 5.0))
+        if self.source_instance_cue_enabled and self.source_instance_cue_dim not in {8, 10}:
+            raise ValueError(
+                "model.source_instance_cue.dim must be 8 or 10, got "
+                f"{self.source_instance_cue_dim}"
+            )
+        source_decoder_cfg = (
+            ConfigExtractor._model_cfg(config).get("source_instance_decoder", {}) or {}
+        )
+        self.source_instance_decoder_enabled = bool(source_decoder_cfg.get("enabled", False))
+        self.source_instance_decoder_top_k = int(source_decoder_cfg.get("top_k", 2))
+        self.source_instance_decoder_merge = str(source_decoder_cfg.get("merge", "weighted_sum"))
+        if self.source_instance_decoder_top_k < 1:
+            raise ValueError("model.source_instance_decoder.top_k must be >= 1")
+        if self.source_instance_decoder_merge not in {"weighted_sum", "max_merge"}:
+            raise ValueError(
+                "model.source_instance_decoder.merge must be 'weighted_sum' or 'max_merge', "
+                f"got {self.source_instance_decoder_merge}"
+            )
+        aux_heads_cfg = ConfigExtractor._model_cfg(config).get("aux_heads", {}) or {}
+        center_cfg = aux_heads_cfg.get("center", {}) or {}
+        distance_cfg = aux_heads_cfg.get("distance", {}) or {}
+        self.center_aux_head_enabled = bool(center_cfg.get("enabled", False))
+        self.distance_aux_head_enabled = bool(distance_cfg.get("enabled", False))
+        self.aux_head_hidden_dim = int(aux_heads_cfg.get("hidden_dim", 64))
 
         assert len(self.view_list) == num_views, (
             f"view_list length {len(self.view_list)} != num_views {num_views}"
@@ -407,6 +477,15 @@ class PointDensityNet(nn.Module):
             d_x=implicit_d_x,
             d_f=implicit_d_f,
         )
+        if self.source_instance_decoder_enabled:
+            self.source_instance_decoder = SourceInstanceFieldDecoder(
+                feature_dim=feature_dim,
+                hidden_dim=int(source_decoder_cfg.get("hidden_dim", 64)),
+            )
+        if self.center_aux_head_enabled:
+            self.center_head = QueryAuxHead(feature_dim, self.aux_head_hidden_dim)
+        if self.distance_aux_head_enabled:
+            self.distance_head = QueryAuxHead(feature_dim, self.aux_head_hidden_dim)
 
         if self.residual_scorer_enabled:
             if self.residual_scorer_input_mode == "bilinear_s3":
@@ -427,9 +506,18 @@ class PointDensityNet(nn.Module):
             if self.aggregation_mode != "legacy_multiscale":
                 raise ValueError("feature_refinement currently requires legacy_multiscale fusion")
             if self.residual_scorer_enabled:
-                raise ValueError("E8 feature_refinement is defined with residual_scorer.enabled=false")
-            if int(refinement_params["geom_dim"]) != 5:
-                raise ValueError("E8 feature refinement expects model.feature_refinement.geom_dim=5")
+                raise ValueError(
+                    "E8 feature_refinement is defined with residual_scorer.enabled=false"
+                )
+            expected_geom_dim = 5 + (
+                self.source_instance_cue_dim if self.source_instance_cue_enabled else 0
+            )
+            if int(refinement_params["geom_dim"]) != expected_geom_dim:
+                raise ValueError(
+                    "feature refinement geom_dim must match E12 geometry plus optional "
+                    f"source cue; expected {expected_geom_dim}, got "
+                    f"{int(refinement_params['geom_dim'])}"
+                )
             self.feature_refinement = FeatureRefinement(
                 feature_dim=feature_dim,
                 geom_dim=int(refinement_params["geom_dim"]),
@@ -550,9 +638,17 @@ class PointDensityNet(nn.Module):
         self.last_transport_consensus_adapter_stats = {}
         self.last_feature_refinement_anchor_loss = None
         self.last_feature_refinement_debug = {}
-
-        # 点采样器
+        self.last_source_cue_stats = {}
+        self.last_source_nearest_dist = None
+        self.last_source_decoder_stats = {}
         self.sampler = PointFeatureSampler()
+
+    def _add_query_aux_outputs(self, aux_outputs: dict, query_feature: torch.Tensor) -> dict:
+        if self.center_aux_head_enabled:
+            aux_outputs["center_logits"] = self.center_head(query_feature)
+        if self.distance_aux_head_enabled:
+            aux_outputs["distance_logits"] = self.distance_head(query_feature)
+        return aux_outputs
 
     def set_training_epoch(self, epoch: int) -> None:
         """Expose Lightning's epoch to modules with epoch-dependent warmup."""
@@ -1310,7 +1406,9 @@ class PointDensityNet(nn.Module):
             self.last_feature_refinement_anchor_loss = None
         elif self.feature_refinement_ptfa_view_aggregation == "reliability_gate":
             if self.ptfa_mode != "corrected_exit_depth_gaussian":
-                raise ValueError("reliability_gate aggregation requires corrected_exit_depth_gaussian")
+                raise ValueError(
+                    "reliability_gate aggregation requires corrected_exit_depth_gaussian"
+                )
             geom_view = self._build_reliability_geometry_features(projection_pack, ptfa_stats)
             s1_evidence, weights = self.reliability_view_gate(
                 s1_ptfa, geom_view, projection_pack["valid"]
@@ -1472,6 +1570,206 @@ class PointDensityNet(nn.Module):
         )
         return depths[..., 0:1]
 
+    def _source_ownership_pack(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+    ) -> dict[str, torch.Tensor] | None:
+        """Compute measurement-derived source ownership for query points."""
+        if source_hypotheses is None:
+            return None
+
+        centers = source_hypotheses["centers"].to(device=points_mm.device, dtype=points_mm.dtype)
+        scores = source_hypotheses.get("peak_scores")
+        valid = source_hypotheses.get("valid")
+        if scores is None:
+            scores = centers.new_ones(centers.shape[:2])
+        else:
+            scores = scores.to(device=points_mm.device, dtype=points_mm.dtype)
+        if valid is None:
+            valid = centers.new_ones(centers.shape[:2])
+        else:
+            valid = valid.to(device=points_mm.device, dtype=points_mm.dtype)
+
+        valid_bool = valid > 0.5
+        diff = points_mm[:, :, None, :] - centers[:, None, :, :]
+        dist = torch.linalg.norm(diff, dim=-1)
+        tau = max(float(self.source_instance_tau_s_mm), 1.0e-6)
+        logits = scores[:, None, :] - (dist.square() / (tau * tau))
+        logits = logits.masked_fill(~valid_bool[:, None, :], -1.0e9)
+        has_peak = valid_bool.any(dim=1)
+        ownership = torch.softmax(logits, dim=-1)
+        ownership = torch.where(has_peak[:, None, None], ownership, torch.zeros_like(ownership))
+        return {
+            "centers": centers,
+            "scores": scores,
+            "valid_bool": valid_bool,
+            "has_peak": has_peak,
+            "ownership": ownership,
+            "tau": points_mm.new_tensor(tau),
+        }
+
+    def _source_topk_pack(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+        top_k: int,
+    ) -> dict[str, torch.Tensor] | None:
+        pack = self._source_ownership_pack(points_mm, source_hypotheses)
+        if pack is None:
+            return None
+
+        centers = pack["centers"]
+        scores = pack["scores"]
+        ownership = pack["ownership"]
+        B, N, _ = points_mm.shape
+        top_k = min(int(top_k), centers.shape[1])
+        top_own, top_idx = torch.topk(ownership, k=top_k, dim=-1)
+        centers_exp = centers[:, None, :, :].expand(-1, N, -1, -1)
+        scores_exp = scores[:, None, :].expand(-1, N, -1)
+        gather_idx = top_idx[..., None].expand(-1, -1, -1, 3)
+        top_centers = centers_exp.gather(2, gather_idx)
+        top_scores = scores_exp.gather(-1, top_idx)
+        rel_xyz = points_mm[:, :, None, :] - top_centers
+        dist = torch.linalg.norm(rel_xyz, dim=-1, keepdim=True)
+        return {
+            **pack,
+            "top_idx": top_idx,
+            "top_ownership": top_own,
+            "top_centers": top_centers,
+            "top_scores": top_scores,
+            "top_rel_xyz": rel_xyz,
+            "top_dist": dist,
+        }
+
+    def _source_instance_cue(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+    ) -> torch.Tensor:
+        """Build query-level measurement-derived source-instance cues.
+
+        The hypotheses are derived from proposal heatmaps outside this module and must not
+        contain GT source centers, bbox, or foreground labels.
+        """
+        B, N, _ = points_mm.shape
+        if not self.source_instance_cue_enabled:
+            return points_mm.new_zeros((B, N, 0))
+        if source_hypotheses is None:
+            self.last_source_cue_stats = {
+                "num_detected_peaks": points_mm.new_zeros(()),
+                "ownership_entropy_mean": points_mm.new_zeros(()),
+                "cue_abs_mean": points_mm.new_zeros(()),
+            }
+            self.last_source_nearest_dist = None
+            return points_mm.new_zeros((B, N, self.source_instance_cue_dim))
+
+        topk = self._source_topk_pack(points_mm, source_hypotheses, top_k=2)
+        assert topk is not None
+        centers = topk["centers"]
+        valid_bool = topk["valid_bool"]
+        has_peak = topk["has_peak"]
+        ownership = topk["ownership"]
+        top_own = topk["top_ownership"]
+        top1_idx = topk["top_idx"][..., 0]
+        tau = topk["tau"]
+        rel_xyz = topk["top_rel_xyz"][..., 0, :] / tau
+        top1_dist = topk["top_dist"][..., 0, :] / tau
+        top1_own = top_own[..., 0:1]
+        if top_own.shape[-1] > 1:
+            top2_own = top_own[..., 1:2]
+        else:
+            top2_own = torch.zeros_like(top1_own)
+        margin = top1_own - top2_own
+        entropy = -(ownership * torch.log(ownership.clamp_min(1.0e-8))).sum(dim=-1, keepdim=True)
+        denom = valid_bool.float().sum(dim=1, keepdim=True).clamp_min(1.0).log()
+        entropy = torch.where(denom[:, None, :] > 0, entropy / denom[:, None, :], entropy)
+        top1_score = topk["scores"][:, None, :].expand(-1, N, -1).gather(-1, top1_idx[..., None])
+        num_peaks_norm = (
+            valid_bool.float().sum(dim=1, keepdim=True) / max(1, centers.shape[1])
+        )[:, None, :].expand(-1, N, -1)
+
+        if self.source_instance_cue_dim == 10:
+            cue = torch.cat(
+                [
+                    rel_xyz,
+                    top1_dist,
+                    top1_own,
+                    top2_own,
+                    margin,
+                    entropy,
+                    top1_score,
+                    num_peaks_norm,
+                ],
+                dim=-1,
+            )
+        else:
+            cue = torch.cat(
+                [rel_xyz, top1_dist, top1_own, margin, entropy, top1_score],
+                dim=-1,
+            )
+        cue = torch.nan_to_num(cue, nan=0.0, posinf=0.0, neginf=0.0)
+        cue = torch.where(has_peak[:, None, None], cue, torch.zeros_like(cue))
+        self.last_source_nearest_dist = top1_dist.squeeze(-1).detach()
+        self.last_source_cue_stats = {
+            "num_detected_peaks": valid_bool.float().sum(dim=1).mean().detach(),
+            "ownership_entropy_mean": entropy.detach().mean(),
+            "top1_ownership_mean": top1_own.detach().mean(),
+            "ownership_margin_mean": margin.detach().mean(),
+            "nearest_peak_dist_mean": top1_dist.detach().mean(),
+            "cue_abs_mean": cue.detach().abs().mean(),
+        }
+        return cue
+
+    def _source_instance_decode(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+        canonical_feature: torch.Tensor,
+        pcfs_feature: torch.Tensor,
+    ) -> torch.Tensor | None:
+        """Decode local source fields and merge top-k hypotheses into query logits."""
+        if not self.source_instance_decoder_enabled:
+            self.last_source_decoder_stats = {}
+            return None
+
+        topk = self._source_topk_pack(
+            points_mm, source_hypotheses, top_k=self.source_instance_decoder_top_k
+        )
+        if topk is None:
+            self.last_source_decoder_stats = {
+                "active_query_ratio": points_mm.new_zeros(()),
+                "topk_ownership_sum_mean": points_mm.new_zeros(()),
+            }
+            return None
+
+        tau = topk["tau"]
+        rel_xyz = topk["top_rel_xyz"] / tau
+        dist = topk["top_dist"] / tau
+        peak_score = topk["top_scores"][..., None]
+        ownership = topk["top_ownership"][..., None]
+        local_features = torch.cat([rel_xyz, dist, peak_score, ownership], dim=-1)
+        local_features = torch.nan_to_num(local_features, nan=0.0, posinf=0.0, neginf=0.0)
+
+        local_logits = self.source_instance_decoder(
+            canonical_feature, pcfs_feature, local_features.to(dtype=canonical_feature.dtype)
+        )
+        has_peak = topk["has_peak"]
+        if self.source_instance_decoder_merge == "weighted_sum":
+            logits = (ownership.to(dtype=local_logits.dtype) * local_logits).sum(dim=2)
+        else:
+            logits = local_logits.max(dim=2).values
+        logits = torch.where(has_peak[:, None, None], logits, torch.zeros_like(logits))
+
+        self.last_source_decoder_stats = {
+            "active_query_ratio": has_peak.float().mean().detach(),
+            "topk_ownership_sum_mean": topk["top_ownership"].sum(dim=-1).detach().mean(),
+            "top1_ownership_mean": topk["top_ownership"][..., 0].detach().mean(),
+            "local_logit_mean": local_logits.detach().mean(),
+            "local_logit_std": local_logits.detach().std(),
+        }
+        return logits
+
     def forward(
         self,
         view_projections,
@@ -1480,6 +1778,8 @@ class PointDensityNet(nn.Module):
         bg_guidance=None,
         points_mm=None,
         depth_maps=None,
+        source_hypotheses=None,
+        aux_only: bool = False,
     ):
         """
         Args:
@@ -1491,8 +1791,6 @@ class PointDensityNet(nn.Module):
             logits: [B, N, 1] 密度预测
             aux_projections: dict auxiliary per-view projection outputs
         """
-        B, N, _ = x3d.shape
-
         # 特征提取（多尺度）
         features_s1_dict, features_s2_dict, features_s3_dict = self._forward_shared_unet(
             view_projections
@@ -1505,6 +1803,13 @@ class PointDensityNet(nn.Module):
                 feat = features_s1_dict[view_name]  # [B, C, H, W]
                 gate_out = self.gate_fusions[v_idx](feat)
                 aux_projections[view_name] = gate_out.squeeze(1)
+
+        if aux_only:
+            first_aux = next(iter(aux_projections.values()))
+            dummy_logits = first_aux.new_zeros((first_aux.shape[0], 1, 1))
+            return dummy_logits, aux_projections
+
+        B, N, _ = x3d.shape
 
         projection_pack = None
         if points_mm is not None and self.use_fmt_simgen_projection:
@@ -1572,6 +1877,7 @@ class PointDensityNet(nn.Module):
                     residual = self.residual_scorer(scorer_input)
                     logits = logits + self.residual_scorer_lambda * residual
 
+                aux_projections = self._add_query_aux_outputs(aux_projections, fused_feat)
                 if getattr(self, "enable_background", False):
                     extra = {"query_view_weights": agg_weights}
                     fused_feat_bg = fused_feat
@@ -1637,6 +1943,7 @@ class PointDensityNet(nn.Module):
 
         # 尺度融合（depth-conditioned）
         fused_feat, _a = self.scale_fusion(h1, h2, h3, depth)
+        source_decoder_canonical_feat = fused_feat
 
         # 位置编码
         if gamma_x is None:
@@ -1663,6 +1970,16 @@ class PointDensityNet(nn.Module):
                 )
             s1_evidence = self._s1_ptfa_evidence(features_s1_dict, projection_pack, depth_maps)
             geom_summary = self._geometry_summary(projection_pack).to(dtype=fused_feat.dtype)
+            if self.source_instance_cue_enabled:
+                if points_mm is None:
+                    raise ValueError("source_instance_cue requires FMT-SimGen points_mm")
+                source_cue = self._source_instance_cue(points_mm, source_hypotheses).to(
+                    dtype=fused_feat.dtype
+                )
+                geom_summary = torch.cat([geom_summary, source_cue], dim=-1)
+            else:
+                self.last_source_cue_stats = {}
+                self.last_source_nearest_dist = None
             refined_feat = self.feature_refinement(fused_feat, s1_evidence, geom_summary)
             self.last_feature_refinement_stats = {
                 "base_mean": fused_feat.detach().mean(),
@@ -1685,7 +2002,20 @@ class PointDensityNet(nn.Module):
             self.last_feature_refinement_debug = {}
 
         # 隐式密度预测
-        logits = self.density_head(gamma_x, fused_feat)
+        if self.source_instance_decoder_enabled:
+            if points_mm is None:
+                raise ValueError("source_instance_decoder requires FMT-SimGen points_mm")
+            logits = self._source_instance_decode(
+                points_mm,
+                source_hypotheses,
+                canonical_feature=source_decoder_canonical_feat,
+                pcfs_feature=fused_feat,
+            )
+            if logits is None:
+                logits = self.density_head(gamma_x, fused_feat)
+        else:
+            self.last_source_decoder_stats = {}
+            logits = self.density_head(gamma_x, fused_feat)
         if self.residual_scorer_enabled:
             residual_s3 = f_s3_for_residual if f_s3_for_residual is not None else f_s3
             s3_query_feat = self.proj_s3(residual_s3).mean(dim=2)
@@ -1697,6 +2027,8 @@ class PointDensityNet(nn.Module):
             )
             residual = self.residual_scorer(scorer_input)
             logits = logits + self.residual_scorer_lambda * residual
+
+        aux_projections = self._add_query_aux_outputs(aux_projections, fused_feat)
 
         # Background branch (optional)
         if getattr(self, "enable_background", False):
