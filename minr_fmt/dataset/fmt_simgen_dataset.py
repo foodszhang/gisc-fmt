@@ -82,7 +82,24 @@ class FmtSimGenProjDataset(Dataset):
             stage1_mesh_files = [stage1_mesh_files]
         self.stage1_mesh_files = [str(p) for p in stage1_mesh_files]
         self.query_sampler = NonGTQuerySampler(self.config) if self.use_nongt_sampler else None
-        self.center_distance_targets_enabled = bool(self.config.get("center_distance_targets", False))
+        self.center_distance_targets_enabled = bool(
+            self.config.get("center_distance_targets", False)
+        )
+        self.center_distance_subdir = str(
+            self.config.get("center_distance_subdir", "center_distance")
+        )
+        self.center_distance_require_precomputed = bool(
+            self.config.get("center_distance_require_precomputed", False)
+        )
+        self.center_distance_filenames = {
+            "center_target": str(
+                self.config.get("center_target_filename", "center_target.npy")
+            ),
+            "distance_target": str(
+                self.config.get("distance_target_filename", "distance_target.npy")
+            ),
+            "fg_mask": str(self.config.get("center_distance_fg_filename", "fg_mask.npy")),
+        }
         self._center_distance_cache: dict[str, dict[str, np.ndarray]] = {}
         source_hyp_cfg = self.config.get("source_hypothesis", {}) or {}
         self.source_hypothesis_enabled = bool(source_hyp_cfg.get("enabled", False))
@@ -454,7 +471,10 @@ class FmtSimGenProjDataset(Dataset):
         xs = np.arange(gt.shape[0], dtype=np.float32)[:, None, None]
         ys = np.arange(gt.shape[1], dtype=np.float32)[None, :, None]
         zs = np.arange(gt.shape[2], dtype=np.float32)[None, None, :]
-        sigma_vox = max(float(self.config.get("center_sigma_mm", 0.5)) / max(self.voxel_size_mm, 1e-6), 1e-6)
+        sigma_vox = max(
+            float(self.config.get("center_sigma_mm", 0.5)) / max(self.voxel_size_mm, 1e-6),
+            1e-6,
+        )
 
         for label_id in range(1, num + 1):
             mask = labeled == label_id
@@ -463,12 +483,14 @@ class FmtSimGenProjDataset(Dataset):
             coords = np.argwhere(mask).astype(np.float32)
             centroid = coords.mean(axis=0)
             dist_sq = (xs - centroid[0]) ** 2 + (ys - centroid[1]) ** 2 + (zs - centroid[2]) ** 2
-            center_target = np.maximum(center_target, np.exp(-dist_sq / (2.0 * sigma_vox**2)).astype(np.float32))
+            center = np.exp(-dist_sq / (2.0 * sigma_vox**2)).astype(np.float32)
+            center_target = np.maximum(center_target, center)
             dist_map = ndimage.distance_transform_edt(mask).astype(np.float32)
             radius = max(float(dist_map[mask].max()), 1.0)
             fg = mask.astype(np.float32)
             fg_mask = np.maximum(fg_mask, fg)
-            distance_target = np.maximum(distance_target, np.where(mask, dist_map / radius, 0.0).astype(np.float32))
+            distance = np.where(mask, dist_map / radius, 0.0).astype(np.float32)
+            distance_target = np.maximum(distance_target, distance)
 
         return {
             "center_target": center_target,
@@ -479,12 +501,37 @@ class FmtSimGenProjDataset(Dataset):
     def _center_distance_targets(self, sample_dir: Path, gt: np.ndarray) -> dict[str, np.ndarray]:
         if not self.center_distance_targets_enabled:
             return {}
+        precomputed = self._load_precomputed_center_distance_targets(sample_dir)
+        if precomputed is not None:
+            return precomputed
+        if self.center_distance_require_precomputed:
+            target_dir = sample_dir / self.center_distance_subdir
+            raise FileNotFoundError(
+                f"Missing precomputed center-distance targets under {target_dir}. "
+                "Run scripts/precompute_center_distance_targets.py first, or set "
+                "data.center_distance_require_precomputed=false to use slow online generation."
+            )
         key = sample_dir.name
         cached = self._center_distance_cache.get(key)
         if cached is None:
             cached = self._build_center_distance_targets(gt)
             self._center_distance_cache[key] = cached
         return cached
+
+    def _load_precomputed_center_distance_targets(
+        self, sample_dir: Path
+    ) -> dict[str, np.ndarray] | None:
+        target_dir = sample_dir / self.center_distance_subdir
+        paths = {
+            key: target_dir / filename
+            for key, filename in self.center_distance_filenames.items()
+        }
+        if not all(path.exists() for path in paths.values()):
+            return None
+        return {
+            key: np.load(path, mmap_mode="r").astype(np.float32, copy=False)
+            for key, path in paths.items()
+        }
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         sample_dir = self.dirs[index]

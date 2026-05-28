@@ -9,6 +9,8 @@ description: E15 center and distance auxiliary heads for multi-source separation
 
 data:
   center_distance_targets: true
+  center_distance_require_precomputed: true
+  center_distance_subdir: center_distance
 
 model:
   aux_heads:
