@@ -1,0 +1,33 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e15_center
+  - _self_
+
+name: fmt_simgen_v2_e15_center_residual
+description: E15 weak center auxiliary with center-aware density logit residual
+
+model:
+  aux_heads:
+    hidden_dim: 64
+    center:
+      enabled: true
+      logit_residual: 0.05
+      residual_warmup_epochs: 10
+    distance:
+      enabled: false
+
+loss:
+  center_weight: 0.05
+  distance_weight: 0.0
+  center_sigma_mm: 0.5
+
+optim:
+  lr: 0.0005
+  scheduler:
+    warmup_epochs: 5
+    warmup_start_factor: 0.05
+
+trainer:
+  max_epochs: 80
+  gradient_clip_val: 1.0

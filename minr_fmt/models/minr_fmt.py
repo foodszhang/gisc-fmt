@@ -301,8 +301,7 @@ class PointDensityNet(nn.Module):
         self.source_instance_tau_s_mm = float(source_cue_cfg.get("tau_s_mm", 5.0))
         if self.source_instance_cue_enabled and self.source_instance_cue_dim not in {8, 10}:
             raise ValueError(
-                "model.source_instance_cue.dim must be 8 or 10, got "
-                f"{self.source_instance_cue_dim}"
+                f"model.source_instance_cue.dim must be 8 or 10, got {self.source_instance_cue_dim}"
             )
         source_decoder_cfg = (
             ConfigExtractor._model_cfg(config).get("source_instance_decoder", {}) or {}
@@ -323,6 +322,9 @@ class PointDensityNet(nn.Module):
         self.center_aux_head_enabled = bool(center_cfg.get("enabled", False))
         self.distance_aux_head_enabled = bool(distance_cfg.get("enabled", False))
         self.aux_head_hidden_dim = int(aux_heads_cfg.get("hidden_dim", 64))
+        self.center_residual_warmup_epochs = int(center_cfg.get("residual_warmup_epochs", 0))
+        self.center_logit_residual = float(center_cfg.get("logit_residual", 0.0))
+        self.center_residual_current_epoch = 0
 
         assert len(self.view_list) == num_views, (
             f"view_list length {len(self.view_list)} != num_views {num_views}"
@@ -524,9 +526,7 @@ class PointDensityNet(nn.Module):
                 hidden_dim=int(refinement_params["hidden_dim"]),
                 zero_init=bool(refinement_params["zero_init"]),
             )
-            self.feature_refinement_input_dim = feature_dim * 3 + int(
-                refinement_params["geom_dim"]
-            )
+            self.feature_refinement_input_dim = feature_dim * 3 + int(refinement_params["geom_dim"])
             if self.feature_refinement_ptfa_view_aggregation == "reliability_gate":
                 gate_cfg = refinement_params["reliability_gate"]
                 self.reliability_gate_geom_set = str(gate_cfg["geom_set"])
@@ -644,9 +644,9 @@ class PointDensityNet(nn.Module):
         self.sampler = PointFeatureSampler()
 
     def _add_query_aux_outputs(self, aux_outputs: dict, query_feature: torch.Tensor) -> dict:
-        if self.center_aux_head_enabled:
+        if self.center_aux_head_enabled and "center_logits" not in aux_outputs:
             aux_outputs["center_logits"] = self.center_head(query_feature)
-        if self.distance_aux_head_enabled:
+        if self.distance_aux_head_enabled and "distance_logits" not in aux_outputs:
             aux_outputs["distance_logits"] = self.distance_head(query_feature)
         return aux_outputs
 
@@ -654,6 +654,18 @@ class PointDensityNet(nn.Module):
         """Expose Lightning's epoch to modules with epoch-dependent warmup."""
         self.mean_prior_current_epoch = int(epoch)
         self.pcfs_current_epoch = int(epoch)
+        self.center_residual_current_epoch = int(epoch)
+
+    def _center_residual_alpha(self) -> float:
+        warmup = max(int(getattr(self, "center_residual_warmup_epochs", 0)), 0)
+        scale = float(getattr(self, "center_logit_residual", 0.0))
+        if scale <= 0:
+            return 0.0
+        if warmup <= 0:
+            return scale
+        epoch = max(int(getattr(self, "center_residual_current_epoch", 0)), 0)
+
+        return scale * min(1.0, float(epoch) / float(warmup))
 
     def _mean_prior_alpha(self) -> float:
         warmup = max(int(getattr(self, "mean_prior_warmup_epochs", 0)), 0)
@@ -998,15 +1010,17 @@ class PointDensityNet(nn.Module):
         grid_x = grid[..., 0]
         grid_y = grid[..., 1]
         boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
-        depth_eff_norm = (
-            ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)
-        ).clamp(0.0, 1.0)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
         raw_depth_like_norm = (
             ptfa_stats["raw_depth_like_mm"] / float(self.ptfa_exit_depth_max_mm)
         ).clamp(0.0, 1.0)
-        angles = torch.tensor(
-            [float(v) for v in self.view_list], device=device, dtype=dtype
-        ) * torch.pi / 180.0
+        angles = (
+            torch.tensor([float(v) for v in self.view_list], device=device, dtype=dtype)
+            * torch.pi
+            / 180.0
+        )
         shape = [1] * (grid_x.dim() - 1) + [len(self.view_list)]
         sin_a = torch.sin(angles).view(*shape).expand_as(grid_x)
         cos_a = torch.cos(angles).view(*shape).expand_as(grid_x)
@@ -1074,15 +1088,15 @@ class PointDensityNet(nn.Module):
         grid_x = grid[..., 0]
         grid_y = grid[..., 1]
         boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
-        depth_eff_norm = (
-            ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)
-        ).clamp(0.0, 1.0)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
         denom = max(self.ptfa_sigma_max - self.ptfa_sigma_min, 1.0e-12)
         sigma_norm = ((ptfa_stats["sigma_px"] - self.ptfa_sigma_min) / denom).clamp(0.0, 1.0)
 
-        angles = torch.as_tensor(
-            [float(v) for v in self.view_list], device=device, dtype=dtype
-        ) * (torch.pi / 180.0)
+        angles = torch.as_tensor([float(v) for v in self.view_list], device=device, dtype=dtype) * (
+            torch.pi / 180.0
+        )
         angle_feat = torch.stack(
             [
                 torch.sin(angles),
@@ -1122,16 +1136,16 @@ class PointDensityNet(nn.Module):
         raw_depth_like_norm = (
             ptfa_stats["raw_depth_like_mm"] / float(self.ptfa_exit_depth_max_mm)
         ).clamp(0.0, 1.0)
-        depth_eff_norm = (
-            ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)
-        ).clamp(0.0, 1.0)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
         denom = max(self.ptfa_sigma_max - self.ptfa_sigma_min, 1.0e-12)
         sigma_norm = ((ptfa_stats["sigma_px"] - self.ptfa_sigma_min) / denom).clamp(0.0, 1.0)
         valid_float = projection_pack["valid"].to(dtype=dtype)
 
-        angles = torch.as_tensor(
-            [float(v) for v in self.view_list], device=device, dtype=dtype
-        ) * (torch.pi / 180.0)
+        angles = torch.as_tensor([float(v) for v in self.view_list], device=device, dtype=dtype) * (
+            torch.pi / 180.0
+        )
         angle_feat = torch.stack(
             [
                 torch.sin(angles),
@@ -1184,15 +1198,15 @@ class PointDensityNet(nn.Module):
         grid_x = grid[..., 0]
         grid_y = grid[..., 1]
         boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
-        depth_eff_norm = (
-            ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)
-        ).clamp(0.0, 1.0)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
         denom = max(self.ptfa_sigma_max - self.ptfa_sigma_min, 1.0e-12)
         sigma_norm = ((ptfa_stats["sigma_px"] - self.ptfa_sigma_min) / denom).clamp(0.0, 1.0)
         valid_float = projection_pack["valid"].to(dtype=dtype)
-        angles = torch.as_tensor(
-            [float(v) for v in self.view_list], device=device, dtype=dtype
-        ) * (torch.pi / 180.0)
+        angles = torch.as_tensor([float(v) for v in self.view_list], device=device, dtype=dtype) * (
+            torch.pi / 180.0
+        )
         angle_feat = torch.stack([torch.sin(angles), torch.cos(angles)], dim=-1).view(
             1, 1, self.num_views, 2
         )
@@ -1231,16 +1245,13 @@ class PointDensityNet(nn.Module):
         ).clamp(0.0, 1.0)
         denom = max(self.ptfa_sigma_max - self.ptfa_sigma_min, 1.0e-12)
         sigma_norm = (
-            (
-                ptfa_stats["sigma_px"].to(device=device, dtype=dtype)
-                - float(self.ptfa_sigma_min)
-            )
+            (ptfa_stats["sigma_px"].to(device=device, dtype=dtype) - float(self.ptfa_sigma_min))
             / denom
         ).clamp(0.0, 1.0)
         valid_float = projection_pack["valid"].to(device=device, dtype=dtype)
-        angles = torch.as_tensor(
-            [float(v) for v in self.view_list], device=device, dtype=dtype
-        ) * (torch.pi / 180.0)
+        angles = torch.as_tensor([float(v) for v in self.view_list], device=device, dtype=dtype) * (
+            torch.pi / 180.0
+        )
         angle_feat = torch.stack([torch.sin(angles), torch.cos(angles)], dim=-1).view(
             1, 1, self.num_views, 2
         )
@@ -1303,9 +1314,9 @@ class PointDensityNet(nn.Module):
         entropy_valid = entropy[has_valid]
         if entropy_valid.numel() == 0:
             entropy_valid = entropy.new_zeros(1)
-        depth_eff_norm = (
-            ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)
-        ).clamp(0.0, 1.0)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
         sigma_px = ptfa_stats["sigma_px"]
         return {
             "reliability_weights_mean": valid_weights.detach().mean(),
@@ -1480,8 +1491,7 @@ class PointDensityNet(nn.Module):
         elif self.feature_refinement_ptfa_view_aggregation == "transport_consensus_adapter":
             if self.ptfa_mode != "corrected_exit_depth_gaussian":
                 raise ValueError(
-                    "transport_consensus_adapter aggregation requires "
-                    "corrected_exit_depth_gaussian"
+                    "transport_consensus_adapter aggregation requires corrected_exit_depth_gaussian"
                 )
             geom_summary = self._geometry_summary(projection_pack).to(dtype=s1_ptfa.dtype)
             s1_evidence, tca_stats = self.transport_consensus_adapter(
@@ -1685,9 +1695,9 @@ class PointDensityNet(nn.Module):
         denom = valid_bool.float().sum(dim=1, keepdim=True).clamp_min(1.0).log()
         entropy = torch.where(denom[:, None, :] > 0, entropy / denom[:, None, :], entropy)
         top1_score = topk["scores"][:, None, :].expand(-1, N, -1).gather(-1, top1_idx[..., None])
-        num_peaks_norm = (
-            valid_bool.float().sum(dim=1, keepdim=True) / max(1, centers.shape[1])
-        )[:, None, :].expand(-1, N, -1)
+        num_peaks_norm = (valid_bool.float().sum(dim=1, keepdim=True) / max(1, centers.shape[1]))[
+            :, None, :
+        ].expand(-1, N, -1)
 
         if self.source_instance_cue_dim == 10:
             cue = torch.cat(
@@ -1856,9 +1866,7 @@ class PointDensityNet(nn.Module):
                 )
                 g_s3 = self.proj_s3(f_s3)
                 geom = self._build_query_geometry_features(projection_pack, ptfa_stats)
-                fused_feat, agg_weights = self.query_view_gate(
-                    g_s3, geom, projection_pack["valid"]
-                )
+                fused_feat, agg_weights = self.query_view_gate(g_s3, geom, projection_pack["valid"])
                 self.last_ptfa_stats = {k: v.detach() for k, v in ptfa_stats.items()}
                 self.last_query_aggregation_weights = agg_weights.detach()
 
@@ -2016,6 +2024,21 @@ class PointDensityNet(nn.Module):
         else:
             self.last_source_decoder_stats = {}
             logits = self.density_head(gamma_x, fused_feat)
+        # E15: center-aware density residual
+        # 注意：这一步让 center head 不只是辅助任务，而是轻微影响最终 density logits
+
+        center_logits_for_aux = None
+        distance_logits_for_aux = None
+
+        if self.center_aux_head_enabled:
+            center_logits_for_aux = self.center_head(fused_feat)
+            alpha_c = self._center_residual_alpha()
+            if alpha_c > 0.0:
+                logits = logits + alpha_c * center_logits_for_aux
+
+        if self.distance_aux_head_enabled:
+            distance_logits_for_aux = self.distance_head(fused_feat)
+
         if self.residual_scorer_enabled:
             residual_s3 = f_s3_for_residual if f_s3_for_residual is not None else f_s3
             s3_query_feat = self.proj_s3(residual_s3).mean(dim=2)
@@ -2027,6 +2050,11 @@ class PointDensityNet(nn.Module):
             )
             residual = self.residual_scorer(scorer_input)
             logits = logits + self.residual_scorer_lambda * residual
+
+        if center_logits_for_aux is not None:
+            aux_projections["center_logits"] = center_logits_for_aux
+        if distance_logits_for_aux is not None:
+            aux_projections["distance_logits"] = distance_logits_for_aux
 
         aux_projections = self._add_query_aux_outputs(aux_projections, fused_feat)
 

@@ -71,6 +71,26 @@ class TrainingLightningModule(LightningModule):
         self._center_distance_center_weight: float = 0.2
         self._center_distance_weight: float = 0.1
 
+    @staticmethod
+    def _center_focal_loss(
+        logits: torch.Tensor,
+        target: torch.Tensor,
+        alpha: float = 2.0,
+        beta: float = 4.0,
+        eps: float = 1e-6,
+    ) -> torch.Tensor:
+        pred = torch.sigmoid(logits).clamp(eps, 1.0 - eps)
+
+        pos_mask = target >= 0.5
+        neg_mask = target < 0.5
+
+        pos_loss = -torch.log(pred) * torch.pow(1.0 - pred, alpha) * pos_mask.float()
+        neg_weight = torch.pow(1.0 - target, beta)
+        neg_loss = -torch.log(1.0 - pred) * torch.pow(pred, alpha) * neg_weight * neg_mask.float()
+
+        pos_count = pos_mask.float().sum().clamp_min(1.0)
+        return (pos_loss.sum() + neg_loss.sum()) / pos_count
+
     def _setup_model(self):
         """Create model from config using ModelFactory"""
         self.net = ModelFactory.create_model(
@@ -392,8 +412,16 @@ class TrainingLightningModule(LightningModule):
         points_mm: torch.Tensor,
         points_ijk: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if "center_target" in batch and "distance_target" in batch and "center_distance_fg_mask" in batch:
-            return batch["center_target"], batch["distance_target"], batch["center_distance_fg_mask"]
+        if (
+            "center_target" in batch
+            and "distance_target" in batch
+            and "center_distance_fg_mask" in batch
+        ):
+            return (
+                batch["center_target"],
+                batch["distance_target"],
+                batch["center_distance_fg_mask"],
+            )
 
         gt_voxels = batch.get("gt_voxels")
         if gt_voxels is None:
@@ -426,11 +454,17 @@ class TrainingLightningModule(LightningModule):
                 mask = gt_b[x, y, z] > 0.0
                 fg_vals.append(mask.unsqueeze(-1).float())
                 if mask.any():
-                    dist_map = torch.tensor(dist_map_np, device=points_mm.device, dtype=torch.float32)
+                    dist_map = torch.tensor(
+                        dist_map_np, device=points_mm.device, dtype=torch.float32
+                    )
                     dist_to_boundary = dist_map[x, y, z].unsqueeze(-1) * voxel_size_mm
-                    dist_vals.append((dist_to_boundary / (radius_vox * voxel_size_mm)).clamp(0.0, 1.0))
+                    dist_vals.append(
+                        (dist_to_boundary / (radius_vox * voxel_size_mm)).clamp(0.0, 1.0)
+                    )
                 else:
-                    dist_vals.append(torch.zeros((N, 1), device=points_mm.device, dtype=torch.float32))
+                    dist_vals.append(
+                        torch.zeros((N, 1), device=points_mm.device, dtype=torch.float32)
+                    )
             center_targets[b] = torch.stack(center_vals, dim=0).amax(dim=0)
             distance_targets[b] = torch.stack(dist_vals, dim=0).amax(dim=0)
             fg_mask[b] = torch.stack(fg_vals, dim=0).amax(dim=0)
@@ -449,7 +483,8 @@ class TrainingLightningModule(LightningModule):
         losses = {}
         if center_logits is not None:
             center_pred = torch.sigmoid(center_logits)
-            center_loss = F.mse_loss(center_pred, center_target)
+            # center_loss = F.mse_loss(center_pred, center_target)
+            center_loss = self._center_focal_loss(center_logits, center_target)
             losses["center_loss"] = center_loss
             losses["center_target_pos_ratio"] = (center_target > 0.5).float().mean()
             losses["center_target_mean"] = center_target.mean()
