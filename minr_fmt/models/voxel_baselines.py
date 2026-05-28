@@ -431,7 +431,7 @@ class AffineSTN3D(nn.Module):
         return self.mlp(self.conv(x)).view(-1, 3, 4).to(dtype=x.dtype)
 
 
-class TemplateSTNVNetBase(nn.Module):
+class TemplateSTNVNetBase(VoxelOutputAlignmentMixin, nn.Module):
     """PGDPNN/FMT-ReconNet style template selection, affine STN, and V-Net refinement."""
 
     output_type = "voxel"
@@ -454,9 +454,17 @@ class TemplateSTNVNetBase(nn.Module):
         self.current_epoch = 0
         self.template_path = str(getattr(params, "template_path", "") or "")
         self.allow_template_fallback = bool(getattr(params, "allow_template_fallback", False))
+        self.require_template_shape_match = bool(getattr(params, "require_template_shape_match", True))
         self.template_features_norm = None
+        self._init_output_alignment(config, params)
         self._load_templates()
         self._apply_stage_freeze()
+
+    def _expected_full_shape(self) -> tuple[int, int, int]:
+        return tuple(int(v) for v in getattr(self.config.model.geometry, "global_voxel_shape", self.roi_shape))
+
+    def _full_volume_shape(self) -> tuple[int, int, int]:
+        return tuple(reversed(self._expected_full_shape()))
 
     def _load_templates(self):
         if not self.template_path:
@@ -474,6 +482,24 @@ class TemplateSTNVNetBase(nn.Module):
         if not path.exists():
             raise FileNotFoundError(f"{self.section}.template_path does not exist: {path}")
         z = np.load(path, allow_pickle=True)
+        expected_xyz = self._expected_full_shape()
+        expected_zyx = tuple(reversed(expected_xyz))
+        source_templates = np.asarray(z["source_templates"], dtype=np.float32)
+        template_spatial_shape = tuple(int(v) for v in source_templates.shape[-3:])
+        if self.require_template_shape_match:
+            if template_spatial_shape not in {expected_xyz, expected_zyx}:
+                raise ValueError(
+                    f"{self.section} template shape mismatch: "
+                    f"template_path={path}, template_shape={tuple(int(v) for v in source_templates.shape)}, "
+                    f"expected_xyz={expected_xyz}, expected_zyx={expected_zyx}, "
+                    f"global_voxel_shape={expected_xyz}"
+                )
+        if template_spatial_shape == expected_zyx:
+            if source_templates.ndim == 5:
+                source_templates = source_templates.transpose(0, 1, 4, 3, 2)
+            else:
+                source_templates = source_templates.transpose(0, 3, 2, 1)
+        self.template_shape = tuple(int(v) for v in source_templates.shape)
         self.register_buffer(
             "surface_templates",
             torch.from_numpy(z["surface_templates"].astype(np.float32)),
@@ -481,7 +507,7 @@ class TemplateSTNVNetBase(nn.Module):
         )
         self.register_buffer(
             "source_templates",
-            torch.from_numpy(z["source_templates"].astype(np.float32)),
+            torch.from_numpy(source_templates),
             persistent=False,
         )
         self.register_buffer(
@@ -537,6 +563,8 @@ class TemplateSTNVNetBase(nn.Module):
         x_tp_def = self._warp(x_tp, theta)
         y_tp_def = self._warp(y_tp, theta)
         pred = self.vnet(torch.cat([x_tr, y_tp_def], dim=1))
+        pred = self._match_roi_shape(pred)
+        pred = self._paste_roi(pred)
         ident = _identity_affine(theta.device, theta.dtype, theta.shape[0])
         stn_align = F.mse_loss(x_tp_def.clamp(0.0, 1.0), x_tr.clamp(0.0, 1.0))
         stn_l2 = (theta - ident).square().mean()
@@ -545,6 +573,10 @@ class TemplateSTNVNetBase(nn.Module):
             "voxel_loss_weight": self.alpha,
             "selected_template_id": template_ids.detach(),
             "theta": theta.detach(),
+            "template_path": self.template_path,
+            "template_shape": tuple(self.template_shape),
+            "expected_xyz": self._expected_full_shape(),
+            "expected_zyx": self._full_volume_shape(),
             "debug": {
                 "x_tr": x_tr.detach(),
                 "x_tp": x_tp.detach(),

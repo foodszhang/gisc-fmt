@@ -8,3 +8,4 @@ uv run python train.py fit model=transunet3d_baseline $COMMON
 uv run python train.py fit model=pah2t_former $COMMON
 uv run python train.py fit model=uhr_deepfmt $COMMON
 uv run python train.py fit model=two_stage_deepfmt $COMMON
+uv run python train.py fit model=pgdpnn $COMMON model.pgdpnn.template_path=tests/assets/pgdpnn_template_common_190_200_104.npz model.pgdpnn.allow_template_fallback=false
