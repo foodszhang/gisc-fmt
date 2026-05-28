@@ -1,9 +1,8 @@
-name: stage1_fem
+name: fem_coarse
 output_type: voxel
 num_views: 7
 fem:
   shared_dir: /home/foods/pro/FMT-SimGen/output/shared_mesh_20k
-stage1_fem:
+fem_coarse:
   uses_prior: true
-  prior_source: stage1_mesh_or_stage1_voxel
-# legacy alias; prefer fem_coarse
+  prior_source: fem_mesh_or_fem_voxel

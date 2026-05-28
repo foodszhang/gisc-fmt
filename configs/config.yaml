@@ -20,4 +20,4 @@ benchmark: false
 verbose: false
 
 data:
-  dataset_type: multiproj
+  dataset_type: {}

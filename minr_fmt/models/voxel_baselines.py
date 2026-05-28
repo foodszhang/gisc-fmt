@@ -36,6 +36,41 @@ def _projection_tensor(projections) -> torch.Tensor:
     return x
 
 
+class VoxelOutputAlignmentMixin:
+    def _init_output_alignment(self, config, params):
+        self.output_mode = str(getattr(params, "output_mode", "roi"))
+        self.paste_roi_to_full = bool(
+            getattr(params, "paste_roi_to_full", self.output_mode == "roi")
+        )
+        self.full_shape = tuple(
+            int(v)
+            for v in getattr(
+                params,
+                "full_output_shape",
+                getattr(config.model.geometry, "global_voxel_shape", self.roi_shape),
+            )
+        )
+
+    def _paste_roi(self, pred: torch.Tensor) -> torch.Tensor:
+        if not self.paste_roi_to_full or pred.shape[2:] == self.full_shape:
+            return pred
+        full = pred.new_zeros((pred.shape[0], 1, *self.full_shape))
+        vr = self.config.data.voxel_ranges
+        x0, x1 = int(vr.x[0]), int(vr.x[1])
+        y0, y1 = int(vr.y[0]), int(vr.y[1])
+        z0, z1 = int(vr.z[0]), int(vr.z[1])
+        expected = (x1 - x0, y1 - y0, z1 - z0)
+        if pred.shape[2:] != expected:
+            raise ValueError(f"ROI pred shape {tuple(pred.shape[2:])} != configured ROI {expected}")
+        full[:, :, x0:x1, y0:y1, z0:z1] = pred
+        return full
+
+    def _match_roi_shape(self, pred: torch.Tensor) -> torch.Tensor:
+        if pred.shape[2:] == self.roi_shape:
+            return pred
+        return F.interpolate(pred, size=self.roi_shape, mode="trilinear", align_corners=False)
+
+
 def _identity_affine(device, dtype, batch_size: int) -> torch.Tensor:
     theta = torch.tensor(
         [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
@@ -154,7 +189,7 @@ class ProjectionToVoxelNet(nn.Module):
         return {"pred_voxel": pred, "aux_outputs": {}}
 
 
-class CNN3DBaseline(nn.Module):
+class CNN3DBaseline(VoxelOutputAlignmentMixin, nn.Module):
     """Light 3D-CNN baseline using boundary-shell projection embedding."""
 
     output_type = "voxel"
@@ -165,12 +200,20 @@ class CNN3DBaseline(nn.Module):
         self.config = config
         self.roi_shape = _roi_shape(config)
         base = int(getattr(params, "base_channels", 8))
+        self._init_output_alignment(config, params)
         self.builder = SurfaceVolumeBuilder(self.roi_shape, config.data.view_angles)
         self.net = VNet3D(1, base, 1)
 
     def forward(self, projections, *args, **kwargs):
-        logits = self.net(self.builder(projections))
-        return {"pred_voxel": logits, "aux_outputs": {"output_space": "full_voxel"}}
+        logits = self._match_roi_shape(self.net(self.builder(projections)))
+        logits = self._paste_roi(logits)
+        return {
+            "pred_voxel": logits,
+            "aux_outputs": {
+                "output_space": self.output_mode,
+                "alignment_mode": "paste_pred" if self.paste_roi_to_full else self.output_mode,
+            },
+        }
 
 
 class TransformerBottleneck3D(nn.Module):
@@ -212,7 +255,7 @@ class TransformerBottleneck3D(nn.Module):
         return x + y
 
 
-class TransUNet3DBaseline(nn.Module):
+class TransUNet3DBaseline(VoxelOutputAlignmentMixin, nn.Module):
     """3D-TransUNet style baseline, intentionally separate from PAH2T-Former."""
 
     output_type = "voxel"
@@ -220,10 +263,12 @@ class TransUNet3DBaseline(nn.Module):
     def __init__(self, config):
         super().__init__()
         params = _model_section(config, "transunet3d_baseline")
+        self.config = config
         self.roi_shape = _roi_shape(config)
         base = int(getattr(params, "base_channels", 8))
         heads = int(getattr(params, "num_heads", 4))
         max_tokens = int(getattr(params, "max_tokens", 512))
+        self._init_output_alignment(config, params)
         self.builder = SurfaceVolumeBuilder(self.roi_shape, config.data.view_angles)
         self.enc1 = ConvBlock3d(1, base)
         self.down1 = nn.MaxPool3d(2, ceil_mode=True)
@@ -252,7 +297,15 @@ class TransUNet3DBaseline(nn.Module):
         d2 = self.dec2(torch.cat([d2, e2], dim=1))
         d1 = self._match(self.up1(d2), e1)
         d1 = self.dec1(torch.cat([d1, e1], dim=1))
-        return {"pred_voxel": self.out(d1), "aux_outputs": {"output_space": "full_voxel"}}
+        logits = self._match_roi_shape(self.out(d1))
+        logits = self._paste_roi(logits)
+        return {
+            "pred_voxel": logits,
+            "aux_outputs": {
+                "output_space": self.output_mode,
+                "alignment_mode": "paste_pred" if self.paste_roi_to_full else self.output_mode,
+            },
+        }
 
 
 class SurfaceVolumeBuilder(nn.Module):
@@ -400,12 +453,18 @@ class TemplateSTNVNetBase(nn.Module):
         self.stage_b_epochs = int(getattr(params, "stage_b_epochs", 20))
         self.current_epoch = 0
         self.template_path = str(getattr(params, "template_path", "") or "")
+        self.allow_template_fallback = bool(getattr(params, "allow_template_fallback", False))
         self.template_features_norm = None
         self._load_templates()
         self._apply_stage_freeze()
 
     def _load_templates(self):
         if not self.template_path:
+            if not self.allow_template_fallback:
+                raise ValueError(
+                    f"{self.section} requires a real template_path. "
+                    "Run scripts/build_pgdpnn_templates.py first, or set allow_template_fallback=true for smoke tests only."
+                )
             self.register_buffer("surface_templates", torch.empty(0), persistent=False)
             self.register_buffer("source_templates", torch.empty(0), persistent=False)
             self.register_buffer("template_features", torch.empty(0), persistent=False)
@@ -545,17 +604,19 @@ class SliceIRadonNet(nn.Module):
     def forward(self, restored: torch.Tensor) -> torch.Tensor:
         b, v, h, _w = restored.shape
         x, y, z = self.roi_shape
-        profiles = restored.mean(dim=-1)
-        profiles = F.interpolate(
-            profiles.unsqueeze(1), size=(v, self.input_h), mode="bilinear", align_corners=False
-        ).squeeze(1)
-        profiles = profiles[:, None].expand(b, z, v, self.input_h).reshape(b * z, v * self.input_h)
+        restored_z = F.interpolate(
+            restored,
+            size=(self.input_h, z),
+            mode="bilinear",
+            align_corners=False,
+        )
+        profiles = restored_z.permute(0, 3, 1, 2).contiguous().reshape(b * z, v * self.input_h)
         slices = self.fc2(F.silu(self.fc1(profiles))).view(b * z, 1, x, y)
         slices = self.refine(slices)
         return slices.view(b, z, 1, x, y).permute(0, 2, 3, 4, 1).contiguous()
 
 
-class TwoStageDeepFMTAdapted(nn.Module):
+class TwoStageDeepFMTAdapted(VoxelOutputAlignmentMixin, nn.Module):
     """Restoration-Net followed by slice-wise iRadon-Net, without latent expand."""
 
     output_type = "voxel"
@@ -570,19 +631,22 @@ class TwoStageDeepFMTAdapted(nn.Module):
         hidden = int(getattr(params, "iradon_hidden_dim", 512))
         input_h = int(getattr(params, "profile_bins", self.roi_shape[0]))
         self.lambda_proj = float(getattr(params, "lambda_proj", 0.0))
+        self._init_output_alignment(config, params)
         self.restorer = ProjectionRestorationNet(self.num_views, base)
         self.iradon = SliceIRadonNet(self.num_views, input_h, self.roi_shape, hidden)
 
     def forward(self, projections, *args, **kwargs):
         x = _projection_tensor(projections)
         restored = self.restorer(x)
-        pred = self.iradon(restored)
+        pred = self._paste_roi(self.iradon(restored))
         proj_loss = pred.new_zeros(())
         if self.lambda_proj > 0:
             proj_loss = self.lambda_proj * F.l1_loss(torch.sigmoid(restored), x.clamp(0.0, 1.0))
         return {
             "pred_voxel": pred,
             "aux_outputs": {
+                "output_space": self.output_mode,
+                "alignment_mode": "paste_pred" if self.paste_roi_to_full else self.output_mode,
                 "restored_projections": restored,
                 "projection_loss": proj_loss,
             },
@@ -709,7 +773,7 @@ class Stage1VolumeMixin:
 
 
 class FEM2VoxUNet(Stage1VolumeMixin, ProjectionToVoxelNet):
-    """Stage1/FEM-prior + 3D U-Net baseline when a real stage1 volume is present."""
+    """FEM-prior + 3D U-Net baseline when a real prior volume is present."""
 
     def __init__(self, config):
         if str(getattr(config.model, "name", "")) == "stage1_unet":
@@ -727,14 +791,14 @@ class FEM2VoxUNet(Stage1VolumeMixin, ProjectionToVoxelNet):
         if stage1 is None:
             if not self.allow_projection_fallback:
                 raise ValueError(
-                    "fem2vox_unet requires a real stage1/FEM prior in the batch; "
+                    "fem2vox_unet requires a real FEM prior in the batch; "
                     "set allow_projection_fallback=true only for smoke tests."
                 )
             return super().forward(projections, *args, **kwargs)
         if stage1.dim() == 4:
             stage1 = stage1.unsqueeze(1)
         pred = self.unet(stage1.float())
-        return {"pred_voxel": pred, "aux_outputs": {"prior_source": "stage1"}}
+        return {"pred_voxel": pred, "aux_outputs": {"prior_source": "fem_prior"}}
 
 
 class Stage1InterpolationBaseline(Stage1VolumeMixin, nn.Module):
@@ -747,7 +811,7 @@ class Stage1InterpolationBaseline(Stage1VolumeMixin, nn.Module):
     def forward(self, projections, *args, **kwargs):
         stage1 = self._stage1_from_kwargs(kwargs)
         if stage1 is None:
-            raise ValueError("stage1_interpolation requires a real stage1/FEM prior in the batch")
+            raise ValueError("fem_to_voxel requires a real FEM prior in the batch")
         if stage1.dim() == 4:
             stage1 = stage1.unsqueeze(1)
         pred = F.interpolate(
@@ -756,7 +820,7 @@ class Stage1InterpolationBaseline(Stage1VolumeMixin, nn.Module):
             mode="trilinear",
             align_corners=False,
         )
-        return {"pred_voxel": pred, "aux_outputs": {"prior_source": "stage1_interpolation"}}
+        return {"pred_voxel": pred, "aux_outputs": {"prior_source": "fem_to_voxel"}}
 
 
 class GenericVoxelBaseline(ProjectionToVoxelNet):

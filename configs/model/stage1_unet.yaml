@@ -13,3 +13,4 @@ stage1_unet:
   uses_prior: true
   prior_source: stage1_fem_or_coarse_prior
   allow_projection_fallback: false
+# legacy alias; prefer fem2vox_unet

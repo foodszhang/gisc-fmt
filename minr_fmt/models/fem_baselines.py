@@ -1,4 +1,4 @@
-"""FEM-domain baselines adapted from the DU2Vox Stage 1 asset layout."""
+"""FEM-domain baselines adapted from FEM coarse/prior assets."""
 
 from __future__ import annotations
 
@@ -55,6 +55,16 @@ class FEMBase(nn.Module):
         self.mapper_n_candidates = int(getattr(params, "n_candidates", 32))
         self.mapper: nn.Module | None = None
 
+    def _validate_mesh_node_count(self):
+        mesh = load_mesh(self.shared_dir)
+        if "nodes" not in mesh:
+            raise ValueError(
+                f"{self.section} requires mesh assets with nodes, but no nodes were found in {self.shared_dir}."
+            )
+        num_nodes = int(mesh["nodes"].shape[0])
+        if hasattr(self, "A") and self.A.shape[1] != num_nodes:
+            raise ValueError(f"FEM A node count {self.A.shape[1]} != mesh node count {num_nodes}")
+
     def mesh_to_voxel(self, x_mesh: torch.Tensor) -> torch.Tensor:
         if self.mapper is None:
             if self.mapper_name == "nearest_node_fallback":
@@ -84,7 +94,7 @@ class FEMBase(nn.Module):
     def _stage1_mesh(self, batch: dict) -> torch.Tensor:
         x = _first_tensor(batch, ("stage1_mesh", "coarse_d", "fem_nodes"))
         if x is None:
-            raise ValueError(f"{self.section} requires a real Stage 1 mesh prediction in the batch")
+            raise ValueError(f"{self.section} requires a real FEM coarse mesh prediction in the batch")
         return x.float()
 
 
@@ -132,9 +142,7 @@ class IterativeFEMBase(FEMBase):
         self.num_iters = int(getattr(params, "num_iters", 100))
         self.step_size = float(getattr(params, "step_size", 0.0))
         self.nonnegative = bool(getattr(params, "nonnegative", True))
-        max_mapper_node = int(self.mapper.node_index.max().item())
-        if self.A.shape[1] <= max_mapper_node:
-            raise ValueError("FEM A matrix node count is inconsistent with mesh-to-voxel mapper")
+        self._validate_mesh_node_count()
 
     def _step(self, A: torch.Tensor) -> float:
         if self.step_size > 0:
@@ -304,7 +312,7 @@ class GraphConv(nn.Module):
 
 
 class GAICNLikeFEM(FEMBase):
-    """GAICN-like graph unrolling baseline using Stage 1 FEM matrix and mesh graph."""
+    """GAICN-like graph unrolling baseline using FEM matrix and mesh graph."""
 
     def __init__(self, config):
         super().__init__(config, "gaicn")

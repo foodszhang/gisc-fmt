@@ -99,7 +99,7 @@ class ModelFactory:
 
     @staticmethod
     def create_fem_baseline_model(model_type: str, config: Optional[Any] = None, **kwargs):
-        """Create a FEM-domain baseline backed by DU2Vox Stage 1 assets."""
+        """Create a FEM-domain baseline backed by FEM coarse/prior assets."""
         if config is None:
             raise ValueError("FEM baseline 模型需要配置对象")
         from .models.fem_baselines import (
@@ -114,6 +114,8 @@ class ModelFactory:
         )
 
         registry = {
+            "fem_coarse": Stage1FEMBaseline,
+            "fem_to_voxel": Stage1ToVoxelBaseline,
             "stage1_fem": Stage1FEMBaseline,
             "stage1_to_voxel": Stage1ToVoxelBaseline,
             "tikhonov_fem": TikhonovFEM,
@@ -189,6 +191,8 @@ class ModelFactory:
         }:
             return ModelFactory.create_voxel_baseline_model(model_type, config, **kwargs)
         elif model_type in {
+            "fem_coarse",
+            "fem_to_voxel",
             "stage1_fem",
             "stage1_to_voxel",
             "tikhonov_fem",

@@ -8,3 +8,4 @@ stage1_to_voxel:
   prior_source: stage1_mesh
   mesh_to_voxel: barycentric
   n_candidates: 32
+# legacy alias; prefer fem_to_voxel

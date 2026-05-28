@@ -11,5 +11,5 @@ geometry:
 fem2vox_unet:
   base_channels: 16
   uses_prior: true
-  prior_source: stage1_fem_or_coarse_prior
+  prior_source: fem_prior_or_coarse_prior
   allow_projection_fallback: false

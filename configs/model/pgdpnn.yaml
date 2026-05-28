@@ -13,6 +13,7 @@ pgdpnn:
   alpha: 1.0
   stage_a_epochs: 10
   stage_b_epochs: 20
-  template_path: /home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k/templates/pgdpnn_templates_k20.npz
+  template_path: ""
+  allow_template_fallback: false
   uses_prior: true
   prior_source: nearest_surface_source_template_stn
