@@ -484,7 +484,14 @@ class TemplateSTNVNetBase(VoxelOutputAlignmentMixin, nn.Module):
         z = np.load(path, allow_pickle=True)
         expected_xyz = self._expected_full_shape()
         expected_zyx = tuple(reversed(expected_xyz))
+        surface_templates = np.asarray(z["surface_templates"], dtype=np.float32)
         source_templates = np.asarray(z["source_templates"], dtype=np.float32)
+        if surface_templates.shape[-3:] != source_templates.shape[-3:]:
+            raise ValueError(
+                f"{self.section} template surface/source shape mismatch: "
+                f"template_path={path}, surface_shape={tuple(int(v) for v in surface_templates.shape)}, "
+                f"source_shape={tuple(int(v) for v in source_templates.shape)}"
+            )
         template_spatial_shape = tuple(int(v) for v in source_templates.shape[-3:])
         if self.require_template_shape_match:
             if template_spatial_shape not in {expected_xyz, expected_zyx}:
@@ -497,12 +504,14 @@ class TemplateSTNVNetBase(VoxelOutputAlignmentMixin, nn.Module):
         if template_spatial_shape == expected_zyx:
             if source_templates.ndim == 5:
                 source_templates = source_templates.transpose(0, 1, 4, 3, 2)
+                surface_templates = surface_templates.transpose(0, 1, 4, 3, 2)
             else:
                 source_templates = source_templates.transpose(0, 3, 2, 1)
+                surface_templates = surface_templates.transpose(0, 3, 2, 1)
         self.template_shape = tuple(int(v) for v in source_templates.shape)
         self.register_buffer(
             "surface_templates",
-            torch.from_numpy(z["surface_templates"].astype(np.float32)),
+            torch.from_numpy(surface_templates),
             persistent=False,
         )
         self.register_buffer(

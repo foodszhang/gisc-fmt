@@ -105,21 +105,21 @@ class ModelFactory:
         if config is None:
             raise ValueError("FEM baseline 模型需要配置对象")
         from .models.fem_baselines import (
+            FEMCoarseBaseline,
+            FEMToVoxelBaseline,
             FISTAFEM,
             L1FEM,
             ElasticNetFEM,
             GAICNLikeFEM,
-            Stage1FEMBaseline,
-            Stage1ToVoxelBaseline,
             StOMPFEM,
             TikhonovFEM,
         )
 
         registry = {
-            "fem_coarse": Stage1FEMBaseline,
-            "fem_to_voxel": Stage1ToVoxelBaseline,
-            "stage1_fem": Stage1FEMBaseline,
-            "stage1_to_voxel": Stage1ToVoxelBaseline,
+            "fem_coarse": FEMCoarseBaseline,
+            "fem_to_voxel": FEMToVoxelBaseline,
+            "stage1_fem": FEMCoarseBaseline,
+            "stage1_to_voxel": FEMToVoxelBaseline,
             "tikhonov_fem": TikhonovFEM,
             "l1_fem": L1FEM,
             "elasticnet_fem": ElasticNetFEM,

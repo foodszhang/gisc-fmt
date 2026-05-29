@@ -98,18 +98,18 @@ class FEMBase(nn.Module):
         return x.float()
 
 
-class Stage1FEMBaseline(FEMBase):
+class FEMCoarseBaseline(FEMBase):
     def __init__(self, config):
-        super().__init__(config, "stage1_fem")
+        super().__init__(config, "fem_coarse")
 
     def forward(self, projections, *args, **kwargs):
         batch = kwargs.get("batch") or {}
-        stage1_voxel = _first_tensor(batch, ("stage1_voxel", "fem_prior", "coarse_prior"))
-        if stage1_voxel is not None:
-            if stage1_voxel.dim() == 4:
-                stage1_voxel = stage1_voxel.unsqueeze(1)
+        fem_prior_voxel = _first_tensor(batch, ("fem_prior_voxel", "stage1_voxel", "fem_prior", "coarse_prior"))
+        if fem_prior_voxel is not None:
+            if fem_prior_voxel.dim() == 4:
+                fem_prior_voxel = fem_prior_voxel.unsqueeze(1)
             return {
-                "pred_voxel": stage1_voxel.float(),
+                "pred_voxel": fem_prior_voxel.float(),
                 "aux_outputs": {"output_space": "full_voxel", "alignment_mode": "full"},
             }
         x_mesh = self._stage1_mesh(batch)
@@ -120,9 +120,9 @@ class Stage1FEMBaseline(FEMBase):
         }
 
 
-class Stage1ToVoxelBaseline(Stage1FEMBaseline):
+class FEMToVoxelBaseline(FEMCoarseBaseline):
     def __init__(self, config):
-        FEMBase.__init__(self, config, "stage1_to_voxel")
+        FEMBase.__init__(self, config, "fem_to_voxel")
 
     def forward(self, projections, *args, **kwargs):
         batch = kwargs.get("batch") or {}
@@ -132,6 +132,10 @@ class Stage1ToVoxelBaseline(Stage1FEMBaseline):
             "pred_voxel": pred,
             "aux_outputs": {"output_space": "mesh", "alignment_mode": "mesh_to_voxel"},
         }
+
+
+Stage1FEMBaseline = FEMCoarseBaseline
+Stage1ToVoxelBaseline = FEMToVoxelBaseline
 
 
 class IterativeFEMBase(FEMBase):
