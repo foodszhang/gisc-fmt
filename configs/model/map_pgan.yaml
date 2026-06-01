@@ -11,6 +11,6 @@ geometry:
 map_pgan:
   base_channels: 16
   latent_channels: 64
+  internal_shape: [48, 50, 26]
   use_gan: false
   lambda_adv: 0.0
-

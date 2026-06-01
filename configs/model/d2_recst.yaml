@@ -11,5 +11,5 @@ geometry:
 d2_recst:
   base_channels: 16
   latent_channels: 64
+  internal_shape: [48, 50, 26]
   lambda_perceptual: 0.0
-

@@ -24,6 +24,7 @@ dependencies = [
     "tensorboard>=2.16.0",
     "torchvision>=0.20.0",
     "pytest>=9.0.2",
+    "pyvista>=0.48.4",
 ]
 
 [project.optional-dependencies]

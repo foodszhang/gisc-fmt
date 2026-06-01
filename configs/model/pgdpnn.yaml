@@ -19,3 +19,4 @@ pgdpnn:
   require_template_shape_match: true
   uses_prior: true
   prior_source: nearest_surface_source_template_stn
+  residual_prior: true

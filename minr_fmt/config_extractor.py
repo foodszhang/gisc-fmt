@@ -455,7 +455,19 @@ class ConfigExtractor:
             raise KeyError("model.uhr_deepfmt must be defined for UHR runs")
         required = ["base_channels", "num_levels", "se_reduction"]
         ConfigExtractor._require_keys(uhr_cfg, required, "uhr_deepfmt")
-        return {key: uhr_cfg[key] for key in required}
+        out = {key: uhr_cfg[key] for key in required}
+        optional_keys = (
+            "output_mode",
+            "lowres_shape",
+            "full_output_shape",
+            "upsample_to_full_for_eval",
+            "loss_type",
+            "dice_weight",
+        )
+        for key in optional_keys:
+            if key in uhr_cfg:
+                out[key] = uhr_cfg[key]
+        return out
 
     @staticmethod
     def extract_vox_dmrn_config(config: Any) -> Dict[str, Any]:

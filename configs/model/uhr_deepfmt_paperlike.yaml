@@ -1,0 +1,14 @@
+name: uhr_deepfmt
+output_type: voxel
+num_views: 7
+in_channels: 1
+feature_dim: 64
+pos_enc_dim: 144
+geometry:
+  camera_distance: 200.0
+  detector_size: [80.0, 80.0]
+  global_voxel_shape: [190, 200, 104]
+uhr_deepfmt:
+  base_channels: 32
+  num_levels: 3
+  se_reduction: 16

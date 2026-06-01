@@ -222,6 +222,24 @@ class UHRDeepFMT3DUNet(nn.Module):
         self.roi_y = int(vr.y[1] - vr.y[0])
         self.roi_z = int(vr.z[1] - vr.z[0])
         self.voxel_depth = self.roi_z
+        self.output_mode = str(uhr_params.get("output_mode", "fullres"))
+        self.full_output_shape = tuple(
+            int(v)
+            for v in uhr_params.get(
+                "full_output_shape",
+                (self.roi_x, self.roi_y, self.roi_z),
+            )
+        )
+        self.lowres_shape = tuple(
+            int(v) for v in uhr_params.get("lowres_shape", self.full_output_shape)
+        )
+        self.upsample_to_full = bool(uhr_params.get("upsample_to_full_for_eval", True))
+        self.loss_type = str(uhr_params.get("loss_type", "default"))
+        self.dice_weight = float(uhr_params.get("dice_weight", 0.5))
+        if self.output_mode == "lowres":
+            self.compute_shape = self.lowres_shape
+        else:
+            self.compute_shape = self.full_output_shape
 
         # 网络参数
         self.in_channels = num_views
@@ -268,7 +286,7 @@ class UHRDeepFMT3DUNet(nn.Module):
 
         volume = torch.stack(proj_list, dim=1)
         B, V, H, W = volume.shape
-        D = self.voxel_depth
+        D = self.compute_shape[2]
         volume_3d = volume.unsqueeze(2).repeat(1, 1, D, 1, 1)
 
         return volume_3d
@@ -289,7 +307,7 @@ class UHRDeepFMT3DUNet(nn.Module):
             points is not None
             or str(getattr(self.config.model, "output_type", "query")).lower() == "voxel"
         ):
-            target_proj_hw = (self.roi_x, self.roi_y)
+            target_proj_hw = self.compute_shape[:2]
         x = self._reshape_projections_to_3d(projections_dict, target_hw=target_proj_hw)
 
         # 编码-Bottleneck-解码
@@ -298,7 +316,7 @@ class UHRDeepFMT3DUNet(nn.Module):
         x = self.bottleneck(x)
         skip_features_reversed = skip_features[::-1]
         output = self.decoder(x, skip_features_reversed)
-        target_dhw = (self.roi_z, self.roi_x, self.roi_y)
+        target_dhw = (self.compute_shape[2], self.compute_shape[0], self.compute_shape[1])
         if tuple(output.shape[2:]) != target_dhw:
             output = F.interpolate(
                 output,
@@ -310,9 +328,25 @@ class UHRDeepFMT3DUNet(nn.Module):
         # 激活和重塑
         output = self.output_activation(output)
         if str(getattr(self.config.model, "output_type", "query")).lower() == "voxel":
+            if self.output_mode == "lowres" and self.upsample_to_full:
+                output = F.interpolate(
+                    output,
+                    size=(
+                        self.full_output_shape[2],
+                        self.full_output_shape[0],
+                        self.full_output_shape[1],
+                    ),
+                    mode="trilinear",
+                    align_corners=False,
+                )
             # Decoder is [B,1,z,x,y]; FMT-SimGen GT is indexed [x,y,z].
             pred_voxel = output.permute(0, 1, 3, 4, 2).contiguous()
-            aux_output = {k: v for k, v in projections_dict.items()}
+            aux_output = {
+                "output_space": "lowres_to_full" if self.output_mode == "lowres" else "fullres",
+                "internal_shape": self.compute_shape,
+                "voxel_loss_type": self.loss_type,
+                "dice_weight": self.dice_weight,
+            }
             return {"pred_voxel": pred_voxel, "aux_outputs": aux_output}
         B, _, D, H, W = output.shape
         output_flat = output.view(B, -1, 1)

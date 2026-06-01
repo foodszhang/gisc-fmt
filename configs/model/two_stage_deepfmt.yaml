@@ -12,6 +12,12 @@ two_stage_deepfmt:
   base_channels: 16
   profile_bins: 64
   iradon_hidden_dim: 512
+  profile_axis: h
+  slice_axis: w
+  refine_channels: 16
+  refine_blocks: 2
+  loss_type: default
+  dice_weight: 0.5
   lambda_proj: 0.0
   output_mode: roi
   paste_roi_to_full: true

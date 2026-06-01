@@ -40,6 +40,15 @@ def _soft_threshold(x: torch.Tensor, threshold: torch.Tensor) -> torch.Tensor:
     return torch.sign(x) * F.relu(x.abs() - threshold)
 
 
+def _probability_to_logits(x: torch.Tensor) -> torch.Tensor:
+    return torch.logit(x.clamp(1e-6, 1.0 - 1e-6))
+
+
+def _normalize_probability(x: torch.Tensor) -> torch.Tensor:
+    dims = tuple(range(1, x.dim()))
+    return x / x.amax(dim=dims, keepdim=True).clamp_min(1e-8)
+
+
 class FEMBase(nn.Module):
     output_type = "voxel"
 
@@ -59,7 +68,8 @@ class FEMBase(nn.Module):
         mesh = load_mesh(self.shared_dir)
         if "nodes" not in mesh:
             raise ValueError(
-                f"{self.section} requires mesh assets with nodes, but no nodes were found in {self.shared_dir}."
+                f"{self.section} requires mesh assets with nodes, "
+                f"but no nodes were found in {self.shared_dir}."
             )
         num_nodes = int(mesh["nodes"].shape[0])
         if hasattr(self, "A") and self.A.shape[1] != num_nodes:
@@ -94,7 +104,9 @@ class FEMBase(nn.Module):
     def _stage1_mesh(self, batch: dict) -> torch.Tensor:
         x = _first_tensor(batch, ("stage1_mesh", "coarse_d", "fem_nodes"))
         if x is None:
-            raise ValueError(f"{self.section} requires a real FEM coarse mesh prediction in the batch")
+            raise ValueError(
+                f"{self.section} requires a real FEM coarse mesh prediction in the batch"
+            )
         return x.float()
 
 
@@ -104,16 +116,19 @@ class FEMCoarseBaseline(FEMBase):
 
     def forward(self, projections, *args, **kwargs):
         batch = kwargs.get("batch") or {}
-        fem_prior_voxel = _first_tensor(batch, ("fem_prior_voxel", "stage1_voxel", "fem_prior", "coarse_prior"))
+        fem_prior_voxel = _first_tensor(
+            batch,
+            ("fem_prior_voxel", "stage1_voxel", "fem_prior", "coarse_prior"),
+        )
         if fem_prior_voxel is not None:
             if fem_prior_voxel.dim() == 4:
                 fem_prior_voxel = fem_prior_voxel.unsqueeze(1)
             return {
-                "pred_voxel": fem_prior_voxel.float(),
+                "pred_voxel": _probability_to_logits(fem_prior_voxel.float()),
                 "aux_outputs": {"output_space": "full_voxel", "alignment_mode": "full"},
             }
         x_mesh = self._stage1_mesh(batch)
-        pred = self.mesh_to_voxel(x_mesh)
+        pred = _probability_to_logits(_normalize_probability(self.mesh_to_voxel(x_mesh)))
         return {
             "pred_voxel": pred,
             "aux_outputs": {"output_space": "mesh", "alignment_mode": "mesh_to_voxel"},
@@ -127,7 +142,7 @@ class FEMToVoxelBaseline(FEMCoarseBaseline):
     def forward(self, projections, *args, **kwargs):
         batch = kwargs.get("batch") or {}
         x_mesh = self._stage1_mesh(batch)
-        pred = self.mesh_to_voxel(x_mesh)
+        pred = _probability_to_logits(_normalize_probability(self.mesh_to_voxel(x_mesh)))
         return {
             "pred_voxel": pred,
             "aux_outputs": {"output_space": "mesh", "alignment_mode": "mesh_to_voxel"},
@@ -162,7 +177,9 @@ class IterativeFEMBase(FEMBase):
     def forward(self, projections, *args, **kwargs):
         phi = self._measurement(kwargs.get("batch") or {})
         x_mesh = self._solve(phi.to(self.A.device, dtype=self.A.dtype))
-        pred = self.mesh_to_voxel(x_mesh.to(phi.device))
+        pred = _probability_to_logits(
+            _normalize_probability(self.mesh_to_voxel(x_mesh.to(phi.device)))
+        )
         residual = torch.mean((phi.to(self.A.device) - x_mesh @ self.A.t()).square()).detach()
         return {
             "pred_voxel": pred,
@@ -309,7 +326,7 @@ class GraphConv(nn.Module):
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         src, dst = edge_index
         msg = self.lin(x[:, src])
-        out = x.new_zeros(x.shape[0], x.shape[1], msg.shape[-1])
+        out = msg.new_zeros(x.shape[0], x.shape[1], msg.shape[-1])
         out.index_add_(1, dst, msg)
         deg = torch.bincount(dst, minlength=x.shape[1]).to(x.device, x.dtype).clamp_min(1.0)
         return F.silu(out / deg.view(1, -1, 1))
@@ -335,6 +352,7 @@ class GAICNLikeFEM(FEMBase):
             persistent=False,
         )
         self.num_phases = int(getattr(params, "num_phases", 6))
+        self.train_in_mesh_space = bool(getattr(params, "train_in_mesh_space", True))
         hidden = int(getattr(params, "hidden_channels", 8))
         rho_init = float(getattr(params, "rho_init", 1e-3))
         threshold_init = float(getattr(params, "threshold_init", 1e-3))
@@ -347,7 +365,7 @@ class GAICNLikeFEM(FEMBase):
     def forward(self, projections, *args, **kwargs):
         batch = kwargs.get("batch") or {}
         phi = self._measurement(batch).to(self.A.device, dtype=self.A.dtype)
-        init = _first_tensor(batch, ("stage1_mesh", "coarse_d", "gt_nodes"))
+        init = _first_tensor(batch, ("stage1_mesh", "coarse_d"))
         if init is None:
             x = torch.zeros(phi.shape[0], self.A.shape[1], device=phi.device, dtype=phi.dtype)
         else:
@@ -360,11 +378,16 @@ class GAICNLikeFEM(FEMBase):
         x_prev = x
         phase_debug = []
         A = self.A.to(phi.device, dtype=phi.dtype)
+        measurement_backprojection = phi @ A
+        edge_index = self.edge_index.to(phi.device)
         for k in range(self.num_phases):
             rho = F.softplus(self.rho[k])
-            r = z - rho * ((z @ A.t() - phi) @ A)
-            h = self.gcn1[k](r.unsqueeze(-1), self.edge_index.to(phi.device))
-            h = self.gcn2[k](h, self.edge_index.to(phi.device))
+            # Keep the fixed measurement backprojection outside the unrolled loop.
+            # Computing A^T A explicitly is larger and slower for this mesh.
+            data_gradient = (z @ A.t()) @ A - measurement_backprojection
+            r = z - rho * data_gradient
+            h = self.gcn1[k](r.unsqueeze(-1), edge_index)
+            h = self.gcn2[k](h, edge_index)
             delta = self.proj[k](h).squeeze(-1)
             delta = _soft_threshold(delta, F.softplus(self.threshold[k]))
             x_next = (r + delta).clamp_min(0.0)
@@ -373,7 +396,11 @@ class GAICNLikeFEM(FEMBase):
             x_prev = x
             x = x_next
             phase_debug.append(x.detach())
-        pred = self.mesh_to_voxel(x)
+        training_space = "mesh" if self.training and self.train_in_mesh_space else "voxel"
+        if training_space == "mesh":
+            pred = _probability_to_logits(_normalize_probability(x))
+        else:
+            pred = _probability_to_logits(_normalize_probability(self.mesh_to_voxel(x)))
         residual = torch.mean((x @ A.t() - phi).square())
         return {
             "pred_voxel": pred,
@@ -386,5 +413,7 @@ class GAICNLikeFEM(FEMBase):
                 "learned_threshold": F.softplus(self.threshold).detach(),
                 "output_space": "mesh",
                 "alignment_mode": "mesh_to_voxel",
+                "cached_measurement_backprojection": True,
+                "training_space": training_space,
             },
         }

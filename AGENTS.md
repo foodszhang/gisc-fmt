@@ -45,6 +45,38 @@ The active comparison set excludes the CQR ablation series by user request and f
 
 Latest test300 result for `gisc_fmt` selected `epoch=44-val_dice=0.6930.ckpt` by candidate Dice. Test Dice is about 0.662, IoU about 0.512, ASSD about 0.579, and HD95 about 2.123 at threshold 0.5. The main GISC-FMT weakness is multi-source recovery, not depth. By `num_foci`, Dice is about 0.761 for one focus, 0.673 for two foci, and 0.579 for three foci. Recall drops from about 0.866 to 0.558 from one to three foci, while precision drops less, indicating missed or incomplete secondary foci rather than only false positives. Depth is secondary: deep, medium, and shallow Dice are about 0.674, 0.665, and 0.647.
 
+FEM-domain methods must be mapped to the common `[190, 200, 104]` voxel grid before
+metrics or figures. Do not report mesh-only Dice as a paper comparison. The verified
+`fem_coarse` and `fem_to_voxel` internal diagnostic voxel Dice is about 0.574. Do not
+present either diagnostic as a paper comparison method. Traditional FEM outputs and
+GAICN must use the shared barycentric mesh-to-voxel mapper before evaluation. The
+available per-sample FEM assets already store a barycentric `[190, 200, 104]`
+interpolation. Reuse their fixed graph, mapping, measurement, and initialization assets
+to accelerate GAICN training, but do not expose their upstream method identity in paper
+tables or figures.
+
+Keep deep-baseline training serial: run only one trainer at a time. Use a 200-train /
+50-val short gate before a formal run when adapting a baseline. A deep method below
+0.4 Dice remains available for supplementary metrics and figures, but mark it as below
+the main-table threshold. The recovered paper-like UHR checkpoint remains the valid UHR
+comparison at about 0.525 test300 Dice. PAH2T-Former is about 0.518. Two-stage DeepFMT
+axis and loss fixes improve test300 Dice only to about 0.277, so retain it as a marked
+supplementary comparison unless a later adaptation crosses 0.4.
+The full-data lightweight FEM2Vox residual-prior adaptation reaches about 0.592 test300
+Dice.
+For GAICN, keep training loss in mesh-node space when `gt_nodes.npy` is available, then
+interpolate to the common voxel grid for validation, test metrics, and figures. Cache
+the measurement backprojection once per batch and use two correction phases with the
+cached FEM initialization. The full-data run reaches about 0.559 val Dice and about
+0.559 test300 voxel Dice.
+
+For paper figures, do not display internal FEM-prior diagnostics. Use the fixed-view
+mouse-internal renderer in `scripts/render_tmi_hard_cases.py`. Keep a main figure for
+valid deep comparisons, a marked supplementary deep-baseline figure for methods below
+0.4 Dice, and a separate traditional-FEM supplementary figure. Hard-case selection must
+require complete GISC-FMT component recovery and should include two-focus, three-focus,
+and irregular-shape examples.
+
 ## E15 Center-Distance Separation
 
 Use E15 for multi-source separation work. The goal is to improve three-focus and mixed-shape cases without changing the E13 main path.

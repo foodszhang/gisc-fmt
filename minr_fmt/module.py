@@ -595,7 +595,12 @@ class TrainingLightningModule(LightningModule):
 
         if self._is_voxel_model():
             pred_voxel, aux_outputs = self._call_voxel_model(projections, batch)
-            target_voxel = self._voxel_target(batch)
+            if aux_outputs.get("training_space") == "mesh":
+                target_voxel = batch.get("gt_nodes")
+                if target_voxel is None:
+                    raise ValueError("Mesh-space training requires gt_nodes in the batch")
+            else:
+                target_voxel = self._voxel_target(batch)
             loss_dict = self.voxel_loss_func(pred_voxel, target_voxel, aux_outputs)
             total_loss = loss_dict["total_loss"]
             self.log(

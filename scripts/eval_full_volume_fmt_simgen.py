@@ -55,6 +55,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--chunk_size", type=int, default=65536)
     parser.add_argument("--max_samples", type=int, default=None)
+    parser.add_argument(
+        "--sample_ids",
+        nargs="+",
+        default=None,
+        help="Optional sample IDs to evaluate after resolving the requested split.",
+    )
     parser.add_argument("--save_dir", default=None)
     parser.add_argument("--save_predictions", action="store_true")
     parser.add_argument("--prediction_dtype", default="float16", choices=["float16", "float32"])
@@ -117,9 +123,21 @@ def is_voxel_model(cfg, net) -> bool:
     ).lower() == "voxel"
 
 
-def sample_dirs_for_split(data_dir: str, cfg, split: str, max_samples: int | None) -> list[Path]:
+def sample_dirs_for_split(
+    data_dir: str,
+    cfg,
+    split: str,
+    max_samples: int | None,
+    sample_ids: list[str] | None = None,
+) -> list[Path]:
     ds = FmtSimGenProjDataset(data_dir, config=cfg, split=split, is_training=False)
     dirs = list(ds.dirs)
+    if sample_ids is not None:
+        requested = set(sample_ids)
+        dirs = [path for path in dirs if path.name in requested]
+        missing = requested - {path.name for path in dirs}
+        if missing:
+            raise ValueError(f"Requested samples are not in split={split}: {sorted(missing)}")
     return dirs[:max_samples] if max_samples is not None else dirs
 
 
@@ -532,7 +550,9 @@ def main() -> None:
     net = load_net(cfg, ckpt_path, device)
     voxel_model = is_voxel_model(cfg, net)
     data_dir = Path(str(cfg.data.val_dir if args.split == "val" else cfg.data.test_dir))
-    sample_dirs = sample_dirs_for_split(str(data_dir), cfg, args.split, args.max_samples)
+    sample_dirs = sample_dirs_for_split(
+        str(data_dir), cfg, args.split, args.max_samples, args.sample_ids
+    )
     stats = load_sample_statistics(data_dir)
     save_dir = Path(
         args.save_dir

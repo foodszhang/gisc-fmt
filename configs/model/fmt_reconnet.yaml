@@ -16,3 +16,4 @@ fmt_reconnet:
   template_path: /home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k/templates/pgdpnn_templates_k20.npz
   uses_prior: true
   prior_source: nearest_surface_source_template_stn
+  residual_prior: true

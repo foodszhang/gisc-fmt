@@ -11,6 +11,6 @@ geometry:
 dspgn:
   base_channels: 16
   latent_channels: 64
+  internal_shape: [48, 50, 26]
   num_nodes: 64
   k_neighbors: 6
-
