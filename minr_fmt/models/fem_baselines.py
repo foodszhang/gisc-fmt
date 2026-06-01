@@ -161,15 +161,49 @@ class IterativeFEMBase(FEMBase):
         self.num_iters = int(getattr(params, "num_iters", 100))
         self.step_size = float(getattr(params, "step_size", 0.0))
         self.nonnegative = bool(getattr(params, "nonnegative", True))
+        self.normalize_columns = bool(getattr(params, "normalize_columns", True))
+        self.normalize_measurement = bool(getattr(params, "normalize_measurement", True))
+        self.relative_regularization = bool(getattr(params, "relative_regularization", True))
+        self.power_iters = int(getattr(params, "power_iters", 12))
+        self._cached_step: float | None = None
         self._validate_mesh_node_count()
 
     def _step(self, A: torch.Tensor) -> float:
         if self.step_size > 0:
             return self.step_size
-        # Conservative Lipschitz estimate for A^T A.
+        if self._cached_step is not None:
+            return self._cached_step
+        # Power iteration estimates ||A||_2^2. Frobenius norm is much too
+        # conservative for the dense FEM matrix and stalls first-order solvers.
         with torch.no_grad():
-            norm = torch.linalg.matrix_norm(A.float()).clamp_min(1e-6)
-        return float(1.0 / (norm * norm))
+            v = torch.ones(A.shape[1], device=A.device, dtype=A.dtype)
+            v = v / v.norm().clamp_min(1e-8)
+            for _ in range(self.power_iters):
+                v = A.t().mv(A.mv(v))
+                v = v / v.norm().clamp_min(1e-8)
+            lipschitz = A.mv(v).square().sum().clamp_min(1e-8)
+        self._cached_step = float(1.0 / lipschitz)
+        return self._cached_step
+
+    def _solver_inputs(self, phi: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        A = self.A.to(phi.device, dtype=phi.dtype)
+        phi = self._normalize_phi(phi)
+        column_norm = A.norm(dim=0).clamp_min(1e-8)
+        if self.normalize_columns:
+            A = A / column_norm
+        else:
+            column_norm = torch.ones_like(column_norm)
+        return A, phi, column_norm
+
+    def _normalize_phi(self, phi: torch.Tensor) -> torch.Tensor:
+        if self.normalize_measurement:
+            return phi / phi.amax(dim=1, keepdim=True).clamp_min(1e-8)
+        return phi
+
+    def _regularization_scale(self, A: torch.Tensor, phi: torch.Tensor) -> torch.Tensor:
+        if not self.relative_regularization:
+            return torch.ones(phi.shape[0], 1, device=phi.device, dtype=phi.dtype)
+        return (phi @ A).abs().amax(dim=1, keepdim=True).clamp_min(1e-8)
 
     def _solve(self, phi: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
@@ -180,7 +214,8 @@ class IterativeFEMBase(FEMBase):
         pred = _probability_to_logits(
             _normalize_probability(self.mesh_to_voxel(x_mesh.to(phi.device)))
         )
-        residual = torch.mean((phi.to(self.A.device) - x_mesh @ self.A.t()).square()).detach()
+        target_phi = self._normalize_phi(phi.to(self.A.device, dtype=self.A.dtype))
+        residual = torch.mean((target_phi - x_mesh @ self.A.t()).square()).detach()
         return {
             "pred_voxel": pred,
             "aux_outputs": {
@@ -199,15 +234,16 @@ class TikhonovFEM(IterativeFEMBase):
         self.lambda_l2 = float(getattr(params, "lambda_l2", 1e-3))
 
     def _solve(self, phi: torch.Tensor) -> torch.Tensor:
-        A = self.A.to(phi.device, dtype=phi.dtype)
+        A, phi, column_norm = self._solver_inputs(phi)
         x = torch.zeros(phi.shape[0], A.shape[1], device=phi.device, dtype=phi.dtype)
         step = self._step(A)
+        lambda_l2 = self.lambda_l2 * self._regularization_scale(A, phi)
         for _ in range(self.num_iters):
-            grad = (x @ A.t() - phi) @ A + self.lambda_l2 * x
+            grad = (x @ A.t() - phi) @ A + lambda_l2 * x
             x = x - step * grad
             if self.nonnegative:
                 x = x.clamp_min(0.0)
-        return x
+        return x / column_norm
 
 
 class L1FEM(IterativeFEMBase):
@@ -217,16 +253,17 @@ class L1FEM(IterativeFEMBase):
         self.lambda_l1 = float(getattr(params, "lambda_l1", 1e-4))
 
     def _solve(self, phi: torch.Tensor) -> torch.Tensor:
-        A = self.A.to(phi.device, dtype=phi.dtype)
+        A, phi, column_norm = self._solver_inputs(phi)
         x = torch.zeros(phi.shape[0], A.shape[1], device=phi.device, dtype=phi.dtype)
         step = self._step(A)
+        lambda_l1 = self.lambda_l1 * self._regularization_scale(A, phi)
         for _ in range(self.num_iters):
             grad = (x @ A.t() - phi) @ A
-            threshold = torch.as_tensor(step * self.lambda_l1, device=x.device)
+            threshold = step * lambda_l1
             x = _soft_threshold(x - step * grad, threshold)
             if self.nonnegative:
                 x = x.clamp_min(0.0)
-        return x
+        return x / column_norm
 
 
 class ElasticNetFEM(IterativeFEMBase):
@@ -237,16 +274,18 @@ class ElasticNetFEM(IterativeFEMBase):
         self.lambda_l2 = float(getattr(params, "lambda_l2", 1e-3))
 
     def _solve(self, phi: torch.Tensor) -> torch.Tensor:
-        A = self.A.to(phi.device, dtype=phi.dtype)
+        A, phi, column_norm = self._solver_inputs(phi)
         x = torch.zeros(phi.shape[0], A.shape[1], device=phi.device, dtype=phi.dtype)
         step = self._step(A)
+        lambda_l1 = self.lambda_l1 * self._regularization_scale(A, phi)
+        lambda_l2 = self.lambda_l2 * self._regularization_scale(A, phi)
         for _ in range(self.num_iters):
-            grad = (x @ A.t() - phi) @ A + self.lambda_l2 * x
-            threshold = torch.as_tensor(step * self.lambda_l1, device=x.device)
+            grad = (x @ A.t() - phi) @ A + lambda_l2 * x
+            threshold = step * lambda_l1
             x = _soft_threshold(x - step * grad, threshold)
             if self.nonnegative:
                 x = x.clamp_min(0.0)
-        return x
+        return x / column_norm
 
 
 class FISTAFEM(L1FEM):
@@ -258,12 +297,12 @@ class FISTAFEM(L1FEM):
         self.lambda_l1 = float(getattr(params, "lambda_l1", self.lambda_l1))
 
     def _solve(self, phi: torch.Tensor) -> torch.Tensor:
-        A = self.A.to(phi.device, dtype=phi.dtype)
+        A, phi, column_norm = self._solver_inputs(phi)
         x = torch.zeros(phi.shape[0], A.shape[1], device=phi.device, dtype=phi.dtype)
         z = x.clone()
         t = 1.0
         step = self._step(A)
-        threshold = torch.as_tensor(step * self.lambda_l1, device=phi.device, dtype=phi.dtype)
+        threshold = step * self.lambda_l1 * self._regularization_scale(A, phi)
         for _ in range(self.num_iters):
             grad = (z @ A.t() - phi) @ A
             x_next = _soft_threshold(z - step * grad, threshold)
@@ -272,7 +311,7 @@ class FISTAFEM(L1FEM):
             t_next = (1.0 + math.sqrt(1.0 + 4.0 * t * t)) / 2.0
             z = x_next + ((t - 1.0) / t_next) * (x_next - x)
             x, t = x_next, t_next
-        return x
+        return x / column_norm
 
 
 class StOMPFEM(IterativeFEMBase):
@@ -286,7 +325,10 @@ class StOMPFEM(IterativeFEMBase):
         self.num_iters = int(getattr(params, "num_iters", 20))
 
     def _solve(self, phi: torch.Tensor) -> torch.Tensor:
-        A = F.normalize(self.A.to(phi.device, dtype=phi.dtype), dim=0, eps=1e-6)
+        A_raw = self.A.to(phi.device, dtype=phi.dtype)
+        phi = self._normalize_phi(phi)
+        column_norm = A_raw.norm(dim=0).clamp_min(1e-8)
+        A = A_raw / column_norm
         out = torch.zeros(phi.shape[0], A.shape[1], device=phi.device, dtype=phi.dtype)
         for b in range(phi.shape[0]):
             y = phi[b]
@@ -315,7 +357,7 @@ class StOMPFEM(IterativeFEMBase):
                 out[b, idx] = sol
             if self.nonnegative:
                 out[b] = out[b].clamp_min(0.0)
-        return out
+        return out / column_norm
 
 
 class GraphConv(nn.Module):

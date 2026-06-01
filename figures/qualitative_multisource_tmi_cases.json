@@ -1,0 +1,42 @@
+{
+  "threshold": 0.5,
+  "camera": "lateral view with slight dorsal oblique",
+  "cases": [
+    {
+      "panel": "(a)",
+      "label": "Weak secondary focus",
+      "sample_id": "sample_0409",
+      "num_foci": 2,
+      "shape_combo": "irregular + sphere",
+      "depth_tier": "medium",
+      "reason": "The secondary sphere is substantially smaller than the irregular source; the case exposes incomplete weak-source recovery and boundary inflation."
+    },
+    {
+      "panel": "(b)",
+      "label": "Adjacent-source merging",
+      "sample_id": "sample_1858",
+      "num_foci": 3,
+      "shape_combo": "ellipsoid + irregular",
+      "depth_tier": "medium",
+      "reason": "The closest source centers are about 7.22 mm apart; baseline reconstructions miss or merge adjacent sources while the proposed method separates all three."
+    },
+    {
+      "panel": "(c)",
+      "label": "Mixed morphology",
+      "sample_id": "sample_2483",
+      "num_foci": 3,
+      "shape_combo": "ellipsoid + irregular + sphere",
+      "depth_tier": "medium",
+      "reason": "The three sources have distinct morphologies; baseline reconstructions retain only part of the combination while the proposed method preserves all sources."
+    },
+    {
+      "panel": "(d)",
+      "label": "Hard three-foci case",
+      "sample_id": "sample_2945",
+      "num_foci": 3,
+      "shape_combo": "ellipsoid + sphere",
+      "depth_tier": "deep",
+      "reason": "A deep three-source example with visible baseline reconstructions but residual missed-source, localization, and boundary errors."
+    }
+  ]
+}

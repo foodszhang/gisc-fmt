@@ -29,6 +29,7 @@ build/
 # Project outputs
 output*/
 outputs/
+figures/qualitative_multisource_tmi_panels/
 wandb/
 lightning_logs/
 .wandb/
@@ -47,5 +48,4 @@ data/
 # Environment files
 .env
 .env.local
-
 

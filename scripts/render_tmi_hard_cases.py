@@ -54,11 +54,11 @@ PREDICTION_DIRS = {
     "map_pgan": "test/map_pgan/predictions",
     "d2_recst": "test/d2_recst/predictions",
     "dspgn": "test/dspgn/predictions",
-    "tikhonov_fem": "current_code_runs/tikhonov_fem/selected_predictions/predictions",
-    "l1_fem": "current_code_runs/l1_fem/selected_predictions/predictions",
-    "elasticnet_fem": "current_code_runs/elasticnet_fem/selected_predictions/predictions",
-    "fista_fem": "current_code_runs/fista_fem/selected_predictions/predictions",
-    "stomp_fem": "current_code_runs/stomp_fem/selected_predictions/predictions",
+    "tikhonov_fem": "current_code_runs/tikhonov_fem/test300/predictions",
+    "l1_fem": "current_code_runs/l1_fem/test300/predictions",
+    "elasticnet_fem": "current_code_runs/elasticnet_fem/test300/predictions",
+    "fista_fem": "current_code_runs/fista_fem/test300/predictions",
+    "stomp_fem": "current_code_runs/stomp_fem/test300/predictions",
 }
 SUMMARY_DIRS = {
     method: str(Path(directory).parent) for method, directory in PREDICTION_DIRS.items()
@@ -139,14 +139,15 @@ def prediction_dir(args: argparse.Namespace, method: str) -> Path:
 
 def load_prediction(
     args: argparse.Namespace, sample_dir: Path, sample_id: str, method: str
-) -> np.ndarray:
+) -> tuple[np.ndarray, float]:
     if method == "gt":
-        return np.load(sample_dir / "gt_voxels.npy").astype(np.float32)
+        return np.load(sample_dir / "gt_voxels.npy").astype(np.float32), args.threshold
     if method == "fem_coarse":
-        return np.load(sample_dir / "stage1_voxel.npy").astype(np.float32)
+        return np.load(sample_dir / "stage1_voxel.npy").astype(np.float32), args.threshold
     pred_path = prediction_dir(args, method) / f"{sample_id}.npz"
     with np.load(pred_path) as pred:
-        return pred["pred"].astype(np.float32)
+        threshold = float(pred["threshold"]) if "threshold" in pred else args.threshold
+        return pred["pred"].astype(np.float32), threshold
 
 
 def render_panel(
@@ -256,8 +257,8 @@ def main() -> None:
         sample_dir = args.data_root / sample_id
         for col_index, (title, method) in enumerate(methods):
             panel_path = panel_dir / f"{sample_id}_{method}.png"
-            volume = load_prediction(args, sample_dir, sample_id, method)
-            render_panel(body_surface, organ_surfaces, volume, panel_path, args.threshold)
+            volume, threshold = load_prediction(args, sample_dir, sample_id, method)
+            render_panel(body_surface, organ_surfaces, volume, panel_path, threshold)
             axis = axes[row_index, col_index]
             axis.imshow(plt.imread(panel_path))
             axis.axis("off")

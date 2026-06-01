@@ -7,5 +7,9 @@ tikhonov_fem:
   lambda_l2: 1.0e-3
   num_iters: 100
   step_size: 0.0
+  power_iters: 12
+  normalize_columns: true
+  normalize_measurement: true
+  relative_regularization: true
   nonnegative: true
   select_lambda_on_val: true

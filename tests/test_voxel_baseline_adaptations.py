@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import torch
+import torch.nn as nn
 from omegaconf import OmegaConf
 
+from minr_fmt.models.fem_baselines import IterativeFEMBase
 from minr_fmt.models.voxel_baselines import D2RecSTAdapted, FEM2VoxUNet
 
 
@@ -53,3 +55,39 @@ def test_projection_shell_lift_preserves_spatial_cues_and_restores_full_shape():
     assert coarse.shape == (1, 4, 8, 8, 4)
     assert coarse.std(dim=(2, 3, 4)).mean() > 0
     assert output.shape == (1, 1, 16, 16, 8)
+
+
+def _iterative_fem_stub(A: torch.Tensor) -> IterativeFEMBase:
+    model = IterativeFEMBase.__new__(IterativeFEMBase)
+    nn.Module.__init__(model)
+    model.register_buffer("A", A)
+    model.step_size = 0.0
+    model.normalize_columns = True
+    model.normalize_measurement = True
+    model.relative_regularization = True
+    model.power_iters = 20
+    model._cached_step = None
+    return model
+
+
+def test_iterative_fem_uses_spectral_step_instead_of_frobenius_step():
+    A = torch.eye(2)
+    model = _iterative_fem_stub(A)
+
+    step = model._step(A)
+    frobenius_step = float(1.0 / A.square().sum())
+
+    assert step > frobenius_step
+    assert abs(step - 1.0) < 1e-5
+
+
+def test_iterative_fem_normalizes_columns_and_measurements():
+    A = torch.tensor([[3.0, 0.0], [4.0, 2.0]])
+    phi = torch.tensor([[2.0, 4.0]])
+    model = _iterative_fem_stub(A)
+
+    A_solver, phi_solver, column_norm = model._solver_inputs(phi)
+
+    assert torch.allclose(column_norm, torch.tensor([5.0, 2.0]))
+    assert torch.allclose(A_solver.norm(dim=0), torch.ones(2))
+    assert torch.allclose(phi_solver, torch.tensor([[0.5, 1.0]]))

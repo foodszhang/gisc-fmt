@@ -7,6 +7,7 @@ stomp_fem:
   num_iters: 20
   max_support: 128
   threshold_sigma: 2.5
+  normalize_measurement: true
   nonnegative: true
   mesh_to_voxel: barycentric
   n_candidates: 32

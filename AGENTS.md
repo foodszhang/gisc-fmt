@@ -71,6 +71,14 @@ interpolation. Reuse their fixed graph, mapping, measurement, and initialization
 to accelerate GAICN training, but do not expose their upstream method identity in paper
 tables or figures.
 
+Traditional continuous FEM methods require their own validation-selected voxel operating
+threshold after barycentric interpolation. Do not apply the deep-model probability
+threshold blindly. The corrected test300 results are about 0.459 Dice for Tikhonov at
+threshold `0.0075` and 0.531 Dice for L1 at threshold `0.01`. Their reported Dice, IoU,
+ASSD, HD95, CLE, and related metrics are all computed on the common `[190, 200, 104]`
+voxel grid. ElasticNet was stopped by user request; FISTA and StOMP do not have completed
+post-fix test300 reruns. Exclude their stale pre-fix metrics from the active summary.
+
 Keep deep-baseline training serial: run only one trainer at a time. Use a 200-train /
 50-val short gate before a formal run when adapting a baseline. A deep method below
 0.4 Dice remains available for supplementary metrics and figures, but mark it as below
@@ -86,12 +94,13 @@ the measurement backprojection once per batch and use two correction phases with
 cached FEM initialization. The full-data run reaches about 0.559 val Dice and about
 0.559 test300 voxel Dice.
 
-For paper figures, do not display internal FEM-prior diagnostics. Use the fixed-view
-mouse-internal renderer in `scripts/render_tmi_hard_cases.py`. Keep a main figure for
-valid deep comparisons, a marked supplementary deep-baseline figure for methods below
-0.4 Dice, and a separate traditional-FEM supplementary figure. Hard-case selection must
-require complete GISC-FMT component recovery and should include two-focus, three-focus,
-and irregular-shape examples.
+For paper figures, do not display internal FEM-prior diagnostics. Use
+`scripts/render_qualitative_multisource_tmi.py` for the main-text 4-by-6 comparison and
+`scripts/render_tmi_hard_cases.py` for broader diagnostic or supplementary figures. The
+main-text figure must use multi-source cases only, place GISC-FMT immediately before the
+rightmost ground-truth column, omit per-panel metrics, and overlay cyan ground-truth
+wireframes on red prediction surfaces. Keep a marked supplementary deep-baseline figure
+for methods below 0.4 Dice and a separate traditional-FEM supplementary figure.
 
 Template-prior residual adaptation does not rescue the PGDPNN/FMT-ReconNet family on
 the current v2 data. The PGDPNN 200-train / 50-val gate remains below 0.06 val Dice,

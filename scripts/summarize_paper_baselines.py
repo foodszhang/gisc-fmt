@@ -22,9 +22,23 @@ MODELS = [
     "fista_fem", "stomp_fem",
 ]
 GROUP_KEYS = {"num_foci", "depth_tier", "shape_class", "shape_set", "num_foci x depth_tier"}
+TRADITIONAL_FEM_THRESHOLDS = {
+    "tikhonov_fem": 0.0075,
+    "l1_fem": 0.01,
+    "elasticnet_fem": 0.01,
+    "fista_fem": 0.02,
+    "stomp_fem": 0.001,
+}
+EXCLUDED_STALE_RESULTS = {
+    "elasticnet_fem": "Formal rerun stopped by user request; exclude stale pre-fix metrics.",
+    "fista_fem": "Post-fix test300 rerun not completed; exclude stale pre-fix metrics.",
+    "stomp_fem": "Post-fix test300 rerun not completed; exclude stale pre-fix metrics.",
+}
 FIELDS = [
-    "model", "status", "best_ckpt", "best_val_dice", "test_dice", "test_iou", "test_nrmse",
-    "test_psnr", "test_ssim", "test_cle", "test_ple", "test_volume_error", "notes",
+    "model", "status", "best_ckpt", "best_val_dice", "test_dice", "test_iou",
+    "test_precision", "test_recall", "test_nrmse", "test_psnr", "test_ssim", "test_assd",
+    "test_hd95", "test_cle", "test_ple", "test_cnr", "test_volume_error",
+    "test_inference_time_ms", "notes",
 ]
 
 def parse_args():
@@ -104,6 +118,8 @@ for model in MODELS:
     ckpt = best_ckpt(run_dir)
     summary_path = test_dir / "metrics_summary.json"
     summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
+    if model in EXCLUDED_STALE_RESULTS:
+        summary = {}
     if summary.get("ckpt_path"):
         ckpt = Path(summary["ckpt_path"])
     if model == "gisc_fmt" and args.gisc_ckpt:
@@ -111,6 +127,9 @@ for model in MODELS:
     dice = metric(summary, "dice")
     notes = ""
     status = "pending"
+    if model in EXCLUDED_STALE_RESULTS:
+        status = "excluded_incomplete_rerun"
+        notes = EXCLUDED_STALE_RESULTS[model]
     if summary:
         if float(dice) >= 0.4:
             status = "main_candidate"
@@ -129,14 +148,25 @@ for model in MODELS:
         notes = "Full-data 2400-train/300-val cached mesh-space GAICN adaptation."
     elif model == "fem2vox_unet_residual" and summary:
         notes = "Full-data 2400-train/300-val residual-prior FEM2Vox adaptation."
+    elif model in TRADITIONAL_FEM_THRESHOLDS and summary:
+        notes = (
+            "Traditional continuous FEM reconstruction; barycentric interpolation to "
+            "[190, 200, 104]. Validation-selected voxel threshold="
+            f"{TRADITIONAL_FEM_THRESHOLDS[model]}."
+        )
     rows.append({
         "model": model,
         "status": status,
         "best_ckpt": str(ckpt) if ckpt else "",
         "best_val_dice": re.search(r"val_dice=([0-9]+(?:\.[0-9]+)?)", ckpt.name).group(1)
         if ckpt and "val_dice=" in ckpt.name else "",
-        **{f"test_{key}": metric(summary, key) for key in
-           ("dice", "iou", "nrmse", "psnr", "ssim", "cle", "ple", "volume_error")},
+        **{
+            f"test_{key}": metric(summary, key)
+            for key in (
+                "dice", "iou", "precision", "recall", "nrmse", "psnr", "ssim", "assd",
+                "hd95", "cle", "ple", "cnr", "volume_error", "inference_time_ms",
+            )
+        },
         "notes": notes,
     })
     grouped_path = test_dir / "metrics_grouped.csv"
