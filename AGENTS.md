@@ -48,12 +48,18 @@ candidate Dice. Its test300 Dice is about 0.662, IoU about 0.512, ASSD about 0.5
 and HD95 about 2.123 at threshold 0.5. Keep this checkpoint only when a table
 explicitly needs the historical baseline. Do not report it as the current best method.
 
-The current main GISC-FMT result is E13-MSQ-fixed:
+The strongest archived GISC-FMT test300 result is E13-MSQ-fixed:
 `outputs/fmt_simgen_v2_multisource/runs/e13_msq_fixed_from_mpb/checkpoints/epoch=05-val_dice=0.7432.ckpt`.
 On the same 300-sample test split, Dice is about 0.741, IoU about 0.603, ASSD about
 0.350, and HD95 about 1.120. By `num_foci`, Dice is about 0.799 for one focus, 0.747
 for two foci, and 0.692 for three foci. Recall is about 0.892, 0.810, and 0.696,
 respectively. Multi-source recovery remains the main improvement target.
+
+For the active paper summary and TMI-style figures, use the E15 center-distance
+checkpoint:
+`outputs/fmt_simgen_v2_e15_center_distance_precomputed/checkpoints/epoch=52-val_dice=0.7414.ckpt`.
+Its test300 Dice is about 0.725. Keep E13-MSQ-fixed recorded as the stronger archived
+test result, but do not mix E13 predictions into E15 paper figures.
 
 FEM-domain methods must be mapped to the common `[190, 200, 104]` voxel grid before
 metrics or figures. Do not report mesh-only Dice as a paper comparison. The verified
@@ -111,8 +117,7 @@ Use E15 for multi-source separation work. The goal is to improve three-focus and
 - E15 uses the E13 MPB chain as its base and keeps the main query-density head intact.
 - The auxiliary heads are only supervision helpers; they do not alter non-GT sampling or inference inputs.
 - The completed E15 center-distance checkpoint `epoch=52-val_dice=0.7414.ckpt`
-  reaches about 0.725 test300 Dice. It does not replace E13-MSQ-fixed as the current
-  main result.
+  reaches about 0.725 test300 Dice. Use it for the active paper summary and figures.
 - Use the shared entrypoint for formal runs: `uv run python train.py fit model=gisc_fmt exp=fmt_simgen_v2_e15_center_distance data.dataset_type=fmt_simgen`.
 - For comparison work, keep the paper baselines on the shared v2 protocol and record the selected checkpoint plus grouped metrics.
 - The most relevant comparison slices remain full-volume test300, grouped by `num_foci`, shape class, and depth tier, with component recall / missed / merge reporting.

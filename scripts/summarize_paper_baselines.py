@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import re
@@ -26,6 +27,13 @@ FIELDS = [
     "test_psnr", "test_ssim", "test_cle", "test_ple", "test_volume_error", "notes",
 ]
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gisc_result_dir", type=Path, default=OUT / "test" / "gisc_fmt")
+    parser.add_argument("--gisc_ckpt", type=Path, default=None)
+    parser.add_argument("--gisc_label", default="GISC-FMT")
+    return parser.parse_args()
+
 def best_ckpt(model_dir: Path):
     paths = list((model_dir / "checkpoints").glob("*.ckpt"))
     def score(path):
@@ -39,9 +47,11 @@ def metric(summary, key):
             return summary[candidate]
     return ""
 
-def result_dir(model):
+def result_dir(model, args):
+    if model == "gisc_fmt":
+        return args.gisc_result_dir
     legacy_test_models = {
-        "gisc_fmt", "uhr_deepfmt", "two_stage_deepfmt", "pgdpnn", "fem2vox_unet",
+        "uhr_deepfmt", "two_stage_deepfmt", "pgdpnn", "fem2vox_unet",
         "vox_dmrn", "fmt_reconnet", "map_pgan", "d2_recst", "dspgn",
     }
     if model in legacy_test_models:
@@ -85,16 +95,19 @@ def derived_shape_groups(test_dir):
         out.append(derived)
     return out
 
+args = parse_args()
 rows = []
 group_rows = []
 for model in MODELS:
     run_dir = model_dir(model)
-    test_dir = result_dir(model)
+    test_dir = result_dir(model, args)
     ckpt = best_ckpt(run_dir)
     summary_path = test_dir / "metrics_summary.json"
     summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
     if summary.get("ckpt_path"):
         ckpt = Path(summary["ckpt_path"])
+    if model == "gisc_fmt" and args.gisc_ckpt:
+        ckpt = args.gisc_ckpt
     dice = metric(summary, "dice")
     notes = ""
     status = "pending"
@@ -104,7 +117,9 @@ for model in MODELS:
         else:
             status = "below_0.4_supplementary"
             notes = "Retain metrics and figures; below main-table deep-baseline threshold."
-    if model in {"fem_coarse", "fem_to_voxel"}:
+    if model == "gisc_fmt" and summary:
+        notes = f"Current paper result: {args.gisc_label}."
+    elif model in {"fem_coarse", "fem_to_voxel"}:
         status = "internal_diagnostic_only"
         notes = (
             "Internal FEM-prior diagnostic only; exclude from the paper comparison. "
@@ -159,7 +174,7 @@ lines = ["# Paper Baseline Summary", "", "| " + " | ".join(FIELDS) + " |",
          "| " + " | ".join(["---"] * len(FIELDS)) + " |"]
 for row in rows:
     lines.append("| " + " | ".join(str(row.get(field, "")) for field in FIELDS) + " |")
-lines.extend(["", "## Current Best: GISC-FMT", ""])
+lines.extend(["", f"## Current Best: {args.gisc_label}", ""])
 for group_key, title in (
     ("num_foci", "By Number of Foci"),
     ("depth_tier", "By Depth Tier"),
@@ -188,7 +203,9 @@ for group_key, title in (
             )
     lines.append("")
 
-component_path = OUT / "test" / "gisc_fmt" / "component_summary.json"
+component_path = args.gisc_result_dir / "component_summary.json"
+if not component_path.exists():
+    component_path = args.gisc_result_dir / "components" / "component_summary.json"
 if component_path.exists():
     component = json.loads(component_path.read_text())
     lines.extend(

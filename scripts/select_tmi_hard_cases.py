@@ -36,6 +36,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_root", type=Path, default=Path("outputs/fmt_simgen_v2_3k_20k"))
     parser.add_argument("--save_dir", type=Path, default=None)
+    parser.add_argument("--gisc_result_dir", type=Path, default=None)
+    parser.add_argument("--gisc_component_csv", type=Path, default=None)
     parser.add_argument("--per_category", type=int, default=1)
     parser.add_argument("--min_gisc_dice", type=float, default=0.65)
     parser.add_argument(
@@ -117,15 +119,23 @@ def main() -> None:
     root = args.output_root
     save_dir = args.save_dir or root / "paper_figures" / "tmi_hard_cases"
     save_dir.mkdir(parents=True, exist_ok=True)
+    gisc_result_dir = args.gisc_result_dir or root / DEFAULT_METHODS["gisc_fmt"]
     requested = ["gisc_fmt", *args.comparison_methods]
     methods = {}
     for method in requested:
-        metrics_path = root / DEFAULT_METHODS[method] / "metrics_per_sample.csv"
+        metrics_path = (
+            gisc_result_dir / "metrics_per_sample.csv"
+            if method == "gisc_fmt"
+            else root / DEFAULT_METHODS[method] / "metrics_per_sample.csv"
+        )
         if metrics_path.exists():
             methods[method] = read_rows(metrics_path)
         else:
             print(f"[WARN] Skipping {method}: missing {metrics_path}")
-    components = read_rows(root / "test/gisc_fmt/component_per_sample.csv")
+    component_csv = args.gisc_component_csv or gisc_result_dir / "component_per_sample.csv"
+    if not component_csv.exists():
+        component_csv = gisc_result_dir / "components" / "component_per_sample.csv"
+    components = read_rows(component_csv)
     candidates = []
     for sample_id, gisc in methods["gisc_fmt"].items():
         component = components[sample_id]

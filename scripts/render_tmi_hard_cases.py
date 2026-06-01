@@ -95,6 +95,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output_root", type=Path, default=Path("outputs/fmt_simgen_v2_3k_20k"))
     parser.add_argument("--save_dir", type=Path, default=None)
+    parser.add_argument("--gisc_prediction_dir", type=Path, default=None)
+    parser.add_argument("--gisc_summary_dir", type=Path, default=None)
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument(
         "--methods",
@@ -129,12 +131,20 @@ def surface_from_mask(mask: np.ndarray) -> pv.PolyData | None:
     return pv.PolyData(vertices, faces_pv)
 
 
-def load_prediction(root: Path, sample_dir: Path, sample_id: str, method: str) -> np.ndarray:
+def prediction_dir(args: argparse.Namespace, method: str) -> Path:
+    if method == "gisc_fmt" and args.gisc_prediction_dir:
+        return args.gisc_prediction_dir
+    return args.output_root / PREDICTION_DIRS[method]
+
+
+def load_prediction(
+    args: argparse.Namespace, sample_dir: Path, sample_id: str, method: str
+) -> np.ndarray:
     if method == "gt":
         return np.load(sample_dir / "gt_voxels.npy").astype(np.float32)
     if method == "fem_coarse":
         return np.load(sample_dir / "stage1_voxel.npy").astype(np.float32)
-    pred_path = root / PREDICTION_DIRS[method] / f"{sample_id}.npz"
+    pred_path = prediction_dir(args, method) / f"{sample_id}.npz"
     with np.load(pred_path) as pred:
         return pred["pred"].astype(np.float32)
 
@@ -186,11 +196,15 @@ def metric_label(row: dict[str, str], method: str) -> str:
     return f"Dice = {float(row[f'{method}_dice']):.3f}"
 
 
-def meets_main_table_threshold(root: Path, method: str) -> bool:
+def meets_main_table_threshold(args: argparse.Namespace, method: str) -> bool:
     if method == "fem_coarse":
-        summary_path = root / "current_code_runs/fem_coarse/test300/metrics_summary.json"
+        summary_path = (
+            args.output_root / "current_code_runs/fem_coarse/test300/metrics_summary.json"
+        )
+    elif method == "gisc_fmt" and args.gisc_summary_dir:
+        summary_path = args.gisc_summary_dir / "metrics_summary.json"
     else:
-        summary_path = root / SUMMARY_DIRS[method] / "metrics_summary.json"
+        summary_path = args.output_root / SUMMARY_DIRS[method] / "metrics_summary.json"
     return float(json.loads(summary_path.read_text())["dice_mean"]) >= 0.4
 
 
@@ -206,7 +220,7 @@ def main() -> None:
         if method == "fem_coarse":
             available_methods.append(method)
             continue
-        pred_dir = args.output_root / PREDICTION_DIRS[method]
+        pred_dir = prediction_dir(args, method)
         predictions_complete = pred_dir.is_dir() and all(
             (pred_dir / f"{row['sample_id']}.npz").exists() for row in rows
         )
@@ -219,7 +233,7 @@ def main() -> None:
             )
     methods = [("Ground Truth", "gt")]
     for method in available_methods:
-        suffix = "" if meets_main_table_threshold(args.output_root, method) else " [<0.4]"
+        suffix = "" if meets_main_table_threshold(args, method) else " [<0.4]"
         methods.append((METHOD_TITLES[method] + suffix, method))
     labels = load_label_volume(args.shared_dir)
     body_surface = surface_from_mask(labels > 0)
@@ -242,7 +256,7 @@ def main() -> None:
         sample_dir = args.data_root / sample_id
         for col_index, (title, method) in enumerate(methods):
             panel_path = panel_dir / f"{sample_id}_{method}.png"
-            volume = load_prediction(args.output_root, sample_dir, sample_id, method)
+            volume = load_prediction(args, sample_dir, sample_id, method)
             render_panel(body_surface, organ_surfaces, volume, panel_path, args.threshold)
             axis = axes[row_index, col_index]
             axis.imshow(plt.imread(panel_path))
