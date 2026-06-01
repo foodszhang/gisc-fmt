@@ -77,6 +77,11 @@ valid deep comparisons, a marked supplementary deep-baseline figure for methods 
 require complete GISC-FMT component recovery and should include two-focus, three-focus,
 and irregular-shape examples.
 
+Template-prior residual adaptation does not rescue the PGDPNN/FMT-ReconNet family on
+the current v2 data. The PGDPNN 200-train / 50-val gate remains below 0.06 val Dice,
+while the FMT-ReconNet smoke remains near the existing low baseline. Retain their
+test300 data and marked supplementary figures; do not promote them to the main table.
+
 ## E15 Center-Distance Separation
 
 Use E15 for multi-source separation work. The goal is to improve three-focus and mixed-shape cases without changing the E13 main path.
