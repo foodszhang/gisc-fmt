@@ -25,6 +25,7 @@ dependencies = [
     "torchvision>=0.20.0",
     "pytest>=9.0.2",
     "pyvista>=0.48.4",
+    "nibabel>=5.4.2",
 ]
 
 [project.optional-dependencies]
