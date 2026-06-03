@@ -31,7 +31,10 @@ SHARED_DIR = Path("/home/foods/pro/FMT-SimGen/output/shared_mesh_20k")
 DIGMOUSE_DIR = Path("/home/foods/pro/FMT-SimGen/digmouse_data")
 
 GT_COLOR = "#11B7C8"
-PRED_COLOR = "#D96B00"
+GT_3D_COLOR = "#D7301F"
+PRED_COLOR = "#D7301F"
+PRED_2D_COLOR = "#E66101"
+OVERLAP_COLOR = "#F6C431"
 BODY_COLOR = "#D8D8D8"
 BODY_EDGE_COLOR = "#8A8A8A"
 ORGAN_COLOR = "#CDB8A7"
@@ -133,7 +136,7 @@ CASE_POOLS = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--with-slices", action="store_true", default=True)
-    parser.add_argument("--slice-cases", default="a")
+    parser.add_argument("--slice-cases", default="a,b,c,d")
     parser.add_argument(
         "--slice-methods",
         default="uhr_deepfmt,pah2t_former,gaicn,fem2vox_unet_residual,gisc_fmt,gt",
@@ -363,24 +366,35 @@ def render_3d_panel(
 ) -> None:
     plotter = pv.Plotter(off_screen=True, window_size=(820, 700))
     plotter.set_background("white")
+    plotter.remove_all_lights()
+    key_light = pv.Light(position=(42.0, -62.0, 48.0), focal_point=(19.0, 20.0, 10.0))
+    key_light.intensity = 0.82
+    fill_light = pv.Light(position=(-30.0, 18.0, 35.0), focal_point=(19.0, 20.0, 10.0))
+    fill_light.intensity = 0.28
+    back_light = pv.Light(position=(16.0, 55.0, 28.0), focal_point=(19.0, 20.0, 10.0))
+    back_light.intensity = 0.22
+    plotter.add_light(key_light)
+    plotter.add_light(fill_light)
+    plotter.add_light(back_light)
     add_anatomical_context(plotter, body_surface, organ_surfaces, enhance_mouse_outline)
     gt_surface = surface_from_mask(gt > 0.0)
     if is_gt:
         if gt_surface is not None:
             plotter.add_mesh(
                 gt_surface,
-                color=GT_COLOR,
-                opacity=0.88,
+                color=GT_3D_COLOR,
+                opacity=0.92,
                 show_edges=False,
                 smooth_shading=True,
-                specular=0.22,
+                specular=0.32,
+                diffuse=0.72,
             )
             plotter.add_mesh(
                 gt_surface,
-                color=GT_COLOR,
-                opacity=0.90,
+                color="#7F0000",
+                opacity=0.50,
                 style="wireframe",
-                line_width=0.85,
+                line_width=0.42,
             )
     else:
         prediction_surface = surface_from_mask(prediction >= THRESHOLD)
@@ -388,24 +402,25 @@ def render_3d_panel(
             plotter.add_mesh(
                 prediction_surface,
                 color=PRED_COLOR,
-                opacity=0.86,
+                opacity=0.90,
                 show_edges=False,
                 smooth_shading=True,
-                specular=0.22,
+                specular=0.34,
+                diffuse=0.72,
             )
             plotter.add_mesh(
                 prediction_surface,
                 color=PRED_COLOR,
-                opacity=0.90,
+                opacity=0.45,
                 style="wireframe",
-                line_width=0.65,
+                line_width=0.38,
             )
     plotter.camera_position = [
         (64.0, -45.0, 38.0),
         (19.0, 20.0, 10.0),
         (0.0, 0.0, 1.0),
     ]
-    plotter.camera.zoom(1.18)
+    plotter.camera.zoom(1.38)
     plotter.screenshot(output_path)
     plotter.close()
 
@@ -535,6 +550,20 @@ def overlay_mask(ax, mask: np.ndarray, color: str, alpha: float) -> None:
     ax.imshow(rgba, interpolation="nearest")
 
 
+def overlay_error_regions(ax, gt_mask: np.ndarray, pred_mask: np.ndarray | None) -> None:
+    if pred_mask is None:
+        overlay_mask(ax, gt_mask, GT_COLOR, 0.26)
+        return
+    gt_bool = gt_mask.astype(bool)
+    pred_bool = pred_mask.astype(bool)
+    overlap = np.logical_and(gt_bool, pred_bool)
+    gt_only = np.logical_and(gt_bool, ~pred_bool)
+    pred_only = np.logical_and(pred_bool, ~gt_bool)
+    overlay_mask(ax, gt_only, GT_COLOR, 0.30)
+    overlay_mask(ax, pred_only, PRED_2D_COLOR, 0.30)
+    overlay_mask(ax, overlap, OVERLAP_COLOR, 0.34)
+
+
 def crop_bounds(crop: tuple[slice, slice]) -> tuple[int, int, int, int]:
     row_slice, col_slice = crop
     r0 = 0 if row_slice.start is None else int(row_slice.start)
@@ -574,13 +603,14 @@ def render_slice_panel(
     bg_slice = slice2d_slab(background, axis, index, SLICE_SLAB_RADIUS, mask=False)[crop]
     gt_slice = slice2d_slab(gt > 0.0, axis, index, SLICE_SLAB_RADIUS, mask=True)[crop]
     ax.imshow(bg_slice, cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest")
-    overlay_mask(ax, gt_slice, GT_COLOR, 0.24)
+    pred_slice = None
     if prediction is not None:
         pred_slice = slice2d_slab(
             prediction >= THRESHOLD, axis, index, SLICE_SLAB_RADIUS, mask=True
         )[crop]
-        overlay_mask(ax, pred_slice, PRED_COLOR, 0.22)
-        draw_contours(ax, pred_slice, PRED_COLOR, 1.8)
+    overlay_error_regions(ax, gt_slice, pred_slice)
+    if pred_slice is not None:
+        draw_contours(ax, pred_slice, PRED_2D_COLOR, 1.7)
     draw_contours(ax, gt_slice, GT_COLOR, 1.9)
     ax.set_title(title, fontsize=10.5, fontweight="bold" if "GISC" in title else "normal", pad=3)
     if roi_crop is not None:
@@ -637,15 +667,17 @@ def add_case_label(ax, case: dict, x: float = -0.08) -> None:
 
 def add_global_legend(fig, y: float = 0.025) -> None:
     handles = [
-        Line2D([0], [0], color=GT_COLOR, lw=3, label="Cyan: Ground truth"),
-        Line2D([0], [0], color=PRED_COLOR, lw=3, label="Orange-red: Prediction"),
+        Line2D([0], [0], color=GT_3D_COLOR, lw=3, label="Red: 3D source surface"),
+        Line2D([0], [0], color=OVERLAP_COLOR, lw=3, label="Yellow: 2D overlap"),
+        Line2D([0], [0], color=GT_COLOR, lw=3, label="Cyan: GT-only"),
+        Line2D([0], [0], color=PRED_2D_COLOR, lw=3, label="Orange: Pred-only"),
         Line2D([0], [0], color=BODY_EDGE_COLOR, lw=3, label="Gray: anatomical context / CT"),
     ]
     fig.legend(
         handles=handles,
         loc="lower center",
         bbox_to_anchor=(0.5, y),
-        ncol=3,
+        ncol=5,
         frameon=False,
         fontsize=11,
     )
@@ -748,21 +780,17 @@ def make_slice_zoom(
     dpi: int,
     legend: bool,
 ) -> None:
-    if len(slice_cases) != 1:
-        slice_cases = slice_cases[:1]
     fig, axes = plt.subplots(
-        2,
+        len(slice_cases),
         len(slice_methods),
-        figsize=(3.95 * len(slice_methods), 7.2),
+        figsize=(3.95 * len(slice_methods), 3.2 * len(slice_cases)),
     )
     axes = np.atleast_2d(axes)
-    case = slice_cases[0]
-    sample_id = str(case["sample_id"])
-    gt = load_volume("gt", sample_id)
-    axis, index = choose_slice(gt > 0.0)
-    context_crop = crop_box_from_gt(gt > 0.0, axis, padding=42)
-    zoom_crop = zoom_crop_from_gt(gt > 0.0, str(case["panel"]), axis, padding=18)
-    for row, crop in enumerate([context_crop, zoom_crop]):
+    for row, case in enumerate(slice_cases):
+        sample_id = str(case["sample_id"])
+        gt = load_volume("gt", sample_id)
+        axis, index = choose_slice(gt > 0.0)
+        crop = crop_box_from_gt(gt > 0.0, axis, padding=42)
         for col, method in enumerate(slice_methods):
             prediction = None if method == "gt" else load_volume(method, sample_id)
             title = METHOD_TITLES[method] if row == 0 else ""
@@ -777,13 +805,12 @@ def make_slice_zoom(
                 crop,
                 title,
                 show_background_label=(row == 0 and col == 0),
-                roi_crop=zoom_crop if row == 0 else None,
             )
         add_case_label(axes[row, 0], case, x=-0.13)
         axes[row, 0].text(
             -0.13,
             0.08,
-            "Context slice" if row == 0 else "Local magnification",
+            "Context slice",
             ha="right",
             va="center",
             transform=axes[row, 0].transAxes,
@@ -796,7 +823,7 @@ def make_slice_zoom(
         top=0.92,
         bottom=0.12 if legend else 0.04,
         wspace=0.045,
-        hspace=0.18,
+        hspace=0.22,
     )
     if legend:
         add_global_legend(fig, y=0.03)
@@ -817,17 +844,23 @@ def make_3d_slice(
     dpi: int,
     legend: bool,
 ) -> None:
-    if len(slice_cases) != 1:
-        slice_cases = slice_cases[:1]
     width = max(18.8, 3.25 * len(slice_methods))
-    fig = plt.figure(figsize=(width, 14.1))
-    outer = fig.add_gridspec(2, 1, height_ratios=[4.15, 1.05], hspace=0.075)
-    top = outer[0].subgridspec(len(cases), len(methods_3d), wspace=0.012, hspace=0.035)
+    fig = plt.figure(figsize=(width, 19.8))
+    grid = fig.add_gridspec(
+        len(cases) * 2,
+        len(methods_3d),
+        height_ratios=[1.0, 0.72] * len(cases),
+        wspace=0.014,
+        hspace=0.055,
+    )
     for row, case in enumerate(cases):
         sample_id = str(case["sample_id"])
+        gt = load_volume("gt", sample_id)
+        axis, index = choose_slice(gt > 0.0)
+        crop = crop_box_from_gt(gt > 0.0, axis, padding=42)
         first_ax = None
         for col, (title, method) in enumerate(methods_3d):
-            ax = fig.add_subplot(top[row, col])
+            ax = fig.add_subplot(grid[row * 2, col])
             if first_ax is None:
                 first_ax = ax
             ax.imshow(plt.imread(panel_paths[(sample_id, method)]))
@@ -836,20 +869,12 @@ def make_3d_slice(
                 ax.set_title(title, fontsize=13, fontweight="bold", pad=8)
         add_case_label(first_ax, case)
 
-    bottom = outer[1].subgridspec(1, len(slice_methods), wspace=0.035, hspace=0.0)
-    for row, case in enumerate(slice_cases):
-        sample_id = str(case["sample_id"])
-        gt = load_volume("gt", sample_id)
-        axis, index = choose_slice(gt > 0.0)
-        crop = crop_box_from_gt(gt > 0.0, axis, padding=42)
-        zoom_crop = zoom_crop_from_gt(gt > 0.0, str(case["panel"]), axis, padding=18)
-        first_ax = None
-        for col, method in enumerate(slice_methods):
-            ax = fig.add_subplot(bottom[0, col])
-            if first_ax is None:
-                first_ax = ax
+        slice_first_ax = None
+        for col, (_, method) in enumerate(methods_3d):
+            ax = fig.add_subplot(grid[row * 2 + 1, col])
+            if slice_first_ax is None:
+                slice_first_ax = ax
             prediction = None if method == "gt" else load_volume(method, sample_id)
-            title = METHOD_TITLES[method]
             render_slice_panel(
                 ax,
                 ct,
@@ -859,25 +884,23 @@ def make_3d_slice(
                 axis,
                 index,
                 crop,
-                title,
-                show_background_label=(col == 0),
-                roi_crop=zoom_crop,
+                "",
+                show_background_label=(row == 0 and col == 0),
             )
-        add_case_label(first_ax, case, x=-0.10)
-        first_ax.text(
-            -0.10,
+        slice_first_ax.text(
+            -0.08,
             0.08,
-            "Context slice with zoom ROI",
+            "Matched CT slice",
             ha="right",
             va="center",
-            transform=first_ax.transAxes,
+            transform=slice_first_ax.transAxes,
             fontsize=9.5,
             color="#444444",
         )
     fig.subplots_adjust(
         left=0.16,
         right=0.995,
-        top=0.955,
+        top=0.965,
         bottom=0.07 if legend else 0.02,
     )
     if legend:
