@@ -32,10 +32,11 @@ DIGMOUSE_DIR = Path("/home/foods/pro/FMT-SimGen/digmouse_data")
 
 GT_COLOR = "#11B7C8"
 PRED_COLOR = "#D96B00"
-BODY_COLOR = "#A8A8A8"
-BODY_EDGE_COLOR = "#7A7A7A"
+BODY_COLOR = "#D8D8D8"
+BODY_EDGE_COLOR = "#8A8A8A"
 ORGAN_COLOR = "#CDB8A7"
 BG_GRAY = "#F7F7F7"
+SLICE_SLAB_RADIUS = 4
 
 METHODS_3D = [
     ("UHR-DeepFMT", "uhr_deepfmt"),
@@ -47,6 +48,16 @@ METHODS_3D = [
 ]
 METHOD_TITLES = {method: title for title, method in METHODS_3D}
 METHOD_TITLES["gt"] = "Ground Truth"
+
+ORGAN_STYLE = {
+    2: ("#B8B8B8", 0.11),
+    4: ("#C8797D", 0.18),
+    5: ("#9ABFD9", 0.16),
+    6: ("#B98274", 0.17),
+    7: ("#B3A08B", 0.18),
+    8: ("#A7B8A0", 0.15),
+    9: ("#B7C9D9", 0.13),
+}
 
 PREDICTION_DIRS = {
     "uhr_deepfmt": [OUTPUT_ROOT / "test" / "uhr_deepfmt" / "predictions"],
@@ -123,7 +134,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--with-slices", action="store_true", default=True)
     parser.add_argument("--slice-cases", default="a,b")
-    parser.add_argument("--slice-methods", default="pah2t_former,gaicn,gisc_fmt,gt")
+    parser.add_argument(
+        "--slice-methods",
+        default="uhr_deepfmt,pah2t_former,gaicn,fem2vox_unet_residual,gisc_fmt,gt",
+    )
     parser.add_argument("--enhance-mouse-outline", action="store_true", default=True)
     parser.add_argument("--legend", action="store_true", default=True)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT / "paper_figures")
@@ -311,28 +325,30 @@ def add_anatomical_context(
     plotter.add_mesh(
         body_surface,
         color=BODY_COLOR,
-        opacity=0.18 if enhance_mouse_outline else 0.12,
+        opacity=0.075 if enhance_mouse_outline else 0.055,
         show_edges=False,
         smooth_shading=True,
-        specular=0.08,
-        diffuse=0.72,
+        specular=0.04,
+        diffuse=0.86,
     )
     if enhance_mouse_outline:
         plotter.add_mesh(
             body_surface,
             color=BODY_EDGE_COLOR,
-            opacity=0.24,
+            opacity=0.075,
             style="wireframe",
-            line_width=0.55,
+            line_width=0.28,
         )
     for label, surface in organ_surfaces.items():
+        color, opacity = ORGAN_STYLE.get(label, (ORGAN_COLOR, 0.14))
         plotter.add_mesh(
             surface,
-            color=BODY_EDGE_COLOR if label == 2 else ORGAN_COLOR,
-            opacity=0.07 if label == 2 else 0.11,
+            color=color,
+            opacity=opacity,
             show_edges=False,
             smooth_shading=True,
-            specular=0.04,
+            specular=0.06,
+            diffuse=0.80,
         )
 
 
@@ -450,6 +466,14 @@ def slice2d(volume: np.ndarray, axis: int, index: int) -> np.ndarray:
     return volume[:, :, index].T
 
 
+def slice2d_slab(volume: np.ndarray, axis: int, index: int, radius: int, mask: bool) -> np.ndarray:
+    start = max(index - radius, 0)
+    stop = min(index + radius + 1, volume.shape[axis])
+    slab = np.take(volume, indices=range(start, stop), axis=axis)
+    reduced = np.any(slab > 0, axis=axis) if mask else np.mean(slab, axis=axis)
+    return reduced.T
+
+
 def projection2d(mask: np.ndarray, axis: int) -> np.ndarray:
     return np.any(mask, axis=axis).T
 
@@ -544,12 +568,14 @@ def render_slice_panel(
     title: str,
     show_background_label: bool,
 ) -> None:
-    bg_slice = slice2d(background, axis, index)[crop]
-    gt_slice = slice2d(gt > 0.0, axis, index)[crop]
+    bg_slice = slice2d_slab(background, axis, index, SLICE_SLAB_RADIUS, mask=False)[crop]
+    gt_slice = slice2d_slab(gt > 0.0, axis, index, SLICE_SLAB_RADIUS, mask=True)[crop]
     ax.imshow(bg_slice, cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest")
     overlay_mask(ax, gt_slice, GT_COLOR, 0.24)
     if prediction is not None:
-        pred_slice = slice2d(prediction >= THRESHOLD, axis, index)[crop]
+        pred_slice = slice2d_slab(
+            prediction >= THRESHOLD, axis, index, SLICE_SLAB_RADIUS, mask=True
+        )[crop]
         overlay_mask(ax, pred_slice, PRED_COLOR, 0.22)
         draw_contours(ax, pred_slice, PRED_COLOR, 1.8)
     draw_contours(ax, gt_slice, GT_COLOR, 1.9)
@@ -711,14 +737,14 @@ def make_slice_zoom(
     fig, axes = plt.subplots(
         len(slice_cases),
         len(slice_methods),
-        figsize=(4.6 * len(slice_methods), 3.85 * len(slice_cases)),
+        figsize=(4.0 * len(slice_methods), 4.25 * len(slice_cases)),
     )
     axes = np.atleast_2d(axes)
     for row, case in enumerate(slice_cases):
         sample_id = str(case["sample_id"])
         gt = load_volume("gt", sample_id)
         axis, index = choose_slice(gt > 0.0)
-        crop = zoom_crop_from_gt(gt > 0.0, str(case["panel"]), axis, padding=16)
+        crop = crop_box_from_gt(gt > 0.0, axis, padding=34)
         for col, method in enumerate(slice_methods):
             prediction = None if method == "gt" else load_volume(method, sample_id)
             render_slice_panel(
@@ -761,9 +787,9 @@ def make_3d_slice(
     dpi: int,
     legend: bool,
 ) -> None:
-    width = max(18.2, 4.1 * len(slice_methods))
-    fig = plt.figure(figsize=(width, 14.2))
-    outer = fig.add_gridspec(2, 1, height_ratios=[4.2, 1.35], hspace=0.08)
+    width = max(18.8, 3.25 * len(slice_methods))
+    fig = plt.figure(figsize=(width, 16.2))
+    outer = fig.add_gridspec(2, 1, height_ratios=[4.1, 2.15], hspace=0.09)
     top = outer[0].subgridspec(len(cases), len(methods_3d), wspace=0.012, hspace=0.035)
     for row, case in enumerate(cases):
         sample_id = str(case["sample_id"])
@@ -795,7 +821,7 @@ def make_3d_slice(
         sample_id = str(case["sample_id"])
         gt = load_volume("gt", sample_id)
         axis, index = choose_slice(gt > 0.0)
-        crop = zoom_crop_from_gt(gt > 0.0, str(case["panel"]), axis, padding=16)
+        crop = crop_box_from_gt(gt > 0.0, axis, padding=34)
         first_ax = None
         for col, method in enumerate(slice_methods):
             ax = fig.add_subplot(bottom[row, col])
