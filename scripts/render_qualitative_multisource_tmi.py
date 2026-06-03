@@ -50,13 +50,13 @@ METHOD_TITLES = {method: title for title, method in METHODS_3D}
 METHOD_TITLES["gt"] = "Ground Truth"
 
 ORGAN_STYLE = {
-    2: ("#B8B8B8", 0.11),
-    4: ("#C8797D", 0.18),
-    5: ("#9ABFD9", 0.16),
-    6: ("#B98274", 0.17),
-    7: ("#B3A08B", 0.18),
-    8: ("#A7B8A0", 0.15),
-    9: ("#B7C9D9", 0.13),
+    2: ("#B4B4B4", 0.12),
+    4: ("#D96F77", 0.22),
+    5: ("#78B6DD", 0.20),
+    6: ("#D18A78", 0.21),
+    7: ("#C3A16F", 0.22),
+    8: ("#8FBA79", 0.18),
+    9: ("#8FC7E8", 0.17),
 }
 
 PREDICTION_DIRS = {
@@ -85,7 +85,7 @@ PREDICTION_DIRS = {
 CASE_POOLS = [
     {
         "panel": "a",
-        "label": "Weak secondary focus",
+        "label": "Case I: Weak secondary-source recovery",
         "num_foci": 2,
         "shape_combo": "irregular + sphere",
         "reason": (
@@ -96,7 +96,7 @@ CASE_POOLS = [
     },
     {
         "panel": "b",
-        "label": "Adjacent-source merging",
+        "label": "Case II: Adjacent-source separation",
         "num_foci": 3,
         "shape_combo": "ellipsoid + irregular",
         "reason": (
@@ -107,7 +107,7 @@ CASE_POOLS = [
     },
     {
         "panel": "c",
-        "label": "Mixed morphology",
+        "label": "Case III: Mixed-morphology reconstruction",
         "num_foci": 3,
         "shape_combo": "ellipsoid + irregular + sphere",
         "reason": (
@@ -118,7 +118,7 @@ CASE_POOLS = [
     },
     {
         "panel": "d",
-        "label": "Hard three-foci case",
+        "label": "Case IV: Low-contrast three-focus localization",
         "num_foci": 3,
         "shape_combo": "ellipsoid + sphere",
         "reason": (
@@ -133,7 +133,7 @@ CASE_POOLS = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--with-slices", action="store_true", default=True)
-    parser.add_argument("--slice-cases", default="a,b")
+    parser.add_argument("--slice-cases", default="a")
     parser.add_argument(
         "--slice-methods",
         default="uhr_deepfmt,pah2t_former,gaicn,fem2vox_unet_residual,gisc_fmt,gt",
@@ -370,41 +370,25 @@ def render_3d_panel(
             plotter.add_mesh(
                 gt_surface,
                 color=GT_COLOR,
-                opacity=0.62,
+                opacity=0.88,
                 show_edges=False,
                 smooth_shading=True,
-                specular=0.20,
+                specular=0.22,
             )
             plotter.add_mesh(
                 gt_surface,
                 color=GT_COLOR,
                 opacity=0.90,
                 style="wireframe",
-                line_width=1.0,
+                line_width=0.85,
             )
     else:
         prediction_surface = surface_from_mask(prediction >= THRESHOLD)
-        if gt_surface is not None:
-            plotter.add_mesh(
-                gt_surface,
-                color=GT_COLOR,
-                opacity=0.54,
-                show_edges=False,
-                smooth_shading=True,
-                specular=0.18,
-            )
-            plotter.add_mesh(
-                gt_surface,
-                color=GT_COLOR,
-                opacity=0.88,
-                style="wireframe",
-                line_width=0.85,
-            )
         if prediction_surface is not None:
             plotter.add_mesh(
                 prediction_surface,
                 color=PRED_COLOR,
-                opacity=0.32,
+                opacity=0.86,
                 show_edges=False,
                 smooth_shading=True,
                 specular=0.22,
@@ -412,9 +396,9 @@ def render_3d_panel(
             plotter.add_mesh(
                 prediction_surface,
                 color=PRED_COLOR,
-                opacity=0.96,
+                opacity=0.90,
                 style="wireframe",
-                line_width=1.25,
+                line_width=0.65,
             )
     plotter.camera_position = [
         (64.0, -45.0, 38.0),
@@ -551,6 +535,24 @@ def overlay_mask(ax, mask: np.ndarray, color: str, alpha: float) -> None:
     ax.imshow(rgba, interpolation="nearest")
 
 
+def crop_bounds(crop: tuple[slice, slice]) -> tuple[int, int, int, int]:
+    row_slice, col_slice = crop
+    r0 = 0 if row_slice.start is None else int(row_slice.start)
+    r1 = int(row_slice.stop)
+    c0 = 0 if col_slice.start is None else int(col_slice.start)
+    c1 = int(col_slice.stop)
+    return r0, r1, c0, c1
+
+
+def relative_crop(inner: tuple[slice, slice], outer: tuple[slice, slice]) -> tuple[slice, slice]:
+    inner_r0, inner_r1, inner_c0, inner_c1 = crop_bounds(inner)
+    outer_r0, _, outer_c0, _ = crop_bounds(outer)
+    return (
+        slice(max(inner_r0 - outer_r0, 0), max(inner_r1 - outer_r0, 0)),
+        slice(max(inner_c0 - outer_c0, 0), max(inner_c1 - outer_c0, 0)),
+    )
+
+
 def draw_contours(ax, mask: np.ndarray, color: str, linewidth: float) -> None:
     for contour in measure.find_contours(mask.astype(np.float32), 0.5):
         ax.plot(contour[:, 1], contour[:, 0], color=color, linewidth=linewidth)
@@ -567,6 +569,7 @@ def render_slice_panel(
     crop: tuple[slice, slice],
     title: str,
     show_background_label: bool,
+    roi_crop: tuple[slice, slice] | None = None,
 ) -> None:
     bg_slice = slice2d_slab(background, axis, index, SLICE_SLAB_RADIUS, mask=False)[crop]
     gt_slice = slice2d_slab(gt > 0.0, axis, index, SLICE_SLAB_RADIUS, mask=True)[crop]
@@ -580,6 +583,20 @@ def render_slice_panel(
         draw_contours(ax, pred_slice, PRED_COLOR, 1.8)
     draw_contours(ax, gt_slice, GT_COLOR, 1.9)
     ax.set_title(title, fontsize=10.5, fontweight="bold" if "GISC" in title else "normal", pad=3)
+    if roi_crop is not None:
+        rr, cc = relative_crop(roi_crop, crop)
+        r0, r1, c0, c1 = crop_bounds((rr, cc))
+        ax.add_patch(
+            Rectangle(
+                (c0, r0),
+                max(c1 - c0, 1),
+                max(r1 - r0, 1),
+                fill=False,
+                edgecolor="#FFFFFF",
+                linewidth=1.0,
+                linestyle="--",
+            )
+        )
     ax.axis("off")
     if show_background_label:
         ax.text(
@@ -596,7 +613,16 @@ def render_slice_panel(
 
 
 def add_case_label(ax, case: dict, x: float = -0.08) -> None:
-    label = f"({case['panel']}) {case['label']}\n{case['num_foci']} foci | {case['shape_combo']}"
+    case_label = str(case["label"])
+    if ": " in case_label:
+        case_id, description = case_label.split(": ", 1)
+        label = (
+            f"({case['panel']}) {case_id}\n"
+            f"{description}\n"
+            f"{case['num_foci']} foci | {case['shape_combo']}"
+        )
+    else:
+        label = f"({case['panel']}) {case_label}\n{case['num_foci']} foci | {case['shape_combo']}"
     ax.text(
         x,
         0.50,
@@ -604,8 +630,8 @@ def add_case_label(ax, case: dict, x: float = -0.08) -> None:
         ha="right",
         va="center",
         transform=ax.transAxes,
-        fontsize=10.5,
-        linespacing=1.35,
+        fontsize=10.2,
+        linespacing=1.28,
     )
 
 
@@ -695,18 +721,6 @@ def make_3d_only(
             ax = axes[row, col]
             ax.imshow(plt.imread(panel_paths[(sample_id, method)]))
             ax.axis("off")
-            if method == "gisc_fmt":
-                ax.add_patch(
-                    Rectangle(
-                        (0.01, 0.01),
-                        0.98,
-                        0.98,
-                        transform=ax.transAxes,
-                        fill=False,
-                        edgecolor="#333333",
-                        linewidth=1.1,
-                    )
-                )
             if row == 0:
                 ax.set_title(title, fontsize=13, fontweight="bold", pad=8)
         add_case_label(axes[row, 0], case)
@@ -734,19 +748,24 @@ def make_slice_zoom(
     dpi: int,
     legend: bool,
 ) -> None:
+    if len(slice_cases) != 1:
+        slice_cases = slice_cases[:1]
     fig, axes = plt.subplots(
-        len(slice_cases),
+        2,
         len(slice_methods),
-        figsize=(4.0 * len(slice_methods), 4.25 * len(slice_cases)),
+        figsize=(3.95 * len(slice_methods), 7.2),
     )
     axes = np.atleast_2d(axes)
-    for row, case in enumerate(slice_cases):
-        sample_id = str(case["sample_id"])
-        gt = load_volume("gt", sample_id)
-        axis, index = choose_slice(gt > 0.0)
-        crop = crop_box_from_gt(gt > 0.0, axis, padding=34)
+    case = slice_cases[0]
+    sample_id = str(case["sample_id"])
+    gt = load_volume("gt", sample_id)
+    axis, index = choose_slice(gt > 0.0)
+    context_crop = crop_box_from_gt(gt > 0.0, axis, padding=42)
+    zoom_crop = zoom_crop_from_gt(gt > 0.0, str(case["panel"]), axis, padding=18)
+    for row, crop in enumerate([context_crop, zoom_crop]):
         for col, method in enumerate(slice_methods):
             prediction = None if method == "gt" else load_volume(method, sample_id)
+            title = METHOD_TITLES[method] if row == 0 else ""
             render_slice_panel(
                 axes[row, col],
                 ct,
@@ -756,17 +775,28 @@ def make_slice_zoom(
                 axis,
                 index,
                 crop,
-                METHOD_TITLES[method],
+                title,
                 show_background_label=(row == 0 and col == 0),
+                roi_crop=zoom_crop if row == 0 else None,
             )
         add_case_label(axes[row, 0], case, x=-0.13)
+        axes[row, 0].text(
+            -0.13,
+            0.08,
+            "Context slice" if row == 0 else "Local magnification",
+            ha="right",
+            va="center",
+            transform=axes[row, 0].transAxes,
+            fontsize=9.5,
+            color="#444444",
+        )
     fig.subplots_adjust(
         left=0.18,
         right=0.995,
         top=0.92,
         bottom=0.12 if legend else 0.04,
         wspace=0.045,
-        hspace=0.26,
+        hspace=0.18,
     )
     if legend:
         add_global_legend(fig, y=0.03)
@@ -787,9 +817,11 @@ def make_3d_slice(
     dpi: int,
     legend: bool,
 ) -> None:
+    if len(slice_cases) != 1:
+        slice_cases = slice_cases[:1]
     width = max(18.8, 3.25 * len(slice_methods))
-    fig = plt.figure(figsize=(width, 16.2))
-    outer = fig.add_gridspec(2, 1, height_ratios=[4.1, 2.15], hspace=0.09)
+    fig = plt.figure(figsize=(width, 14.1))
+    outer = fig.add_gridspec(2, 1, height_ratios=[4.15, 1.05], hspace=0.075)
     top = outer[0].subgridspec(len(cases), len(methods_3d), wspace=0.012, hspace=0.035)
     for row, case in enumerate(cases):
         sample_id = str(case["sample_id"])
@@ -800,35 +832,24 @@ def make_3d_slice(
                 first_ax = ax
             ax.imshow(plt.imread(panel_paths[(sample_id, method)]))
             ax.axis("off")
-            if method == "gisc_fmt":
-                ax.add_patch(
-                    Rectangle(
-                        (0.01, 0.01),
-                        0.98,
-                        0.98,
-                        transform=ax.transAxes,
-                        fill=False,
-                        edgecolor="#333333",
-                        linewidth=1.1,
-                    )
-                )
             if row == 0:
                 ax.set_title(title, fontsize=13, fontweight="bold", pad=8)
         add_case_label(first_ax, case)
 
-    bottom = outer[1].subgridspec(len(slice_cases), len(slice_methods), wspace=0.035, hspace=0.18)
+    bottom = outer[1].subgridspec(1, len(slice_methods), wspace=0.035, hspace=0.0)
     for row, case in enumerate(slice_cases):
         sample_id = str(case["sample_id"])
         gt = load_volume("gt", sample_id)
         axis, index = choose_slice(gt > 0.0)
-        crop = crop_box_from_gt(gt > 0.0, axis, padding=34)
+        crop = crop_box_from_gt(gt > 0.0, axis, padding=42)
+        zoom_crop = zoom_crop_from_gt(gt > 0.0, str(case["panel"]), axis, padding=18)
         first_ax = None
         for col, method in enumerate(slice_methods):
-            ax = fig.add_subplot(bottom[row, col])
+            ax = fig.add_subplot(bottom[0, col])
             if first_ax is None:
                 first_ax = ax
             prediction = None if method == "gt" else load_volume(method, sample_id)
-            title = METHOD_TITLES[method] if row == 0 else ""
+            title = METHOD_TITLES[method]
             render_slice_panel(
                 ax,
                 ct,
@@ -839,9 +860,20 @@ def make_3d_slice(
                 index,
                 crop,
                 title,
-                show_background_label=(row == 0 and col == 0),
+                show_background_label=(col == 0),
+                roi_crop=zoom_crop,
             )
         add_case_label(first_ax, case, x=-0.10)
+        first_ax.text(
+            -0.10,
+            0.08,
+            "Context slice with zoom ROI",
+            ha="right",
+            va="center",
+            transform=first_ax.transAxes,
+            fontsize=9.5,
+            color="#444444",
+        )
     fig.subplots_adjust(
         left=0.16,
         right=0.995,
