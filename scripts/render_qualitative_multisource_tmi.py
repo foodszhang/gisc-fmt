@@ -31,8 +31,8 @@ SHARED_DIR = Path("/home/foods/pro/FMT-SimGen/output/shared_mesh_20k")
 DIGMOUSE_DIR = Path("/home/foods/pro/FMT-SimGen/digmouse_data")
 
 GT_COLOR = "#11B7C8"
-GT_3D_COLOR = "#D7301F"
-PRED_COLOR = "#D7301F"
+GT_3D_COLOR = "#FF1A1A"
+PRED_COLOR = "#FF1A1A"
 PRED_2D_COLOR = "#E66101"
 OVERLAP_COLOR = "#F6C431"
 BODY_COLOR = "#D8D8D8"
@@ -40,6 +40,8 @@ BODY_EDGE_COLOR = "#8A8A8A"
 ORGAN_COLOR = "#CDB8A7"
 BG_GRAY = "#F7F7F7"
 SLICE_SLAB_RADIUS = 4
+FIXED_SLICE_AXIS = 2
+FIXED_SLICE_CROP = (slice(60, 200), slice(0, 168))
 
 METHODS_3D = [
     ("UHR-DeepFMT", "uhr_deepfmt"),
@@ -53,13 +55,13 @@ METHOD_TITLES = {method: title for title, method in METHODS_3D}
 METHOD_TITLES["gt"] = "Ground Truth"
 
 ORGAN_STYLE = {
-    2: ("#B4B4B4", 0.12),
-    4: ("#D96F77", 0.22),
-    5: ("#78B6DD", 0.20),
-    6: ("#D18A78", 0.21),
-    7: ("#C3A16F", 0.22),
-    8: ("#8FBA79", 0.18),
-    9: ("#8FC7E8", 0.17),
+    2: ("#34A853", 0.24),
+    4: ("#D96F77", 0.24),
+    5: ("#78B6DD", 0.22),
+    6: ("#D18A78", 0.23),
+    7: ("#C3A16F", 0.24),
+    8: ("#8FBA79", 0.20),
+    9: ("#8FC7E8", 0.19),
 }
 
 PREDICTION_DIRS = {
@@ -101,12 +103,12 @@ CASE_POOLS = [
         "panel": "b",
         "label": "Case II: Adjacent-source separation",
         "num_foci": 3,
-        "shape_combo": "ellipsoid + irregular",
+        "shape_combo": "ellipsoid + sphere",
         "reason": (
             "The closest source centers are close enough to stress separability; slice zooms show "
             "whether adjacent lesions are merged or separated."
         ),
-        "candidates": ["sample_1858", "sample_1404", "sample_0473", "sample_2059"],
+        "candidates": ["sample_0128", "sample_1404", "sample_0473", "sample_2059"],
     },
     {
         "panel": "c",
@@ -212,13 +214,21 @@ def fixed_ct_normalize(ct: np.ndarray, body_mask: np.ndarray) -> np.ndarray:
     return np.clip((ct - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
 
 
-def surface_from_mask(mask: np.ndarray) -> pv.PolyData | None:
+def surface_from_mask(
+    mask: np.ndarray,
+    smooth_iter: int = 24,
+    relaxation_factor: float = 0.08,
+) -> pv.PolyData | None:
     if not np.any(mask):
         return None
     vertices, faces, _, _ = measure.marching_cubes(mask.astype(np.float32), level=0.5)
     vertices = (vertices + 0.5) * SPACING_MM
     faces_pv = np.column_stack([np.full(len(faces), 3), faces]).astype(np.int64).ravel()
-    return pv.PolyData(vertices, faces_pv)
+    surface = pv.PolyData(vertices, faces_pv)
+    if smooth_iter > 0 and surface.n_points > 0:
+        surface = surface.smooth(n_iter=smooth_iter, relaxation_factor=relaxation_factor)
+        surface = surface.compute_normals(auto_orient_normals=True, consistent_normals=True)
+    return surface
 
 
 def prediction_path(method: str, sample_id: str) -> Path:
@@ -327,20 +337,22 @@ def add_anatomical_context(
 ) -> None:
     plotter.add_mesh(
         body_surface,
-        color=BODY_COLOR,
-        opacity=0.075 if enhance_mouse_outline else 0.055,
+        color="#E8E8E8",
+        opacity=0.055 if enhance_mouse_outline else 0.045,
         show_edges=False,
         smooth_shading=True,
-        specular=0.04,
-        diffuse=0.86,
+        ambient=0.18,
+        specular=0.10,
+        specular_power=18,
+        diffuse=0.78,
     )
     if enhance_mouse_outline:
         plotter.add_mesh(
             body_surface,
             color=BODY_EDGE_COLOR,
-            opacity=0.075,
+            opacity=0.045,
             style="wireframe",
-            line_width=0.28,
+            line_width=0.20,
         )
     for label, surface in organ_surfaces.items():
         color, opacity = ORGAN_STYLE.get(label, (ORGAN_COLOR, 0.14))
@@ -350,8 +362,79 @@ def add_anatomical_context(
             opacity=opacity,
             show_edges=False,
             smooth_shading=True,
-            specular=0.06,
-            diffuse=0.80,
+            ambient=0.16 if label == 2 else 0.10,
+            diffuse=0.68,
+            specular=0.34 if label == 2 else 0.26,
+            specular_power=30,
+            pbr=True,
+            roughness=0.52,
+            metallic=0.0,
+        )
+
+
+def add_volumetric_source(plotter: pv.Plotter, mask: np.ndarray, color: str) -> None:
+    from scipy import ndimage
+
+    core_mask = mask.astype(bool)
+    if not np.any(core_mask):
+        return
+    halo_mask = ndimage.binary_dilation(core_mask, iterations=2)
+    inner_mask = ndimage.binary_erosion(core_mask, iterations=1)
+
+    halo_surface = surface_from_mask(halo_mask)
+    core_surface = surface_from_mask(core_mask)
+    inner_surface = surface_from_mask(inner_mask) if np.any(inner_mask) else None
+
+    if halo_surface is not None:
+        plotter.add_mesh(
+            halo_surface,
+            color="#FF7A00",
+            opacity=0.30,
+            show_edges=False,
+            smooth_shading=True,
+            ambient=0.34,
+            diffuse=0.54,
+            specular=0.36,
+            specular_power=28,
+            pbr=True,
+            roughness=0.46,
+            metallic=0.0,
+            emissive=True,
+        )
+    if core_surface is not None:
+        plotter.add_mesh(
+            core_surface,
+            color=color,
+            opacity=0.94,
+            show_edges=False,
+            smooth_shading=True,
+            ambient=0.58,
+            diffuse=0.72,
+            specular=0.70,
+            specular_power=46,
+        )
+        plotter.add_mesh(
+            core_surface,
+            color="#7F0000",
+            opacity=0.12,
+            style="wireframe",
+            line_width=0.22,
+        )
+    if inner_surface is not None:
+        plotter.add_mesh(
+            inner_surface,
+            color="#FFD6A5",
+            opacity=0.30,
+            show_edges=False,
+            smooth_shading=True,
+            ambient=0.42,
+            diffuse=0.38,
+            specular=0.92,
+            specular_power=88,
+            pbr=True,
+            roughness=0.14,
+            metallic=0.0,
+            emissive=True,
         )
 
 
@@ -366,6 +449,8 @@ def render_3d_panel(
 ) -> None:
     plotter = pv.Plotter(off_screen=True, window_size=(820, 700))
     plotter.set_background("white")
+    plotter.enable_depth_peeling(number_of_peels=8, occlusion_ratio=0.0)
+    plotter.enable_eye_dome_lighting()
     plotter.remove_all_lights()
     key_light = pv.Light(position=(42.0, -62.0, 48.0), focal_point=(19.0, 20.0, 10.0))
     key_light.intensity = 0.82
@@ -377,44 +462,10 @@ def render_3d_panel(
     plotter.add_light(fill_light)
     plotter.add_light(back_light)
     add_anatomical_context(plotter, body_surface, organ_surfaces, enhance_mouse_outline)
-    gt_surface = surface_from_mask(gt > 0.0)
     if is_gt:
-        if gt_surface is not None:
-            plotter.add_mesh(
-                gt_surface,
-                color=GT_3D_COLOR,
-                opacity=0.92,
-                show_edges=False,
-                smooth_shading=True,
-                specular=0.32,
-                diffuse=0.72,
-            )
-            plotter.add_mesh(
-                gt_surface,
-                color="#7F0000",
-                opacity=0.50,
-                style="wireframe",
-                line_width=0.42,
-            )
+        add_volumetric_source(plotter, gt > 0.0, GT_3D_COLOR)
     else:
-        prediction_surface = surface_from_mask(prediction >= THRESHOLD)
-        if prediction_surface is not None:
-            plotter.add_mesh(
-                prediction_surface,
-                color=PRED_COLOR,
-                opacity=0.90,
-                show_edges=False,
-                smooth_shading=True,
-                specular=0.34,
-                diffuse=0.72,
-            )
-            plotter.add_mesh(
-                prediction_surface,
-                color=PRED_COLOR,
-                opacity=0.45,
-                style="wireframe",
-                line_width=0.38,
-            )
+        add_volumetric_source(plotter, prediction >= THRESHOLD, PRED_COLOR)
     plotter.camera_position = [
         (64.0, -45.0, 38.0),
         (19.0, 20.0, 10.0),
@@ -455,6 +506,24 @@ def choose_slice(gt_mask: np.ndarray) -> tuple[int, int]:
                 best_axis = axis
                 best_index = index
     return int(best_axis), int(best_index)
+
+
+def choose_slice_on_axis(gt_mask: np.ndarray, axis: int) -> int:
+    components = connected_components(gt_mask)
+    best = (-1, -1, 0)
+    for index in range(gt_mask.shape[axis]):
+        covered = 0
+        area = 0
+        for coords in components:
+            hits = coords[:, axis] == index
+            if np.any(hits):
+                covered += 1
+                area += int(hits.sum())
+        key = (covered, area, -abs(index - gt_mask.shape[axis] // 2))
+        if key > best:
+            best = key
+            best_index = index
+    return int(best_index)
 
 
 def slice2d(volume: np.ndarray, axis: int, index: int) -> np.ndarray:
@@ -789,8 +858,9 @@ def make_slice_zoom(
     for row, case in enumerate(slice_cases):
         sample_id = str(case["sample_id"])
         gt = load_volume("gt", sample_id)
-        axis, index = choose_slice(gt > 0.0)
-        crop = crop_box_from_gt(gt > 0.0, axis, padding=42)
+        axis = FIXED_SLICE_AXIS
+        index = choose_slice_on_axis(gt > 0.0, axis)
+        crop = FIXED_SLICE_CROP
         for col, method in enumerate(slice_methods):
             prediction = None if method == "gt" else load_volume(method, sample_id)
             title = METHOD_TITLES[method] if row == 0 else ""
@@ -856,8 +926,9 @@ def make_3d_slice(
     for row, case in enumerate(cases):
         sample_id = str(case["sample_id"])
         gt = load_volume("gt", sample_id)
-        axis, index = choose_slice(gt > 0.0)
-        crop = crop_box_from_gt(gt > 0.0, axis, padding=42)
+        axis = FIXED_SLICE_AXIS
+        index = choose_slice_on_axis(gt > 0.0, axis)
+        crop = FIXED_SLICE_CROP
         first_ax = None
         for col, (title, method) in enumerate(methods_3d):
             ax = fig.add_subplot(grid[row * 2, col])
