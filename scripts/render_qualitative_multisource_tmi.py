@@ -19,6 +19,7 @@ import nibabel as nib
 import numpy as np
 import pyvista as pv
 from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 from skimage import measure
 
 SPACING_MM = 0.2
@@ -29,11 +30,11 @@ DATA_ROOT = Path("/home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k/samples")
 SHARED_DIR = Path("/home/foods/pro/FMT-SimGen/output/shared_mesh_20k")
 DIGMOUSE_DIR = Path("/home/foods/pro/FMT-SimGen/digmouse_data")
 
-GT_COLOR = "#00A6B2"
-PRED_COLOR = "#D95F02"
-BODY_COLOR = "#9E9E9E"
-BODY_EDGE_COLOR = "#8C8C8C"
-ORGAN_COLOR = "#C9A79E"
+GT_COLOR = "#11B7C8"
+PRED_COLOR = "#D96B00"
+BODY_COLOR = "#A8A8A8"
+BODY_EDGE_COLOR = "#7A7A7A"
+ORGAN_COLOR = "#CDB8A7"
 BG_GRAY = "#F7F7F7"
 
 METHODS_3D = [
@@ -70,54 +71,50 @@ PREDICTION_DIRS = {
     ],
 }
 
-CASES = [
+CASE_POOLS = [
     {
         "panel": "a",
         "label": "Weak secondary focus",
-        "sample_id": "sample_0409",
         "num_foci": 2,
         "shape_combo": "irregular + sphere",
-        "depth_tier": "medium",
         "reason": (
             "The secondary sphere is substantially smaller than the irregular source; "
             "the slice zoom highlights weak-source recovery and boundary inflation."
         ),
+        "candidates": ["sample_0409", "sample_1837", "sample_2069"],
     },
     {
         "panel": "b",
         "label": "Adjacent-source merging",
-        "sample_id": "sample_1858",
         "num_foci": 3,
         "shape_combo": "ellipsoid + irregular",
-        "depth_tier": "medium",
         "reason": (
-            "The closest source centers are about 7.22 mm apart; slice contours show "
+            "The closest source centers are close enough to stress separability; slice zooms show "
             "whether adjacent lesions are merged or separated."
         ),
+        "candidates": ["sample_1858", "sample_1404", "sample_0473", "sample_2059"],
     },
     {
         "panel": "c",
         "label": "Mixed morphology",
-        "sample_id": "sample_2483",
         "num_foci": 3,
         "shape_combo": "ellipsoid + irregular + sphere",
-        "depth_tier": "medium",
         "reason": (
             "The three sources have distinct morphologies; baseline reconstructions retain "
             "only part of the combination while the proposed method preserves all sources."
         ),
+        "candidates": ["sample_2483", "sample_2077", "sample_2357", "sample_1378"],
     },
     {
         "panel": "d",
         "label": "Hard three-foci case",
-        "sample_id": "sample_2945",
         "num_foci": 3,
         "shape_combo": "ellipsoid + sphere",
-        "depth_tier": "deep",
         "reason": (
             "A deep three-source example with visible baseline reconstructions but residual "
             "missed-source, localization, and boundary errors."
         ),
+        "candidates": ["sample_2945", "sample_0128", "sample_1741"],
     },
 ]
 
@@ -145,8 +142,8 @@ def requested_formats(value: str) -> list[str]:
     return formats or ["png", "pdf"]
 
 
-def case_by_panel(panel: str) -> dict:
-    for case in CASES:
+def case_by_panel(cases: list[dict], panel: str) -> dict:
+    for case in cases:
         if case["panel"] == panel:
             return case
     raise KeyError(f"Unknown case panel: {panel}")
@@ -223,6 +220,88 @@ def load_volume(method: str, sample_id: str) -> np.ndarray:
         return prediction["pred"].astype(np.float32)
 
 
+def mask_outside_ratio(mask: np.ndarray, body_mask: np.ndarray) -> float:
+    fg = mask.astype(bool)
+    return float(np.logical_and(fg, ~body_mask).sum() / max(int(fg.sum()), 1))
+
+
+def centroid_inside_body(mask: np.ndarray, body_mask: np.ndarray) -> bool:
+    coords = np.argwhere(mask.astype(bool))
+    if coords.size == 0:
+        return False
+    centroid = np.rint(coords.mean(axis=0)).astype(int)
+    centroid = np.clip(centroid, 0, np.array(body_mask.shape) - 1)
+    return bool(body_mask[tuple(centroid)])
+
+
+def candidate_prediction_available(sample_id: str) -> list[str]:
+    missing = []
+    for _, method in METHODS_3D:
+        if method == "gt":
+            continue
+        try:
+            prediction_path(method, sample_id)
+        except FileNotFoundError:
+            missing.append(method)
+    return missing
+
+
+def select_filtered_cases(body_mask: np.ndarray, output_dir: Path) -> list[dict]:
+    selected = []
+    log_lines = [
+        "panel\tsample_id\tstatus\tgt_outside_ratio\tpred_outside_ratio\treason",
+    ]
+    for pool in CASE_POOLS:
+        selected_case = None
+        for sample_id in pool["candidates"]:
+            reasons = []
+            gt = load_volume("gt", sample_id) > 0.0
+            gt_outside = mask_outside_ratio(gt, body_mask)
+            pred_outside = float("nan")
+            missing = candidate_prediction_available(sample_id)
+            if missing:
+                reasons.append("missing_prediction:" + ",".join(missing))
+            if gt_outside > 0.01:
+                reasons.append(f"gt_outside_ratio>{0.01:g}")
+            if not centroid_inside_body(gt, body_mask):
+                reasons.append("gt_centroid_outside_body")
+            if not missing:
+                pred = load_volume("gisc_fmt", sample_id) >= THRESHOLD
+                pred_outside = mask_outside_ratio(pred, body_mask)
+                if pred_outside > 0.05:
+                    reasons.append(f"pred_outside_ratio>{0.05:g}")
+            status = "selected" if not reasons and selected_case is None else "rejected"
+            if status == "selected":
+                selected_case = {
+                    **{key: value for key, value in pool.items() if key != "candidates"},
+                    "sample_id": sample_id,
+                    "gt_outside_ratio": gt_outside,
+                    "pred_outside_ratio": pred_outside,
+                }
+                reason = "passed"
+            else:
+                reason = ";".join(reasons) if reasons else "lower_priority_candidate"
+            log_lines.append(
+                "\t".join(
+                    [
+                        str(pool["panel"]),
+                        sample_id,
+                        status,
+                        f"{gt_outside:.6f}",
+                        "nan" if np.isnan(pred_outside) else f"{pred_outside:.6f}",
+                        reason,
+                    ]
+                )
+            )
+            if selected_case is not None:
+                break
+        if selected_case is None:
+            raise RuntimeError(f"No valid qualitative case found for panel {pool['panel']}")
+        selected.append(selected_case)
+    (output_dir / "qualitative_case_filter_log.txt").write_text("\n".join(log_lines) + "\n")
+    return selected
+
+
 def add_anatomical_context(
     plotter: pv.Plotter,
     body_surface: pv.PolyData,
@@ -232,25 +311,28 @@ def add_anatomical_context(
     plotter.add_mesh(
         body_surface,
         color=BODY_COLOR,
-        opacity=0.16 if enhance_mouse_outline else 0.10,
+        opacity=0.18 if enhance_mouse_outline else 0.12,
         show_edges=False,
         smooth_shading=True,
+        specular=0.08,
+        diffuse=0.72,
     )
     if enhance_mouse_outline:
         plotter.add_mesh(
             body_surface,
             color=BODY_EDGE_COLOR,
-            opacity=0.18,
+            opacity=0.24,
             style="wireframe",
-            line_width=0.4,
+            line_width=0.55,
         )
-    for surface in organ_surfaces.values():
+    for label, surface in organ_surfaces.items():
         plotter.add_mesh(
             surface,
-            color=ORGAN_COLOR,
-            opacity=0.075,
+            color=BODY_EDGE_COLOR if label == 2 else ORGAN_COLOR,
+            opacity=0.07 if label == 2 else 0.11,
             show_edges=False,
             smooth_shading=True,
+            specular=0.04,
         )
 
 
@@ -275,7 +357,14 @@ def render_3d_panel(
                 opacity=0.62,
                 show_edges=False,
                 smooth_shading=True,
-                specular=0.14,
+                specular=0.20,
+            )
+            plotter.add_mesh(
+                gt_surface,
+                color=GT_COLOR,
+                opacity=0.90,
+                style="wireframe",
+                line_width=1.0,
             )
     else:
         prediction_surface = surface_from_mask(prediction >= THRESHOLD)
@@ -283,26 +372,33 @@ def render_3d_panel(
             plotter.add_mesh(
                 gt_surface,
                 color=GT_COLOR,
-                opacity=0.50,
+                opacity=0.54,
                 show_edges=False,
                 smooth_shading=True,
-                specular=0.10,
+                specular=0.18,
+            )
+            plotter.add_mesh(
+                gt_surface,
+                color=GT_COLOR,
+                opacity=0.88,
+                style="wireframe",
+                line_width=0.85,
             )
         if prediction_surface is not None:
             plotter.add_mesh(
                 prediction_surface,
                 color=PRED_COLOR,
-                opacity=0.34,
+                opacity=0.32,
                 show_edges=False,
                 smooth_shading=True,
-                specular=0.16,
+                specular=0.22,
             )
             plotter.add_mesh(
                 prediction_surface,
                 color=PRED_COLOR,
-                opacity=0.92,
+                opacity=0.96,
                 style="wireframe",
-                line_width=1.0,
+                line_width=1.25,
             )
     plotter.camera_position = [
         (64.0, -45.0, 38.0),
@@ -372,6 +468,65 @@ def crop_box_from_gt(gt_mask: np.ndarray, axis: int, padding: int = 12) -> tuple
     return slice(r0, r1), slice(c0, c1)
 
 
+def target_coords_for_zoom(gt_mask: np.ndarray, panel: str) -> np.ndarray:
+    components = connected_components(gt_mask)
+    if not components:
+        return np.argwhere(gt_mask)
+    if panel == "a":
+        return min(components, key=len)
+    if panel == "b" and len(components) >= 2:
+        centers = [coords.mean(axis=0) for coords in components]
+        best_pair = (0, 1)
+        best_dist = float("inf")
+        for i in range(len(centers)):
+            for j in range(i + 1, len(centers)):
+                dist = float(np.linalg.norm(centers[i] - centers[j]))
+                if dist < best_dist:
+                    best_dist = dist
+                    best_pair = (i, j)
+        return np.concatenate([components[best_pair[0]], components[best_pair[1]]], axis=0)
+    return np.argwhere(gt_mask)
+
+
+def crop_box_from_coords(
+    coords3d: np.ndarray,
+    axis: int,
+    shape2d: tuple[int, int],
+    padding: int = 14,
+) -> tuple[slice, slice]:
+    if coords3d.size == 0:
+        return slice(None), slice(None)
+    if axis == 0:
+        coords2d = np.column_stack([coords3d[:, 2], coords3d[:, 1]])
+    elif axis == 1:
+        coords2d = np.column_stack([coords3d[:, 2], coords3d[:, 0]])
+    else:
+        coords2d = np.column_stack([coords3d[:, 1], coords3d[:, 0]])
+    mins = coords2d.min(axis=0)
+    maxs = coords2d.max(axis=0)
+    r0 = max(int(mins[0]) - padding, 0)
+    c0 = max(int(mins[1]) - padding, 0)
+    r1 = min(int(maxs[0]) + padding + 1, shape2d[0])
+    c1 = min(int(maxs[1]) + padding + 1, shape2d[1])
+    return slice(r0, r1), slice(c0, c1)
+
+
+def zoom_crop_from_gt(gt_mask: np.ndarray, panel: str, axis: int, padding: int = 14) -> tuple[slice, slice]:
+    shape2d = projection2d(gt_mask, axis).shape
+    return crop_box_from_coords(target_coords_for_zoom(gt_mask, panel), axis, shape2d, padding)
+
+
+def overlay_mask(ax, mask: np.ndarray, color: str, alpha: float) -> None:
+    if not np.any(mask):
+        return
+    import matplotlib.colors as mcolors
+
+    rgba = np.zeros((*mask.shape, 4), dtype=np.float32)
+    rgba[..., :3] = mcolors.to_rgb(color)
+    rgba[..., 3] = mask.astype(np.float32) * alpha
+    ax.imshow(rgba, interpolation="nearest")
+
+
 def draw_contours(ax, mask: np.ndarray, color: str, linewidth: float) -> None:
     for contour in measure.find_contours(mask.astype(np.float32), 0.5):
         ax.plot(contour[:, 1], contour[:, 0], color=color, linewidth=linewidth)
@@ -392,10 +547,12 @@ def render_slice_panel(
     bg_slice = slice2d(background, axis, index)[crop]
     gt_slice = slice2d(gt > 0.0, axis, index)[crop]
     ax.imshow(bg_slice, cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest")
+    overlay_mask(ax, gt_slice, GT_COLOR, 0.24)
     if prediction is not None:
         pred_slice = slice2d(prediction >= THRESHOLD, axis, index)[crop]
-        draw_contours(ax, pred_slice, PRED_COLOR, 1.45)
-    draw_contours(ax, gt_slice, GT_COLOR, 1.65)
+        overlay_mask(ax, pred_slice, PRED_COLOR, 0.22)
+        draw_contours(ax, pred_slice, PRED_COLOR, 1.8)
+    draw_contours(ax, gt_slice, GT_COLOR, 1.9)
     ax.set_title(title, fontsize=10.5, fontweight="bold" if "GISC" in title else "normal", pad=3)
     ax.axis("off")
     if show_background_label:
@@ -430,7 +587,7 @@ def add_global_legend(fig, y: float = 0.025) -> None:
     handles = [
         Line2D([0], [0], color=GT_COLOR, lw=3, label="Cyan: Ground truth"),
         Line2D([0], [0], color=PRED_COLOR, lw=3, label="Orange-red: Prediction"),
-        Line2D([0], [0], color=BODY_EDGE_COLOR, lw=3, label="Gray: anatomical context"),
+        Line2D([0], [0], color=BODY_EDGE_COLOR, lw=3, label="Gray: anatomical context / CT"),
     ]
     fig.legend(
         handles=handles,
@@ -472,7 +629,7 @@ def build_3d_panels(
         raise ValueError("Mouse body surface is empty.")
     organ_surfaces = {
         label: surface
-        for label in (4, 5, 6, 7, 8, 9)
+        for label in (2, 4, 5, 6, 7, 8, 9)
         if (surface := surface_from_mask(labels == label)) is not None
     }
     panel_dir.mkdir(parents=True, exist_ok=True)
@@ -512,6 +669,18 @@ def make_3d_only(
             ax = axes[row, col]
             ax.imshow(plt.imread(panel_paths[(sample_id, method)]))
             ax.axis("off")
+            if method == "gisc_fmt":
+                ax.add_patch(
+                    Rectangle(
+                        (0.01, 0.01),
+                        0.98,
+                        0.98,
+                        transform=ax.transAxes,
+                        fill=False,
+                        edgecolor="#333333",
+                        linewidth=1.1,
+                    )
+                )
             if row == 0:
                 ax.set_title(title, fontsize=13, fontweight="bold", pad=8)
         add_case_label(axes[row, 0], case)
@@ -525,11 +694,11 @@ def make_3d_only(
     )
     if legend:
         add_global_legend(fig, y=0.015)
-    save_figure(fig, "qualitative_comparison_3d_only", output_dir, formats, dpi)
+    save_figure(fig, "qualitative_comparison_3d_only_v2", output_dir, formats, dpi)
     plt.close(fig)
 
 
-def make_slices_only(
+def make_slice_zoom(
     slice_cases: list[dict],
     slice_methods: list[str],
     ct: np.ndarray,
@@ -542,14 +711,14 @@ def make_slices_only(
     fig, axes = plt.subplots(
         len(slice_cases),
         len(slice_methods),
-        figsize=(4.2 * len(slice_methods), 3.2 * len(slice_cases)),
+        figsize=(4.6 * len(slice_methods), 3.85 * len(slice_cases)),
     )
     axes = np.atleast_2d(axes)
     for row, case in enumerate(slice_cases):
         sample_id = str(case["sample_id"])
         gt = load_volume("gt", sample_id)
         axis, index = choose_slice(gt > 0.0)
-        crop = crop_box_from_gt(gt > 0.0, axis)
+        crop = zoom_crop_from_gt(gt > 0.0, str(case["panel"]), axis, padding=16)
         for col, method in enumerate(slice_methods):
             prediction = None if method == "gt" else load_volume(method, sample_id)
             render_slice_panel(
@@ -575,7 +744,7 @@ def make_slices_only(
     )
     if legend:
         add_global_legend(fig, y=0.03)
-    save_figure(fig, "qualitative_comparison_slices_only", output_dir, formats, dpi)
+    save_figure(fig, "qualitative_comparison_slice_zoom_v2", output_dir, ["png"], dpi)
     plt.close(fig)
 
 
@@ -605,6 +774,18 @@ def make_3d_slice(
                 first_ax = ax
             ax.imshow(plt.imread(panel_paths[(sample_id, method)]))
             ax.axis("off")
+            if method == "gisc_fmt":
+                ax.add_patch(
+                    Rectangle(
+                        (0.01, 0.01),
+                        0.98,
+                        0.98,
+                        transform=ax.transAxes,
+                        fill=False,
+                        edgecolor="#333333",
+                        linewidth=1.1,
+                    )
+                )
             if row == 0:
                 ax.set_title(title, fontsize=13, fontweight="bold", pad=8)
         add_case_label(first_ax, case)
@@ -614,7 +795,7 @@ def make_3d_slice(
         sample_id = str(case["sample_id"])
         gt = load_volume("gt", sample_id)
         axis, index = choose_slice(gt > 0.0)
-        crop = crop_box_from_gt(gt > 0.0, axis)
+        crop = zoom_crop_from_gt(gt > 0.0, str(case["panel"]), axis, padding=16)
         first_ax = None
         for col, method in enumerate(slice_methods):
             ax = fig.add_subplot(bottom[row, col])
@@ -643,11 +824,11 @@ def make_3d_slice(
     )
     if legend:
         add_global_legend(fig, y=0.018)
-    save_figure(fig, "qualitative_comparison_3d_slice", output_dir, formats, dpi)
+    save_figure(fig, "qualitative_comparison_3d_slice_v2", output_dir, formats, dpi)
     plt.close(fig)
 
 
-def write_case_json(output_dir: Path, background_label: str) -> None:
+def write_case_json(output_dir: Path, background_label: str, cases: list[dict]) -> None:
     (output_dir / "qualitative_comparison_cases.json").write_text(
         json.dumps(
             {
@@ -657,7 +838,7 @@ def write_case_json(output_dir: Path, background_label: str) -> None:
                     "Digimouse CT ct_380x992x208 cropped to x=[0,38] mm, "
                     "y=[34,74] mm, z=[0,20.8] mm and mean-downsampled 2x to [190,200,104]."
                 ),
-                "cases": CASES,
+                "cases": cases,
             },
             indent=2,
         )
@@ -667,17 +848,17 @@ def write_case_json(output_dir: Path, background_label: str) -> None:
 
 def main() -> None:
     args = parse_args()
-    if any(case["num_foci"] < 2 for case in CASES):
+    if any(case["num_foci"] < 2 for case in CASE_POOLS):
         raise ValueError("The main-text qualitative figure must not contain single-focus cases.")
     formats = requested_formats(args.format)
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     expected = [
-        output_dir / f"qualitative_comparison_3d_slice.{fmt}" for fmt in formats
+        output_dir / f"qualitative_comparison_3d_slice_v2.{fmt}" for fmt in formats
     ] + [
-        output_dir / f"qualitative_comparison_3d_only.{fmt}" for fmt in formats
+        output_dir / f"qualitative_comparison_3d_only_v2.{fmt}" for fmt in formats
     ] + [
-        output_dir / f"qualitative_comparison_slices_only.{fmt}" for fmt in formats
+        output_dir / "qualitative_comparison_slice_zoom_v2.png"
     ]
     ensure_can_write(expected, args.overwrite)
 
@@ -691,25 +872,26 @@ def main() -> None:
         background = body_mask.astype(np.float32) * 0.65 + (labels > 2).astype(np.float32) * 0.25
         background_label = "Anatomical mask"
 
+    cases = select_filtered_cases(body_mask, output_dir)
     panel_dir = output_dir / "qualitative_comparison_panels"
     panel_paths = build_3d_panels(
-        CASES,
+        cases,
         METHODS_3D,
         panel_dir,
         labels,
         enhance_mouse_outline=args.enhance_mouse_outline,
     )
     slice_cases = [
-        case_by_panel(panel.strip()) for panel in args.slice_cases.split(",") if panel.strip()
+        case_by_panel(cases, panel.strip()) for panel in args.slice_cases.split(",") if panel.strip()
     ]
     slice_methods = [method.strip() for method in args.slice_methods.split(",") if method.strip()]
     for method in slice_methods:
         if method != "gt" and method not in PREDICTION_DIRS:
             raise ValueError(f"Unknown slice method: {method}")
 
-    make_3d_only(CASES, METHODS_3D, panel_paths, output_dir, formats, args.dpi, args.legend)
+    make_3d_only(cases, METHODS_3D, panel_paths, output_dir, formats, args.dpi, args.legend)
     if args.with_slices:
-        make_slices_only(
+        make_slice_zoom(
             slice_cases,
             slice_methods,
             background,
@@ -720,7 +902,7 @@ def main() -> None:
             args.legend,
         )
         make_3d_slice(
-            CASES,
+            cases,
             METHODS_3D,
             panel_paths,
             slice_cases,
@@ -732,7 +914,7 @@ def main() -> None:
             args.dpi,
             args.legend,
         )
-    write_case_json(output_dir, background_label)
+    write_case_json(output_dir, background_label, cases)
     for path in expected:
         if path.exists():
             print(path)
