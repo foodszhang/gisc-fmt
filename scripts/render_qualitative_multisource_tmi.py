@@ -31,14 +31,20 @@ SHARED_DIR = Path("/home/foods/pro/FMT-SimGen/output/shared_mesh_20k")
 DIGMOUSE_DIR = Path("/home/foods/pro/FMT-SimGen/digmouse_data")
 
 GT_COLOR = "#11B7C8"
-GT_3D_COLOR = "#FF1A1A"
-PRED_COLOR = "#FF1A1A"
+GT_3D_COLOR = "#C91717"
+PRED_COLOR = "#C91717"
 PRED_2D_COLOR = "#E66101"
 OVERLAP_COLOR = "#F6C431"
 BODY_COLOR = "#D8D8D8"
 BODY_EDGE_COLOR = "#8A8A8A"
 ORGAN_COLOR = "#CDB8A7"
 BG_GRAY = "#F7F7F7"
+REFERENCE_CAMERA_POSITION = [
+    (19.0, 20.0, 88.0),
+    (19.0, 20.0, 8.8),
+    (0.0, -1.0, 0.0),
+]
+FLIP_SLICE_LEFT_RIGHT = True
 SLICE_SLAB_RADIUS = 4
 FIXED_SLICE_AXIS = 2
 FIXED_SLICE_CROP = (slice(60, 200), slice(0, 168))
@@ -55,13 +61,13 @@ METHOD_TITLES = {method: title for title, method in METHODS_3D}
 METHOD_TITLES["gt"] = "Ground Truth"
 
 ORGAN_STYLE = {
-    2: ("#34A853", 0.24),
-    4: ("#D96F77", 0.24),
-    5: ("#78B6DD", 0.22),
-    6: ("#D18A78", 0.23),
-    7: ("#C3A16F", 0.24),
-    8: ("#8FBA79", 0.20),
-    9: ("#8FC7E8", 0.19),
+    2: ("#009600", 0.99),  # skeleton/bone, matching the bright green reference pose.
+    4: ("#FFF53A", 0.58),
+    5: ("#8CF5F3", 0.28),
+    6: ("#E2B1E9", 0.28),
+    7: ("#D49445", 0.34),
+    8: ("#F0F0F7", 0.18),
+    9: ("#B6FAF7", 0.42),
 }
 
 PREDICTION_DIRS = {
@@ -337,38 +343,31 @@ def add_anatomical_context(
 ) -> None:
     plotter.add_mesh(
         body_surface,
-        color="#E8E8E8",
-        opacity=0.055 if enhance_mouse_outline else 0.045,
+        color="#C0C0C0",
+        opacity=0.40,
         show_edges=False,
         smooth_shading=True,
-        ambient=0.18,
-        specular=0.10,
-        specular_power=18,
-        diffuse=0.78,
+        ambient=0.58,
+        specular=0.03,
+        specular_power=14,
+        diffuse=0.42,
+        silhouette={"color": "#9A9A9A", "line_width": 1.0, "opacity": 0.36}
+        if enhance_mouse_outline
+        else False,
     )
-    if enhance_mouse_outline:
-        plotter.add_mesh(
-            body_surface,
-            color=BODY_EDGE_COLOR,
-            opacity=0.045,
-            style="wireframe",
-            line_width=0.20,
-        )
     for label, surface in organ_surfaces.items():
         color, opacity = ORGAN_STYLE.get(label, (ORGAN_COLOR, 0.14))
+        is_bone = label == 2
         plotter.add_mesh(
             surface,
             color=color,
             opacity=opacity,
             show_edges=False,
             smooth_shading=True,
-            ambient=0.16 if label == 2 else 0.10,
-            diffuse=0.68,
-            specular=0.34 if label == 2 else 0.26,
-            specular_power=30,
-            pbr=True,
-            roughness=0.52,
-            metallic=0.0,
+            ambient=0.42 if is_bone else 0.50,
+            diffuse=0.88 if is_bone else 0.64,
+            specular=0.55 if is_bone else 0.16,
+            specular_power=46 if is_bone else 18,
         )
 
 
@@ -378,29 +377,11 @@ def add_volumetric_source(plotter: pv.Plotter, mask: np.ndarray, color: str) -> 
     core_mask = mask.astype(bool)
     if not np.any(core_mask):
         return
-    halo_mask = ndimage.binary_dilation(core_mask, iterations=2)
     inner_mask = ndimage.binary_erosion(core_mask, iterations=1)
 
-    halo_surface = surface_from_mask(halo_mask)
     core_surface = surface_from_mask(core_mask)
     inner_surface = surface_from_mask(inner_mask) if np.any(inner_mask) else None
 
-    if halo_surface is not None:
-        plotter.add_mesh(
-            halo_surface,
-            color="#FF7A00",
-            opacity=0.30,
-            show_edges=False,
-            smooth_shading=True,
-            ambient=0.34,
-            diffuse=0.54,
-            specular=0.36,
-            specular_power=28,
-            pbr=True,
-            roughness=0.46,
-            metallic=0.0,
-            emissive=True,
-        )
     if core_surface is not None:
         plotter.add_mesh(
             core_surface,
@@ -408,31 +389,24 @@ def add_volumetric_source(plotter: pv.Plotter, mask: np.ndarray, color: str) -> 
             opacity=0.94,
             show_edges=False,
             smooth_shading=True,
-            ambient=0.58,
-            diffuse=0.72,
-            specular=0.70,
-            specular_power=46,
-        )
-        plotter.add_mesh(
-            core_surface,
-            color="#7F0000",
-            opacity=0.12,
-            style="wireframe",
-            line_width=0.22,
+            ambient=0.46,
+            diffuse=0.82,
+            specular=0.48,
+            specular_power=40,
         )
     if inner_surface is not None:
         plotter.add_mesh(
             inner_surface,
-            color="#FFD6A5",
-            opacity=0.30,
+            color="#F0A0A0",
+            opacity=0.18,
             show_edges=False,
             smooth_shading=True,
-            ambient=0.42,
-            diffuse=0.38,
-            specular=0.92,
-            specular_power=88,
+            ambient=0.28,
+            diffuse=0.42,
+            specular=0.42,
+            specular_power=44,
             pbr=True,
-            roughness=0.14,
+            roughness=0.32,
             metallic=0.0,
             emissive=True,
         )
@@ -447,31 +421,27 @@ def render_3d_panel(
     is_gt: bool,
     enhance_mouse_outline: bool,
 ) -> None:
-    plotter = pv.Plotter(off_screen=True, window_size=(820, 700))
+    plotter = pv.Plotter(off_screen=True, window_size=(860, 720))
     plotter.set_background("white")
-    plotter.enable_depth_peeling(number_of_peels=8, occlusion_ratio=0.0)
-    plotter.enable_eye_dome_lighting()
     plotter.remove_all_lights()
-    key_light = pv.Light(position=(42.0, -62.0, 48.0), focal_point=(19.0, 20.0, 10.0))
+    # ITK-SNAP uses VTK-style surface rendering with camera-aligned illumination.
+    # Keep the main light close to the viewing axis and use weak fills to avoid harsh side shadows.
+    key_light = pv.Light(position=(19.0, 20.0, 88.0), focal_point=(19.0, 20.0, 8.8))
     key_light.intensity = 0.82
-    fill_light = pv.Light(position=(-30.0, 18.0, 35.0), focal_point=(19.0, 20.0, 10.0))
-    fill_light.intensity = 0.28
-    back_light = pv.Light(position=(16.0, 55.0, 28.0), focal_point=(19.0, 20.0, 10.0))
-    back_light.intensity = 0.22
+    fill_light = pv.Light(position=(-18.0, 4.0, 58.0), focal_point=(19.0, 20.0, 8.8))
+    fill_light.intensity = 0.24
+    rim_light = pv.Light(position=(56.0, 36.0, 42.0), focal_point=(19.0, 20.0, 8.8))
+    rim_light.intensity = 0.12
     plotter.add_light(key_light)
     plotter.add_light(fill_light)
-    plotter.add_light(back_light)
+    plotter.add_light(rim_light)
     add_anatomical_context(plotter, body_surface, organ_surfaces, enhance_mouse_outline)
     if is_gt:
         add_volumetric_source(plotter, gt > 0.0, GT_3D_COLOR)
     else:
         add_volumetric_source(plotter, prediction >= THRESHOLD, PRED_COLOR)
-    plotter.camera_position = [
-        (64.0, -45.0, 38.0),
-        (19.0, 20.0, 10.0),
-        (0.0, 0.0, 1.0),
-    ]
-    plotter.camera.zoom(1.38)
+    plotter.camera_position = REFERENCE_CAMERA_POSITION
+    plotter.camera.zoom(1.16)
     plotter.screenshot(output_path)
     plotter.close()
 
@@ -671,12 +641,17 @@ def render_slice_panel(
 ) -> None:
     bg_slice = slice2d_slab(background, axis, index, SLICE_SLAB_RADIUS, mask=False)[crop]
     gt_slice = slice2d_slab(gt > 0.0, axis, index, SLICE_SLAB_RADIUS, mask=True)[crop]
-    ax.imshow(bg_slice, cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest")
     pred_slice = None
     if prediction is not None:
         pred_slice = slice2d_slab(
             prediction >= THRESHOLD, axis, index, SLICE_SLAB_RADIUS, mask=True
         )[crop]
+    if FLIP_SLICE_LEFT_RIGHT:
+        bg_slice = np.fliplr(bg_slice)
+        gt_slice = np.fliplr(gt_slice)
+        if pred_slice is not None:
+            pred_slice = np.fliplr(pred_slice)
+    ax.imshow(bg_slice, cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest")
     overlay_error_regions(ax, gt_slice, pred_slice)
     if pred_slice is not None:
         draw_contours(ax, pred_slice, PRED_2D_COLOR, 1.7)

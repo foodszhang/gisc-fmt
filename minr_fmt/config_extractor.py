@@ -84,10 +84,13 @@ class ConfigExtractor:
         ptfa = model_cfg.get("ptfa", {}) or {}
         if not isinstance(ptfa, dict):
             raise KeyError("model.ptfa must be a mapping when provided")
+        gisc = model_cfg.get("gisc", {}) or {}
+        if not isinstance(gisc, dict):
+            raise KeyError("model.gisc must be a mapping when provided")
         pcfs = ptfa.get("pcfs", {}) or {}
         if not isinstance(pcfs, dict):
             raise KeyError("model.ptfa.pcfs must be a mapping when provided")
-        return {
+        out = {
             "enabled": bool(ptfa.get("enabled", False)),
             "scales": [str(v) for v in ptfa.get("scales", [])],
             "mode": str(ptfa.get("mode", "fixed_gaussian")),
@@ -103,7 +106,98 @@ class ConfigExtractor:
                 "warmup_epochs": int(pcfs.get("warmup_epochs", 10)),
                 "norm": str(pcfs.get("norm", "layernorm")),
                 "zero_init": bool(pcfs.get("zero_init", True)),
+                "use_bounded_delta": bool(pcfs.get("use_bounded_delta", True)),
+                "use_sigma_bounds": bool(pcfs.get("use_sigma_bounds", True)),
             },
+        }
+        mode = gisc.get("footprint_mode")
+        if mode is None:
+            return out
+
+        mode = str(mode)
+        use_footprint = bool(gisc.get("use_footprint", mode != "point"))
+        fixed_sigma = float(gisc.get("fixed_sigma", out["sigma_px"]))
+        sigma_min = float(gisc.get("sigma_min", out["sigma_min"]))
+        sigma_max = float(gisc.get("sigma_max", out["sigma_max"]))
+        physical = bool(gisc.get("use_physical_constraint", True))
+
+        if mode == "point" or not use_footprint:
+            out.update({"enabled": False, "scales": [], "mode": "fixed_gaussian", "window": 1})
+        elif mode == "fixed":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s3"],
+                    "mode": "fixed_gaussian",
+                    "sigma_px": fixed_sigma,
+                }
+            )
+        elif mode == "depth":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s3"],
+                    "mode": "exit_depth_gaussian",
+                    "sigma_min": sigma_min,
+                    "sigma_max": sigma_max,
+                    "invert_depth": False,
+                }
+            )
+        elif mode == "center_distance":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s1"],
+                    "mode": "corrected_exit_depth_gaussian",
+                    "sigma_min": sigma_min,
+                    "sigma_max": sigma_max,
+                    "invert_depth": True,
+                }
+            )
+        elif mode == "adaptive_unconstrained":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s1"],
+                    "mode": "pcfs_corrected_exit_depth_gaussian",
+                    "sigma_min": sigma_min,
+                    "sigma_max": sigma_max,
+                    "invert_depth": True,
+                }
+            )
+            out["pcfs"]["use_bounded_delta"] = False
+            out["pcfs"]["use_sigma_bounds"] = physical
+        elif mode == "adaptive_constrained":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s1"],
+                    "mode": "pcfs_corrected_exit_depth_gaussian",
+                    "sigma_min": sigma_min,
+                    "sigma_max": sigma_max,
+                    "invert_depth": True,
+                }
+            )
+            out["pcfs"]["use_bounded_delta"] = True
+            out["pcfs"]["use_sigma_bounds"] = True
+        else:
+            raise ValueError(f"Unsupported model.gisc.footprint_mode: {mode}")
+        return out
+
+    @staticmethod
+    def extract_gisc_ablation_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        gisc = model_cfg.get("gisc", {}) or {}
+        if not isinstance(gisc, dict):
+            raise KeyError("model.gisc must be a mapping when provided")
+        subset = gisc.get("view_subset")
+        if subset is not None:
+            subset = [int(v) for v in subset]
+        return {
+            "footprint_mode": str(gisc.get("footprint_mode", "")),
+            "view_subset": subset,
+            "log_footprint_stats": bool(gisc.get("log_footprint_stats", False)),
+            "save_debug_predictions": bool(gisc.get("save_debug_predictions", False)),
         }
 
     @staticmethod

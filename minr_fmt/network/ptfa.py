@@ -17,9 +17,11 @@ class PCFSSigmaCalibrator(nn.Module):
         delta_max: float = 0.1,
         norm: str = "layernorm",
         zero_init: bool = True,
+        use_bounded_delta: bool = True,
     ) -> None:
         super().__init__()
         self.delta_max = float(delta_max)
+        self.use_bounded_delta = bool(use_bounded_delta)
         if self.delta_max < 0:
             raise ValueError(f"delta_max must be non-negative, got {delta_max}")
         layers: list[nn.Module] = []
@@ -44,9 +46,11 @@ class PCFSSigmaCalibrator(nn.Module):
                 nn.init.zeros_(last.bias)
 
     def forward(self, geom: torch.Tensor) -> torch.Tensor:
-        """Return bounded delta_h [B,N,V] in normalized sigma-depth space."""
-        delta = torch.tanh(self.net(geom)).squeeze(-1)
-        return self.delta_max * delta
+        """Return delta_h [B,N,V] in normalized sigma-depth space."""
+        raw = self.net(geom).squeeze(-1)
+        if self.use_bounded_delta:
+            return self.delta_max * torch.tanh(raw)
+        return self.delta_max * raw
 
 
 def ptfa_sample_fixed_gaussian(
@@ -89,84 +93,13 @@ def ptfa_sample_fixed_gaussian(
     if valid_mask.shape != (B, N, V):
         raise ValueError(f"valid_mask shape {tuple(valid_mask.shape)} != {(B, N, V)}")
 
-    dtype = feature_map.dtype
-    device = feature_map.device
-    feat_flat = feature_map.reshape(B * V, C, H, W)
-    center = center_grid.permute(0, 2, 1, 3).reshape(B * V, N, 2)
-    view_valid = valid_mask.permute(0, 2, 1).reshape(B * V, N).to(device=device)
-
-    if W > 1:
-        center_x = (center[..., 0] + 1.0) * (W - 1) / 2.0
-    else:
-        center_x = torch.zeros_like(center[..., 0])
-    if H > 1:
-        center_y = (center[..., 1] + 1.0) * (H - 1) / 2.0
-    else:
-        center_y = torch.zeros_like(center[..., 1])
-
-    radius = window // 2
-    offsets = torch.arange(-radius, radius + 1, device=device, dtype=dtype)
-    dy, dx = torch.meshgrid(offsets, offsets, indexing="ij")
-    offsets_xy = torch.stack([dx.reshape(-1), dy.reshape(-1)], dim=-1)
-
-    base_x = torch.round(center_x)
-    base_y = torch.round(center_y)
-    out = torch.zeros(B * V, N, C, device=device, dtype=dtype)
-    denom = torch.zeros(B * V, N, device=device, dtype=dtype)
-    min_dist2 = torch.full((B * V, N), torch.inf, device=device, dtype=dtype)
-
-    for offset_x, offset_y in offsets_xy:
-        sample_x = base_x + offset_x
-        sample_y = base_y + offset_y
-        inside = (
-            (sample_x >= 0)
-            & (sample_x <= W - 1)
-            & (sample_y >= 0)
-            & (sample_y <= H - 1)
-            & view_valid
-        )
-        dist2 = (sample_x - center_x).square() + (sample_y - center_y).square()
-        min_dist2 = torch.minimum(min_dist2, torch.where(inside, dist2, min_dist2))
-
-    for offset_x, offset_y in offsets_xy:
-        sample_x = base_x + offset_x
-        sample_y = base_y + offset_y
-        inside = (
-            (sample_x >= 0)
-            & (sample_x <= W - 1)
-            & (sample_y >= 0)
-            & (sample_y <= H - 1)
-            & view_valid
-        )
-        dist2 = (sample_x - center_x).square() + (sample_y - center_y).square()
-        # Subtracting the nearest valid distance is algebraically cancelled by
-        # normalization and prevents underflow for the sigma->0 nearest check.
-        stable_dist2 = dist2 - min_dist2
-        weight = torch.exp(-stable_dist2 / (2.0 * float(sigma_px) ** 2)).to(dtype=dtype)
-        weight = weight * inside.to(dtype=dtype)
-
-        if W > 1:
-            grid_x = sample_x / (W - 1) * 2.0 - 1.0
-        else:
-            grid_x = torch.zeros_like(sample_x)
-        if H > 1:
-            grid_y = sample_y / (H - 1) * 2.0 - 1.0
-        else:
-            grid_y = torch.zeros_like(sample_y)
-        grid = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(1)
-
-        sampled = F.grid_sample(
-            feat_flat,
-            grid,
-            mode="bilinear",
-            padding_mode="zeros",
-            align_corners=True,
-        ).squeeze(2)
-        out = out + sampled.permute(0, 2, 1) * weight.unsqueeze(-1)
-        denom = denom + weight
-
-    out = torch.where(denom.unsqueeze(-1) > 0, out / denom.clamp_min(1.0e-12).unsqueeze(-1), out)
-    return out.reshape(B, V, N, C).permute(0, 2, 1, 3)
+    sigma = torch.full(
+        (B, N, V),
+        float(sigma_px),
+        device=feature_map.device,
+        dtype=feature_map.dtype,
+    )
+    return _ptfa_sample_gaussian_with_sigma(feature_map, center_grid, valid_mask, window, sigma)
 
 
 def _sample_surface_depth(depth_maps: torch.Tensor, center_grid: torch.Tensor) -> torch.Tensor:
@@ -338,6 +271,7 @@ def ptfa_sample_pcfs_corrected_exit_depth_gaussian(
     alpha: float,
     invert_depth: bool = True,
     base_stats: dict[str, torch.Tensor] | None = None,
+    use_sigma_bounds: bool = True,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Corrected exit-depth PTFA with a bounded learned sigma calibration.
 
@@ -361,9 +295,14 @@ def ptfa_sample_pcfs_corrected_exit_depth_gaussian(
     if delta_h.shape != h0.shape:
         raise ValueError(f"delta_h shape {tuple(delta_h.shape)} != h0 shape {tuple(h0.shape)}")
     delta_h = torch.nan_to_num(delta_h.to(device=h0.device, dtype=h0.dtype), nan=0.0)
-    h = (h0 + float(alpha) * delta_h).clamp(0.0, 1.0)
+    h = h0 + float(alpha) * delta_h
+    if use_sigma_bounds:
+        h = h.clamp(0.0, 1.0)
     sigma_px = float(sigma_min) + (float(sigma_max) - float(sigma_min)) * h
-    sigma_px = sigma_px.clamp(float(sigma_min), float(sigma_max))
+    if use_sigma_bounds:
+        sigma_px = sigma_px.clamp(float(sigma_min), float(sigma_max))
+    else:
+        sigma_px = sigma_px.clamp_min(1.0e-6)
 
     features = _ptfa_sample_gaussian_with_sigma(
         feature_map, center_grid, valid_mask, window, sigma_px
@@ -396,7 +335,7 @@ def _ptfa_sample_gaussian_with_sigma(
     N = center_grid.shape[1]
     dtype = feature_map.dtype
     device = feature_map.device
-    feat_flat = feature_map.reshape(B * V, C, H, W)
+    feat_flat = feature_map.contiguous().reshape(B * V, C, H, W)
     center = center_grid.permute(0, 2, 1, 3).reshape(B * V, N, 2)
     view_valid = valid_mask.permute(0, 2, 1).reshape(B * V, N).to(device=device)
     sigma = sigma_px.permute(0, 2, 1).reshape(B * V, N).to(device=device, dtype=dtype)
@@ -449,16 +388,25 @@ def _ptfa_sample_gaussian_with_sigma(
         grid_y = sample_y / (H - 1) * 2.0 - 1.0
     else:
         grid_y = torch.zeros_like(sample_y)
-    grid = torch.stack([grid_x, grid_y], dim=-1).reshape(B * V, 1, N * K, 2)
-    sampled = F.grid_sample(
-        feat_flat,
-        grid,
-        mode="bilinear",
-        padding_mode="zeros",
-        align_corners=True,
-    ).squeeze(2)
-    sampled = sampled.permute(0, 2, 1).reshape(B * V, N, K, C)
-    out = (sampled * weight.unsqueeze(-1)).sum(dim=2)
+    out = torch.zeros(B * V, N, C, device=device, dtype=dtype)
+    offset_chunk = 5
+    for start in range(0, K, offset_chunk):
+        end = min(start + offset_chunk, K)
+        k_chunk = end - start
+        grid = (
+            torch.stack([grid_x[..., start:end], grid_y[..., start:end]], dim=-1)
+            .reshape(B * V, 1, N * k_chunk, 2)
+            .contiguous()
+        )
+        sampled = F.grid_sample(
+            feat_flat,
+            grid,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=True,
+        ).squeeze(2)
+        sampled = sampled.permute(0, 2, 1).reshape(B * V, N, k_chunk, C)
+        out = out + (sampled * weight[..., start:end].unsqueeze(-1)).sum(dim=2)
     denom = weight.sum(dim=2)
 
     out = torch.where(denom.unsqueeze(-1) > 0, out / denom.clamp_min(1.0e-12).unsqueeze(-1), out)

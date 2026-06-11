@@ -39,6 +39,7 @@ from ..network.query_aggregation import (
 )
 from ..utils.cam import project_points_to_camera
 from ..utils.fmt_simgen_projection import project_points_mm_to_detector
+from ..utils.view_selection import select_views_by_angles
 
 # ===== 核心模块 =====
 
@@ -234,6 +235,7 @@ class PointDensityNet(nn.Module):
         refinement_params = ConfigExtractor.extract_feature_refinement_config(config)
         query_agg_params = ConfigExtractor.extract_query_aggregation_config(config)
         gisc_params = ConfigExtractor.extract_gisc_fmt_config(config)
+        gisc_ablation_params = ConfigExtractor.extract_gisc_ablation_config(config)
         view_angles = ConfigExtractor.extract_view_angles(config)
 
         # 网络基本参数
@@ -278,6 +280,8 @@ class PointDensityNet(nn.Module):
         self.pcfs_delta_max = float(pcfs_params["delta_max"])
         self.pcfs_warmup_epochs = int(pcfs_params["warmup_epochs"])
         self.pcfs_norm = str(pcfs_params["norm"])
+        self.pcfs_use_bounded_delta = bool(pcfs_params["use_bounded_delta"])
+        self.pcfs_use_sigma_bounds = bool(pcfs_params["use_sigma_bounds"])
         self.pcfs_current_epoch = 0
         self.aggregation_mode = str(query_agg_params["aggregation_mode"])
         self.residual_scorer_enabled = bool(residual_scorer_params["enabled"])
@@ -288,6 +292,16 @@ class PointDensityNet(nn.Module):
             refinement_params["ptfa_view_aggregation"]
         )
         self.view_list = view_angles[:num_views]
+        self.view_subset = gisc_ablation_params["view_subset"]
+        if self.view_subset is not None:
+            select_views_by_angles(
+                torch.empty(len(self.view_list)), self.view_list, self.view_subset
+            )
+        self.active_view_mask = [
+            self.view_subset is None or int(v) in self.view_subset for v in self.view_list
+        ]
+        if not any(self.active_view_mask):
+            raise ValueError("model.gisc.view_subset selects zero views")
         self.pos_enc_dim = pos_enc_dim
         self.feature_dim = feature_dim
         self.num_views = num_views
@@ -615,6 +629,7 @@ class PointDensityNet(nn.Module):
                 delta_max=self.pcfs_delta_max,
                 norm=self.pcfs_norm,
                 zero_init=bool(pcfs_params["zero_init"]),
+                use_bounded_delta=self.pcfs_use_bounded_delta,
             )
 
         if self.aggregation_mode == "corrected_exit_ptfa_geom_gate":
@@ -642,6 +657,26 @@ class PointDensityNet(nn.Module):
         self.last_source_nearest_dist = None
         self.last_source_decoder_stats = {}
         self.sampler = PointFeatureSampler()
+
+    def _active_view_mask_tensor(self, device: torch.device) -> torch.Tensor:
+        return torch.tensor(self.active_view_mask, device=device, dtype=torch.bool)
+
+    def _apply_sparse_view_mask_to_features(self, view_features) -> None:
+        if self.view_subset is None:
+            return
+        for view_name, active in zip(self.view_list, self.active_view_mask):
+            if not active and view_name in view_features:
+                view_features[view_name] = torch.zeros_like(view_features[view_name])
+
+    def _apply_sparse_view_mask_to_pack(
+        self, projection_pack: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        if self.view_subset is None:
+            return projection_pack
+        mask = self._active_view_mask_tensor(projection_pack["valid"].device).view(1, 1, -1)
+        pack = dict(projection_pack)
+        pack["valid"] = projection_pack["valid"] & mask
+        return pack
 
     def _add_query_aux_outputs(self, aux_outputs: dict, query_feature: torch.Tensor) -> dict:
         if self.center_aux_head_enabled and "center_logits" not in aux_outputs:
@@ -912,13 +947,15 @@ class PointDensityNet(nn.Module):
             valid_masks.append(valid_mask)
             uv_px_list.append(uv_px)
             uv_phys_list.append(uv_phys)
-        return {
-            "grid": torch.stack(grids, dim=2),
-            "depth": torch.stack(depths, dim=2),
-            "valid": torch.stack(valid_masks, dim=2),
-            "uv_px": torch.stack(uv_px_list, dim=2),
-            "uv_phys": torch.stack(uv_phys_list, dim=2),
-        }
+        return self._apply_sparse_view_mask_to_pack(
+            {
+                "grid": torch.stack(grids, dim=2),
+                "depth": torch.stack(depths, dim=2),
+                "valid": torch.stack(valid_masks, dim=2),
+                "uv_px": torch.stack(uv_px_list, dim=2),
+                "uv_phys": torch.stack(uv_phys_list, dim=2),
+            }
+        )
 
     def _view_feature_dict_to_tensor(self, view_features) -> torch.Tensor:
         """Pack view feature dict into [B,V,C,H,W] in view_list order."""
@@ -1073,6 +1110,7 @@ class PointDensityNet(nn.Module):
             alpha=self._pcfs_alpha(),
             invert_depth=self.ptfa_invert_depth,
             base_stats=base_stats,
+            use_sigma_bounds=self.pcfs_use_sigma_bounds,
         )
         return sampled, stats
 
@@ -1805,6 +1843,9 @@ class PointDensityNet(nn.Module):
         features_s1_dict, features_s2_dict, features_s3_dict = self._forward_shared_unet(
             view_projections
         )
+        self._apply_sparse_view_mask_to_features(features_s1_dict)
+        self._apply_sparse_view_mask_to_features(features_s2_dict)
+        self._apply_sparse_view_mask_to_features(features_s3_dict)
 
         # 门控融合辅助输出（用final尺度特征）
         aux_projections = {}

@@ -1,6 +1,0 @@
-Representative qualitative comparison on challenging multi-source FMT-SimGen v2 cases.
-All methods are rendered using the same threshold, camera pose, opacity, and anatomical
-context. Red surfaces denote reconstructed sources, and cyan contours denote ground-truth
-source boundaries. Ground truth is shown in the rightmost column for direct comparison
-with GISC-FMT. Quantitative results over the full test set and stratified multi-source
-analyses are reported in Table X.
