@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_main
+  - _self_
+
+name: fmt_simgen_real_20260605_luoshu1_ssq_main
+description: SSQ mainline training on real_20260605_luoshu1_1k_20k
+
+data:
+  dataset_type: fmt_simgen
+  data_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
+  train_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
+  val_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
+  test_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
