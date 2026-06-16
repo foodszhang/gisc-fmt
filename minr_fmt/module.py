@@ -71,6 +71,14 @@ class TrainingLightningModule(LightningModule):
         self._test_save_recon_roi: bool = True
         self._test_save_registered_seg: bool = True
         self._test_save_proj_comparisons: bool = True
+        validation_cfg = cfg.get("validation", None)
+        test_cfg = cfg.get("test", None)
+        if validation_cfg is not None and "pred_threshold" in validation_cfg:
+            self._validation_pred_threshold = float(validation_cfg.pred_threshold)
+        elif test_cfg is not None and "pred_threshold" in test_cfg:
+            self._validation_pred_threshold = float(test_cfg.pred_threshold)
+        else:
+            self._validation_pred_threshold = 0.5
 
     @staticmethod
     def _center_focal_loss(
@@ -820,10 +828,14 @@ class TrainingLightningModule(LightningModule):
             density_gt = point_densities.reshape(voxel_shape_tuple)
             density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
             density_pred = pred_prob.reshape(voxel_shape_tuple)
-            dice = dice_coefficient(density_pred, density_gt_bin)
+            dice = dice_coefficient(
+                density_pred,
+                density_gt_bin,
+                threshold=self._validation_pred_threshold,
+            )
             metric_name = "val_full_dice"
         else:
-            pred_bin = (pred_prob.squeeze(-1) >= 0.5).float()
+            pred_bin = (pred_prob.squeeze(-1) >= self._validation_pred_threshold).float()
             gt_bin = (point_densities > 0.0).float()
             intersection = (pred_bin * gt_bin).sum(dim=1)
             dice = (
@@ -845,6 +857,18 @@ class TrainingLightningModule(LightningModule):
             "val_dice",
             dice,
             prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log(
+            "val_pred_threshold",
+            torch.tensor(
+                self._validation_pred_threshold,
+                dtype=dice.dtype,
+                device=dice.device,
+            ),
+            prog_bar=False,
             on_step=False,
             on_epoch=True,
             sync_dist=True,

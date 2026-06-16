@@ -13,3 +13,9 @@ data:
   train_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
   val_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
   test_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
+
+validation:
+  pred_threshold: 0.05
+
+test:
+  pred_threshold: 0.05
