@@ -815,14 +815,15 @@ class TrainingLightningModule(LightningModule):
                 sync_dist=True,
             )
         full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+        pred_prob = torch.sigmoid(pred)
         if full_grid:
             density_gt = point_densities.reshape(voxel_shape_tuple)
             density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
-            density_pred = pred.reshape(voxel_shape_tuple)
+            density_pred = pred_prob.reshape(voxel_shape_tuple)
             dice = dice_coefficient(density_pred, density_gt_bin)
             metric_name = "val_full_dice"
         else:
-            pred_bin = (pred.squeeze(-1) >= 0.5).float()
+            pred_bin = (pred_prob.squeeze(-1) >= 0.5).float()
             gt_bin = (point_densities > 0.0).float()
             intersection = (pred_bin * gt_bin).sum(dim=1)
             dice = (
@@ -1339,17 +1340,17 @@ class TrainingLightningModule(LightningModule):
             if full_grid:
                 density_gt = point_densities.reshape(voxel_shape_tuple)
                 density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
-                density_pred = pred_density.reshape(voxel_shape_tuple)
+                density_pred = torch.sigmoid(pred_density).reshape(voxel_shape_tuple)
                 dice = dice_coefficient(
                     density_pred, density_gt_bin, threshold=self._test_pred_threshold
                 )
             else:
                 density_gt = None
                 density_gt_bin = None
-                density_pred = pred_density
+                density_pred = torch.sigmoid(pred_density)
 
         if not full_grid:
-            pred_bin = (pred_density.squeeze(-1) >= self._test_pred_threshold).float()
+            pred_bin = (density_pred.squeeze(-1) >= self._test_pred_threshold).float()
             gt_bin = (point_densities > 0.0).float()
             intersection = (pred_bin * gt_bin).sum(dim=1)
             dice = (
