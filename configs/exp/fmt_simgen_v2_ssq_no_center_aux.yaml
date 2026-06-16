@@ -5,12 +5,4 @@ defaults:
   - _self_
 
 name: fmt_simgen_v2_ssq_no_center_aux
-description: SSQ ablation without center auxiliary supervision
-
-model:
-  aux_heads:
-    center:
-      enabled: false
-
-loss:
-  center_weight: 0.0
+description: Backward-compatible alias for the SSQ mainline without center auxiliary supervision

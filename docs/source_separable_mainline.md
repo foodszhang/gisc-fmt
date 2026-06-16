@@ -10,8 +10,8 @@ measurement-derived source-separability cues.
 ## Formal Method
 
 The main method is **source-separable query representation (SSQ)**, not a source-slot
-decoder. SSQ keeps the strongest E15 reconstruction path and augments each query with
-measurement-derived source-separable evidence:
+decoder. SSQ keeps the strongest density-head reconstruction path and augments each
+query with measurement-derived source-separable evidence:
 
 - PTFA/PCFS provide measurement-aligned query evidence.
 - Canonical reliability aggregation builds a query-canonical representation across
@@ -20,10 +20,14 @@ measurement-derived source-separable evidence:
   `proj.npz` and geometry.
 - `source_instance_cue` encodes over-complete source-hypothesis geometry, score,
   ownership-like distance cues, and entropy/margin statistics into the query feature.
-- Center and distance heads remain simulation-derived auxiliary training regularizers.
-  They are not inference inputs and are not used for post-processing, component
-  splitting, or threshold adjustment.
-- The final density is still produced by the established E15 density head. The
+- The distance head remains a simulation-derived auxiliary training regularizer. It is
+  not an inference input and is not used for post-processing, component splitting, or
+  threshold adjustment.
+- Center auxiliary supervision is retained as an ablation rather than the formal
+  mainline. The no-center run produced slightly stronger test300 Dice while preserving
+  component-level separation, so the paper should not frame center supervision as the
+  core source-separation mechanism.
+- The final density is still produced by the established density head. The
   `source_instance_decoder` is disabled in the formal mainline.
 
 Main training config:
@@ -75,8 +79,11 @@ Formal SSQ ablations:
 - `exp=fmt_simgen_v2_ssq_no_ptfa`
 - `exp=fmt_simgen_v2_ssq_no_canonical_reliability`
 - `exp=fmt_simgen_v2_ssq_no_source_cue`
-- `exp=fmt_simgen_v2_ssq_no_center_aux`
+- `exp=fmt_simgen_v2_ssq_center_aux`
 - `exp=fmt_simgen_v2_ssq_no_distance_aux`
+
+`exp=fmt_simgen_v2_ssq_no_center_aux` remains available as a backward-compatible alias
+for `fmt_simgen_v2_ssq_main`.
 
 Source-slot decoder experiments are retained only as ablations:
 
@@ -84,5 +91,5 @@ Source-slot decoder experiments are retained only as ablations:
 - `exp=fmt_simgen_v2_source_slots_distance_ownership`
 - `exp=fmt_simgen_v2_source_slots_weighted_sum`
 
-The source-slot soft-union decoder did not outperform the E15/SSQ density path as a
+The source-slot soft-union decoder did not outperform the SSQ density path as a
 final-output method on test300, so it is not the formal mainline.

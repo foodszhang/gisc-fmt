@@ -1,8 +1,8 @@
 # SSQ Mainline and Ablation Results
 
-Date: 2026-06-15
+Date: 2026-06-16
 
-This document records the completed FMT-SimGen v2 test300 evaluation for the source-separable query (SSQ) mainline and related ablations. The formal mainline is measurement-derived source-separable query representation with PTFA, canonical reliability, source cue, and center/distance auxiliary supervision. The source-slot soft-union decoder is retained only as an ablation because it did not outperform the current mainline.
+This document records the completed FMT-SimGen v2 test300 evaluation for the source-separable query (SSQ) mainline and related ablations. Based on the completed ablations, the formal mainline is now the no-center-auxiliary SSQ variant: measurement-derived source-separable query representation with PTFA, canonical reliability, source cue, and distance auxiliary supervision. The original E15 center-distance result is retained as a center-auxiliary ablation. The source-slot soft-union decoder is retained only as an ablation because it did not outperform the SSQ density-head path.
 
 ## Evaluation Protocol
 
@@ -13,43 +13,110 @@ This document records the completed FMT-SimGen v2 test300 evaluation for the sou
 - Component evaluator: `scripts/eval_components_fmt_simgen.py`
 - Component matching: `iou_threshold=0.01`, `centroid_threshold_vox=3.0`, `connectivity=26`, `min_region_size=10`
 
+Reproducibility note: after this analysis, `fmt_simgen_v2_ssq_main` was updated to the
+no-center-auxiliary mainline. The retained `no_ptfa`, `no_canonical_reliability`,
+`no_source_cue`, and `no_distance_aux` checkpoints were trained before that relabeling,
+on the original center-auxiliary SSQ family. They are valid evidence that these modules
+matter in the SSQ family, while future strict ablations against the new no-center
+mainline should be rerun from the updated configs if exact one-factor attribution is
+needed.
+
 ## Cleanup State
 
 - Removed precomputed `center_distance` directories from all 3000 samples after evaluation; remaining count is `0`.
 - Cleaned unused SSQ ablation checkpoints and retained one evaluated/best checkpoint per run.
 - Retained checkpoints:
+  - `SSQ mainline (no center aux)`: `outputs/fmt_simgen_v2_ssq_ablation/runs/no_center_aux/checkpoints/epoch=73-val_dice=0.7364.ckpt`
+  - `SSQ center_aux ablation (E15)`: `outputs/fmt_simgen_v2_e15_center_distance_precomputed/checkpoints/epoch=52-val_dice=0.7414.ckpt`
+  - `Source-slot soft-union`: `outputs/gisc_fmt/fit/2026-06-12/12-37-02/checkpoints/epoch=10-val_dice=0.7232.ckpt`
   - `SSQ no_ptfa`: `outputs/fmt_simgen_v2_ssq_ablation/runs/no_ptfa/checkpoints/epoch=51-val_dice=0.7302.ckpt`
   - `SSQ no_canonical_reliability`: `outputs/fmt_simgen_v2_ssq_ablation/runs/no_canonical_reliability/checkpoints/epoch=59-val_dice=0.7262.ckpt`
   - `SSQ no_source_cue`: `outputs/fmt_simgen_v2_ssq_ablation/runs/no_source_cue/checkpoints/epoch=59-val_dice=0.7302.ckpt`
-  - `SSQ no_center_aux`: `outputs/fmt_simgen_v2_ssq_ablation/runs/no_center_aux/checkpoints/epoch=73-val_dice=0.7364.ckpt`
   - `SSQ no_distance_aux`: `outputs/fmt_simgen_v2_ssq_ablation/runs/no_distance_aux/checkpoints/epoch=59-val_dice=0.7256.ckpt`
 
 ## Overall Results
 
 | Run | Kind | Dice | IoU | Precision | Recall | ASSD | HD95 | Comp recall | Comp precision | Miss/sample | Merge/sample |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| E15 / SSQ mainline | mainline | 0.7246 | 0.5831 | 0.7259 | 0.7976 | 0.3964 | 1.3591 | 0.9133 | 0.9889 | 0.2333 | 0.1100 |
+| SSQ mainline (no center aux) | mainline | 0.7299 | 0.5903 | 0.7484 | 0.7878 | 0.3720 | 1.1964 | 0.9128 | 0.9881 | 0.2333 | 0.1267 |
+| SSQ center_aux ablation (E15) | ablation | 0.7246 | 0.5831 | 0.7259 | 0.7976 | 0.3964 | 1.3591 | 0.9133 | 0.9889 | 0.2333 | 0.1100 |
 | Source-slot soft-union | decoder ablation | 0.7093 | 0.5630 | 0.6966 | 0.8015 | 0.3822 | 1.1360 | 0.9006 | 0.9856 | 0.2633 | 0.1633 |
 | SSQ no_ptfa | ablation | 0.6986 | 0.5510 | 0.6534 | 0.8332 | 0.3958 | 1.1093 | 0.8961 | 0.9778 | 0.2733 | 0.2033 |
 | SSQ no_canonical_reliability | ablation | 0.7123 | 0.5661 | 0.6998 | 0.8017 | 0.3760 | 1.1125 | 0.9022 | 0.9914 | 0.2600 | 0.1800 |
 | SSQ no_source_cue | ablation | 0.7079 | 0.5613 | 0.6880 | 0.8118 | 0.3869 | 1.1310 | 0.9039 | 0.9856 | 0.2533 | 0.1600 |
-| SSQ no_center_aux | ablation | 0.7299 | 0.5903 | 0.7484 | 0.7878 | 0.3720 | 1.1964 | 0.9128 | 0.9881 | 0.2333 | 0.1267 |
 | SSQ no_distance_aux | ablation | 0.7106 | 0.5646 | 0.6954 | 0.8048 | 0.3943 | 1.2275 | 0.9094 | 0.9861 | 0.2433 | 0.1533 |
 
 ## Main Findings
 
-- `Source-slot soft-union` underperforms E15/SSQ mainline on Dice (`0.7093` vs `0.7246`) and component recall (`0.9006` vs `0.9133`), so it should remain an ablation rather than the main method.
+- The no-center SSQ variant is the formal mainline because it has the strongest test300 Dice (`0.7299`) while maintaining component recall comparable to E15 (`0.9128` vs `0.9133`).
+- The original E15 center-distance checkpoint is now the `center_aux` ablation: its Dice is lower (`0.7246`) but merge/sample is lower (`0.1100` vs `0.1267`). This means center auxiliary can be discussed as a separation-oriented regularizer, but not as the main performance path.
+- `Source-slot soft-union` underperforms the no-center SSQ mainline on Dice (`0.7093` vs `0.7299`) and component recall (`0.9006` vs `0.9128`), so it should remain an ablation rather than the main method.
 - `no_ptfa` is the strongest negative ablation: Dice drops to `0.6986`, precision drops to `0.6534`, and merge/sample rises to `0.2033`. PTFA should stay in the mainline.
 - `no_canonical_reliability` drops Dice to `0.7123` and component recall to `0.9022`; canonical reliability contributes but is not the sole driver.
 - `no_source_cue` drops Dice to `0.7079` and component recall to `0.9039`; measurement-derived source cue should remain part of the SSQ representation.
 - `no_distance_aux` drops Dice to `0.7106` and increases merge/sample to `0.1533`; distance auxiliary supervision is useful for final reconstruction and separation.
-- `no_center_aux` has the highest Dice among these runs (`0.7299`) but does not clearly improve separation over E15/SSQ mainline: component recall is essentially tied and merge/sample is higher (`0.1267` vs `0.1100`). Treat center auxiliary as a regularizer, not the core contribution.
 
-## E15 / SSQ mainline
+## SSQ mainline (no center aux)
+
+- Checkpoint: `outputs/fmt_simgen_v2_ssq_ablation/runs/no_center_aux/checkpoints/epoch=73-val_dice=0.7364.ckpt`
+- Output dir: `outputs/fmt_simgen_v2_ssq_ablation/test300/no_center_aux`
+- Note: Formal source-separable query representation mainline: PTFA, canonical reliability, measurement-derived source cue, distance auxiliary supervision, center auxiliary disabled.
+
+| Dice | IoU | Precision | Recall | ASSD | HD95 | CLE | NRMSE | Comp recall | Miss/sample | Merge/sample |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0.7299 | 0.5903 | 0.7484 | 0.7878 | 0.3720 | 1.1964 | 0.9491 | 0.0302 | 0.9128 | 0.2333 | 0.1267 |
+
+### By Num Foci
+
+| Num foci | N | Dice | IoU | Precision | Recall | ASSD | HD95 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 80 | 0.7892 | 0.6690 | 0.7669 | 0.8908 | 0.2673 | 0.5802 |
+| 2 | 111 | 0.7323 | 0.5915 | 0.7486 | 0.7990 | 0.3372 | 1.0076 |
+| 3 | 109 | 0.6840 | 0.5314 | 0.7348 | 0.7007 | 0.4844 | 1.8410 |
+
+### Component Metrics by Num Foci
+
+| Num foci | N | GT comp | Pred comp | Matched | Missed | False | Merge | Split | Comp recall | Comp precision | Matched IoU |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 80 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 1.0000 | 1.0000 | 0.6690 |
+| 2 | 111 | 1.9730 | 1.8559 | 1.8468 | 0.1261 | 0.0090 | 0.0721 | 0.0090 | 0.9369 | 0.9955 | 0.5592 |
+| 3 | 109 | 2.8807 | 2.4404 | 2.3670 | 0.5138 | 0.0734 | 0.2752 | 0.0367 | 0.8242 | 0.9717 | 0.5207 |
+
+### By Depth Tier
+
+| Depth | N | Dice | IoU | Precision | Recall | ASSD | HD95 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| deep | 89 | 0.7457 | 0.6104 | 0.7768 | 0.7855 | 0.3313 | 0.9718 |
+| medium | 123 | 0.7338 | 0.5946 | 0.7485 | 0.7943 | 0.3839 | 1.2415 |
+| shallow | 88 | 0.7087 | 0.5640 | 0.7198 | 0.7808 | 0.3967 | 1.3606 |
+
+### By Shape Class
+
+| Shape class | N | Dice | IoU | Precision | Recall | ASSD | HD95 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ellipsoid | 41 | 0.7665 | 0.6369 | 0.7844 | 0.8270 | 0.3072 | 0.7165 |
+| irregular | 50 | 0.7520 | 0.6220 | 0.7430 | 0.8533 | 0.3405 | 1.0867 |
+| mixed_three_shape | 18 | 0.6791 | 0.5272 | 0.7883 | 0.6697 | 0.4911 | 1.8171 |
+| mixed_two_shape | 160 | 0.7124 | 0.5666 | 0.7405 | 0.7540 | 0.4064 | 1.3768 |
+| sphere | 31 | 0.7660 | 0.6370 | 0.7276 | 0.8732 | 0.2623 | 0.7169 |
+
+### By Shape Set
+
+| Shape set | N | Dice | IoU | Precision | Recall |
+| --- | --- | --- | --- | --- | --- |
+| ellipsoid | 41 | 0.7665 | 0.6369 | 0.7844 | 0.8270 |
+| ellipsoid+irregular | 47 | 0.7216 | 0.5754 | 0.7759 | 0.7262 |
+| ellipsoid+irregular+sphere | 18 | 0.6791 | 0.5272 | 0.7883 | 0.6697 |
+| ellipsoid+sphere | 70 | 0.7149 | 0.5719 | 0.7364 | 0.7609 |
+| irregular | 50 | 0.7520 | 0.6220 | 0.7430 | 0.8533 |
+| irregular+sphere | 43 | 0.6982 | 0.5483 | 0.7085 | 0.7730 |
+| sphere | 31 | 0.7660 | 0.6370 | 0.7276 | 0.8732 |
+
+## SSQ center_aux ablation (E15)
 
 - Checkpoint: `outputs/fmt_simgen_v2_e15_center_distance_precomputed/checkpoints/epoch=52-val_dice=0.7414.ckpt`
 - Output dir: `outputs/fmt_simgen_v2_source_slots_eval/e15_center_distance_epoch52_test300`
-- Note: Formal source-separable query representation mainline reused from E15 center-distance checkpoint.
+- Note: Original E15 center-distance checkpoint; now interpreted as the center auxiliary ablation against the no-center SSQ mainline.
 
 | Dice | IoU | Precision | Recall | ASSD | HD95 | CLE | NRMSE | Comp recall | Miss/sample | Merge/sample |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -325,62 +392,6 @@ This document records the completed FMT-SimGen v2 test300 evaluation for the sou
 | irregular+sphere | 43 | 0.6898 | 0.5390 | 0.6859 | 0.7751 |
 | sphere | 31 | 0.7255 | 0.5826 | 0.6342 | 0.9077 |
 
-## SSQ no_center_aux
-
-- Checkpoint: `outputs/fmt_simgen_v2_ssq_ablation/runs/no_center_aux/checkpoints/epoch=73-val_dice=0.7364.ckpt`
-- Output dir: `outputs/fmt_simgen_v2_ssq_ablation/test300/no_center_aux`
-- Note: Center auxiliary loss/head disabled; distance auxiliary retained.
-
-| Dice | IoU | Precision | Recall | ASSD | HD95 | CLE | NRMSE | Comp recall | Miss/sample | Merge/sample |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.7299 | 0.5903 | 0.7484 | 0.7878 | 0.3720 | 1.1964 | 0.9491 | 0.0302 | 0.9128 | 0.2333 | 0.1267 |
-
-### By Num Foci
-
-| Num foci | N | Dice | IoU | Precision | Recall | ASSD | HD95 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 80 | 0.7892 | 0.6690 | 0.7669 | 0.8908 | 0.2673 | 0.5802 |
-| 2 | 111 | 0.7323 | 0.5915 | 0.7486 | 0.7990 | 0.3372 | 1.0076 |
-| 3 | 109 | 0.6840 | 0.5314 | 0.7348 | 0.7007 | 0.4844 | 1.8410 |
-
-### Component Metrics by Num Foci
-
-| Num foci | N | GT comp | Pred comp | Matched | Missed | False | Merge | Split | Comp recall | Comp precision | Matched IoU |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 80 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 1.0000 | 1.0000 | 0.6690 |
-| 2 | 111 | 1.9730 | 1.8559 | 1.8468 | 0.1261 | 0.0090 | 0.0721 | 0.0090 | 0.9369 | 0.9955 | 0.5592 |
-| 3 | 109 | 2.8807 | 2.4404 | 2.3670 | 0.5138 | 0.0734 | 0.2752 | 0.0367 | 0.8242 | 0.9717 | 0.5207 |
-
-### By Depth Tier
-
-| Depth | N | Dice | IoU | Precision | Recall | ASSD | HD95 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| deep | 89 | 0.7457 | 0.6104 | 0.7768 | 0.7855 | 0.3313 | 0.9718 |
-| medium | 123 | 0.7338 | 0.5946 | 0.7485 | 0.7943 | 0.3839 | 1.2415 |
-| shallow | 88 | 0.7087 | 0.5640 | 0.7198 | 0.7808 | 0.3967 | 1.3606 |
-
-### By Shape Class
-
-| Shape class | N | Dice | IoU | Precision | Recall | ASSD | HD95 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| ellipsoid | 41 | 0.7665 | 0.6369 | 0.7844 | 0.8270 | 0.3072 | 0.7165 |
-| irregular | 50 | 0.7520 | 0.6220 | 0.7430 | 0.8533 | 0.3405 | 1.0867 |
-| mixed_three_shape | 18 | 0.6791 | 0.5272 | 0.7883 | 0.6697 | 0.4911 | 1.8171 |
-| mixed_two_shape | 160 | 0.7124 | 0.5666 | 0.7405 | 0.7540 | 0.4064 | 1.3768 |
-| sphere | 31 | 0.7660 | 0.6370 | 0.7276 | 0.8732 | 0.2623 | 0.7169 |
-
-### By Shape Set
-
-| Shape set | N | Dice | IoU | Precision | Recall |
-| --- | --- | --- | --- | --- | --- |
-| ellipsoid | 41 | 0.7665 | 0.6369 | 0.7844 | 0.8270 |
-| ellipsoid+irregular | 47 | 0.7216 | 0.5754 | 0.7759 | 0.7262 |
-| ellipsoid+irregular+sphere | 18 | 0.6791 | 0.5272 | 0.7883 | 0.6697 |
-| ellipsoid+sphere | 70 | 0.7149 | 0.5719 | 0.7364 | 0.7609 |
-| irregular | 50 | 0.7520 | 0.6220 | 0.7430 | 0.8533 |
-| irregular+sphere | 43 | 0.6982 | 0.5483 | 0.7085 | 0.7730 |
-| sphere | 31 | 0.7660 | 0.6370 | 0.7276 | 0.8732 |
-
 ## SSQ no_distance_aux
 
 - Checkpoint: `outputs/fmt_simgen_v2_ssq_ablation/runs/no_distance_aux/checkpoints/epoch=59-val_dice=0.7256.ckpt`
@@ -439,4 +450,4 @@ This document records the completed FMT-SimGen v2 test300 evaluation for the sou
 
 ## Interpretation for Paper Positioning
 
-The results support positioning SSQ as source-separable query representation rather than a source-slot soft-union decoder. The main paper should emphasize measurement-derived source hypotheses/cues, PTFA evidence, query-canonical reliability aggregation, and distance/geometry auxiliary training regularization. Center auxiliary can be described as auxiliary regularization, but should not be framed as the central source-separation mechanism because `no_center_aux` slightly improves Dice while not improving merge behavior over the E15/SSQ mainline.
+The results support positioning SSQ as source-separable query representation rather than a source-slot soft-union decoder. The formal mainline should be the no-center SSQ variant: measurement-derived source hypotheses/cues, PTFA evidence, query-canonical reliability aggregation, and distance/geometry auxiliary training regularization. The original E15 center auxiliary path should be presented as a center-auxiliary ablation: it modestly reduces merge count but does not improve overall Dice, so center supervision is not the central source-separation mechanism.

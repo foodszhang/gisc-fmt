@@ -23,7 +23,6 @@ EXPERIMENTS = [
     ("no_ptfa", "fmt_simgen_v2_ssq_no_ptfa"),
     ("no_canonical_reliability", "fmt_simgen_v2_ssq_no_canonical_reliability"),
     ("no_source_cue", "fmt_simgen_v2_ssq_no_source_cue"),
-    ("no_center_aux", "fmt_simgen_v2_ssq_no_center_aux"),
     ("no_distance_aux", "fmt_simgen_v2_ssq_no_distance_aux"),
 ]
 
@@ -176,6 +175,22 @@ def evaluation_complete(name: str) -> bool:
 def write_reuse_manifest() -> None:
     manifest = {
         "ssq_main": {
+            "reused_from": "fmt_simgen_v2_ssq_no_center_aux",
+            "checkpoint": (
+                "outputs/fmt_simgen_v2_ssq_ablation/runs/no_center_aux/checkpoints/"
+                "epoch=73-val_dice=0.7364.ckpt"
+            ),
+            "test300": (
+                "outputs/fmt_simgen_v2_ssq_ablation/test300/no_center_aux"
+            ),
+            "reason": (
+                "fmt_simgen_v2_ssq_main uses measurement-derived source hypotheses, "
+                "source_instance_cue, canonical reliability, distance auxiliary supervision, "
+                "and source_instance_decoder=false. Center auxiliary is disabled because the "
+                "no-center run produced the strongest Dice while preserving component recall."
+            ),
+        },
+        "center_aux_ablation": {
             "reused_from": "fmt_simgen_v2_e15_center_distance",
             "checkpoint": (
                 "outputs/fmt_simgen_v2_e15_center_distance_precomputed/checkpoints/"
@@ -186,9 +201,8 @@ def write_reuse_manifest() -> None:
                 "e15_center_distance_epoch52_test300"
             ),
             "reason": (
-                "fmt_simgen_v2_ssq_main is E15 with explicit source_instance_decoder=false; "
-                "E15 already uses measurement-derived source hypotheses, source_instance_cue, "
-                "canonical reliability, and center/distance auxiliary supervision."
+                "Original E15 center-distance path retained as the center auxiliary "
+                "ablation."
             ),
         },
         "source_slots_soft_union_ablation": {
