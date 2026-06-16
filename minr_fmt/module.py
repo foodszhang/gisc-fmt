@@ -45,6 +45,10 @@ class TrainingLightningModule(LightningModule):
         # Extract commonly used parameters
         self.learning_rate = cfg.optim.lr
         self.max_epochs = cfg.trainer.max_epochs
+        self._center_distance_sigma_mm: float = 0.5
+        self._center_distance_center_weight: float = 0.2
+        self._center_distance_weight: float = 0.1
+        self._empty_slot_weight: float = 0.0
 
         # Create model and loss
         self._setup_model()
@@ -67,9 +71,6 @@ class TrainingLightningModule(LightningModule):
         self._test_save_recon_roi: bool = True
         self._test_save_registered_seg: bool = True
         self._test_save_proj_comparisons: bool = True
-        self._center_distance_sigma_mm: float = 0.5
-        self._center_distance_center_weight: float = 0.2
-        self._center_distance_weight: float = 0.1
 
     @staticmethod
     def _center_focal_loss(
@@ -189,6 +190,7 @@ class TrainingLightningModule(LightningModule):
         self._center_distance_sigma_mm = float(loss_cfg.get("center_sigma_mm", 0.5))
         self._center_distance_center_weight = float(loss_cfg.get("center_weight", 0.2))
         self._center_distance_weight = float(loss_cfg.get("distance_weight", 0.1))
+        self._empty_slot_weight = float(loss_cfg.get("empty_slot_weight", 0.0))
         self.loss_func = AuxProjectionLightLoss(
             init_scatter_weight=loss_cfg.get(
                 "aux_projection_weight", loss_cfg.get("scatter_weight", 1.0)
@@ -503,6 +505,22 @@ class TrainingLightningModule(LightningModule):
                 losses["pred_distance_mean"] = torch.zeros((), device=points_mm.device)
         return losses
 
+    def _empty_slot_suppression_loss(self, aux_outputs) -> torch.Tensor | None:
+        if self._empty_slot_weight <= 0.0 or not isinstance(aux_outputs, dict):
+            return None
+        component_logits = aux_outputs.get("source_component_logits")
+        component_valid = aux_outputs.get("source_component_valid")
+        if component_logits is None or component_valid is None:
+            return None
+        invalid = ~component_valid.to(device=component_logits.device, dtype=torch.bool)
+        invalid = invalid[:, None, :, None].expand_as(component_logits)
+        if invalid.any():
+            component_logits = torch.nan_to_num(
+                component_logits, nan=0.0, posinf=30.0, neginf=-30.0
+            ).clamp(-30.0, 30.0)
+            return torch.sigmoid(component_logits)[invalid].mean()
+        return torch.zeros((), dtype=component_logits.dtype, device=component_logits.device)
+
     def _log_query_sampling_stats(self, prefix: str, batch, point_densities: torch.Tensor) -> None:
         """Log sampled-query composition for stability audits."""
         pos_ratio = (point_densities > 0.0).float().mean()
@@ -660,12 +678,40 @@ class TrainingLightningModule(LightningModule):
             loss_dict.update(center_distance_losses)
             loss_dict["center_distance_aux_loss"] = total_center_distance
             loss_dict["total_loss"] = loss_dict["total_loss"] + total_center_distance
+        empty_slot_loss = self._empty_slot_suppression_loss(aux_outputs)
+        if empty_slot_loss is not None:
+            loss_dict["empty_slot_loss"] = empty_slot_loss
+            loss_dict["total_loss"] = (
+                loss_dict["total_loss"] + self._empty_slot_weight * empty_slot_loss
+            )
         total_loss = loss_dict["total_loss"]
         anchor_loss = getattr(self.net, "last_feature_refinement_anchor_loss", None)
         if isinstance(anchor_loss, torch.Tensor):
             total_loss = total_loss + anchor_loss
             loss_dict["total_loss"] = total_loss
             loss_dict["feature_refinement_anchor_loss"] = anchor_loss.detach()
+
+        nonfinite_loss = ~torch.isfinite(total_loss.detach())
+        if bool(nonfinite_loss.item()):
+            self.log(
+                "train_nonfinite_loss_skip",
+                torch.ones((), dtype=total_loss.dtype, device=total_loss.device),
+                prog_bar=False,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            total_loss = torch.nan_to_num(density_pred, nan=0.0, posinf=0.0, neginf=0.0).sum() * 0.0
+            loss_dict["total_loss"] = total_loss
+        else:
+            self.log(
+                "train_nonfinite_loss_skip",
+                torch.zeros((), dtype=total_loss.dtype, device=total_loss.device),
+                prog_bar=False,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )
 
         # Log metrics
         self.log(
@@ -750,13 +796,24 @@ class TrainingLightningModule(LightningModule):
         voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
 
         # Inference
-        pred, _ = self._call_model(
+        pred, aux_outputs = self._call_model(
             proj_in,
             points,
             points_mm=points_mm,
             depth_maps=depth_maps,
             source_hypotheses=source_hypotheses,
         )
+        self._log_source_cue_stats("val", batch, point_densities)
+        empty_slot_loss = self._empty_slot_suppression_loss(aux_outputs)
+        if empty_slot_loss is not None:
+            self.log(
+                "val_empty_slot_loss",
+                empty_slot_loss.detach(),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
         full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
         if full_grid:
             density_gt = point_densities.reshape(voxel_shape_tuple)

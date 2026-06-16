@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_main
+  - _self_
+
+name: fmt_simgen_v2_ssq_no_ptfa
+description: SSQ ablation without PTFA/PCFS query evidence and canonical reliability refinement
+
+model:
+  ptfa:
+    enabled: false
+
+  feature_refinement:
+    enabled: false

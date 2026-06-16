@@ -1,0 +1,12 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_source_slots_soft_union
+  - _self_
+
+name: fmt_simgen_v2_source_slots_weighted_sum
+description: Ablation with weighted-sum source logits instead of soft-union composition
+
+model:
+  source_instance_decoder:
+    merge: weighted_sum

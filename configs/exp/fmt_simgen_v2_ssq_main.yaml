@@ -1,0 +1,39 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e15_center_distance
+  - _self_
+
+name: fmt_simgen_v2_ssq_main
+description: Source-separable query representation mainline with measurement-derived source cue, canonical reliability, and center-distance auxiliary supervision
+
+data:
+  source_hypothesis:
+    enabled: true
+    top_m: 5
+    blur_sigma: 1.0
+    min_distance_cells: 3
+    min_value_ratio: 0.1
+
+model:
+  ptfa:
+    enabled: true
+
+  feature_refinement:
+    enabled: true
+    ptfa_view_aggregation: canonical_reliability
+
+  source_instance_cue:
+    enabled: true
+    dim: 10
+    tau_s_mm: 5.0
+
+  source_instance_decoder:
+    enabled: false
+
+  aux_heads:
+    hidden_dim: 64
+    center:
+      enabled: true
+    distance:
+      enabled: true

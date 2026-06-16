@@ -142,12 +142,41 @@ class ImplicitSourceField(nn.Module):
         return self.mlp_out(z)
 
 
-class SourceInstanceFieldDecoder(nn.Module):
-    """Shared local implicit source field used by E14 source-instance decoding."""
+class EvidenceAwareOwnershipNet(nn.Module):
+    """Query-evidence conditioned source-slot ownership predictor."""
 
-    def __init__(self, feature_dim: int, hidden_dim: int):
+    def __init__(self, feature_dim: int, hidden_dim: int, geom_dim: int = 6):
         super().__init__()
-        local_dim = 6  # rel_xyz, dist, peak_score, ownership
+        self.net = nn.Sequential(
+            nn.Linear(feature_dim * 2 + geom_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(
+        self,
+        canonical_feature: torch.Tensor,
+        pcfs_feature: torch.Tensor,
+        slot_geom: torch.Tensor,
+    ) -> torch.Tensor:
+        B, N, M, _ = slot_geom.shape
+        canonical = torch.nan_to_num(canonical_feature, nan=0.0, posinf=0.0, neginf=0.0)
+        pcfs = torch.nan_to_num(pcfs_feature, nan=0.0, posinf=0.0, neginf=0.0)
+        geom = torch.nan_to_num(slot_geom, nan=0.0, posinf=0.0, neginf=0.0).clamp(-20.0, 20.0)
+        canonical = canonical[:, :, None, :].expand(-1, -1, M, -1)
+        pcfs = pcfs[:, :, None, :].expand(-1, -1, M, -1)
+        ownership_input = torch.cat([canonical, pcfs, geom], dim=-1)
+        ownership_input = torch.nan_to_num(ownership_input, nan=0.0, posinf=0.0, neginf=0.0)
+        return self.net(ownership_input.reshape(B * N * M, -1)).reshape(B, N, M)
+
+
+class SourceInstanceFieldDecoder(nn.Module):
+    """Shared local implicit source field for source-instance decoding."""
+
+    def __init__(self, feature_dim: int, hidden_dim: int, local_dim: int):
+        super().__init__()
         self.net = nn.Sequential(
             nn.Linear(feature_dim * 2 + local_dim, hidden_dim),
             nn.GELU(),
@@ -163,9 +192,14 @@ class SourceInstanceFieldDecoder(nn.Module):
         local_source_features: torch.Tensor,
     ) -> torch.Tensor:
         B, N, K, _ = local_source_features.shape
-        canonical = canonical_feature[:, :, None, :].expand(-1, -1, K, -1)
-        pcfs = pcfs_feature[:, :, None, :].expand(-1, -1, K, -1)
-        decoder_input = torch.cat([canonical, pcfs, local_source_features], dim=-1)
+        canonical = torch.nan_to_num(canonical_feature, nan=0.0, posinf=0.0, neginf=0.0)
+        pcfs = torch.nan_to_num(pcfs_feature, nan=0.0, posinf=0.0, neginf=0.0)
+        local = torch.nan_to_num(local_source_features, nan=0.0, posinf=0.0, neginf=0.0)
+        local = local.clamp(-20.0, 20.0)
+        canonical = canonical[:, :, None, :].expand(-1, -1, K, -1)
+        pcfs = pcfs[:, :, None, :].expand(-1, -1, K, -1)
+        decoder_input = torch.cat([canonical, pcfs, local], dim=-1)
+        decoder_input = torch.nan_to_num(decoder_input, nan=0.0, posinf=0.0, neginf=0.0)
         return self.net(decoder_input.reshape(B * N * K, -1)).reshape(B, N, K, 1)
 
 
@@ -321,14 +355,48 @@ class PointDensityNet(nn.Module):
             ConfigExtractor._model_cfg(config).get("source_instance_decoder", {}) or {}
         )
         self.source_instance_decoder_enabled = bool(source_decoder_cfg.get("enabled", False))
-        self.source_instance_decoder_top_k = int(source_decoder_cfg.get("top_k", 2))
+        source_decoder_top_k = source_decoder_cfg.get("top_k", 2)
+        self.source_instance_decoder_top_k = (
+            None if source_decoder_top_k is None else int(source_decoder_top_k)
+        )
+        self.source_instance_decoder_use_all_slots = bool(
+            source_decoder_cfg.get("use_all_slots", False)
+        )
         self.source_instance_decoder_merge = str(source_decoder_cfg.get("merge", "weighted_sum"))
-        if self.source_instance_decoder_top_k < 1:
+        self.source_instance_decoder_output_components = bool(
+            source_decoder_cfg.get("output_components", False)
+        )
+        self.source_instance_ownership_mode = str(
+            source_decoder_cfg.get("ownership_mode", "distance")
+        )
+        self.source_instance_ownership_temperature = float(
+            source_decoder_cfg.get("ownership_temperature", 1.0)
+        )
+        self.source_instance_ownership_logit_clip = float(
+            source_decoder_cfg.get("ownership_logit_clip", 30.0)
+        )
+        self.source_instance_component_logit_clip = float(
+            source_decoder_cfg.get("component_logit_clip", 30.0)
+        )
+        self.source_instance_detach_ownership_feature = bool(
+            source_decoder_cfg.get("detach_ownership_feature", False)
+        )
+        self.source_instance_decoder_local_dim = int(source_decoder_cfg.get("local_dim", 6))
+        if (
+            self.source_instance_decoder_top_k is not None
+            and self.source_instance_decoder_top_k < 1
+        ):
             raise ValueError("model.source_instance_decoder.top_k must be >= 1")
-        if self.source_instance_decoder_merge not in {"weighted_sum", "max_merge"}:
+        if self.source_instance_decoder_merge not in {"weighted_sum", "max_merge", "soft_union"}:
             raise ValueError(
-                "model.source_instance_decoder.merge must be 'weighted_sum' or 'max_merge', "
+                "model.source_instance_decoder.merge must be 'weighted_sum', 'max_merge', "
+                "or 'soft_union', "
                 f"got {self.source_instance_decoder_merge}"
+            )
+        if self.source_instance_ownership_mode not in {"distance", "evidence_aware"}:
+            raise ValueError(
+                "model.source_instance_decoder.ownership_mode must be 'distance' or "
+                f"'evidence_aware', got {self.source_instance_ownership_mode}"
             )
         aux_heads_cfg = ConfigExtractor._model_cfg(config).get("aux_heads", {}) or {}
         center_cfg = aux_heads_cfg.get("center", {}) or {}
@@ -497,7 +565,14 @@ class PointDensityNet(nn.Module):
             self.source_instance_decoder = SourceInstanceFieldDecoder(
                 feature_dim=feature_dim,
                 hidden_dim=int(source_decoder_cfg.get("hidden_dim", 64)),
+                local_dim=self.source_instance_decoder_local_dim,
             )
+            if self.source_instance_ownership_mode == "evidence_aware":
+                self.source_ownership_net = EvidenceAwareOwnershipNet(
+                    feature_dim=feature_dim,
+                    hidden_dim=int(source_decoder_cfg.get("ownership_hidden_dim", 64)),
+                    geom_dim=6,
+                )
         if self.center_aux_head_enabled:
             self.center_head = QueryAuxHead(feature_dim, self.aux_head_hidden_dim)
         if self.distance_aux_head_enabled:
@@ -1623,17 +1698,22 @@ class PointDensityNet(nn.Module):
         points_mm: torch.Tensor,
         source_hypotheses: dict[str, torch.Tensor] | None,
     ) -> dict[str, torch.Tensor] | None:
-        """Compute measurement-derived source ownership for query points."""
+        """Compute distance-only measurement-derived source ownership for query points."""
         if source_hypotheses is None:
             return None
 
         centers = source_hypotheses["centers"].to(device=points_mm.device, dtype=points_mm.dtype)
         scores = source_hypotheses.get("peak_scores")
+        scales = source_hypotheses.get("scales")
         valid = source_hypotheses.get("valid")
         if scores is None:
             scores = centers.new_ones(centers.shape[:2])
         else:
             scores = scores.to(device=points_mm.device, dtype=points_mm.dtype)
+        if scales is None:
+            scales = centers.new_ones(centers.shape[:2])
+        else:
+            scales = scales.to(device=points_mm.device, dtype=points_mm.dtype)
         if valid is None:
             valid = centers.new_ones(centers.shape[:2])
         else:
@@ -1648,13 +1728,130 @@ class PointDensityNet(nn.Module):
         has_peak = valid_bool.any(dim=1)
         ownership = torch.softmax(logits, dim=-1)
         ownership = torch.where(has_peak[:, None, None], ownership, torch.zeros_like(ownership))
+        entropy = -(ownership * torch.log(ownership.clamp_min(1.0e-8))).sum(dim=-1)
+        top2 = torch.topk(ownership, k=min(2, ownership.shape[-1]), dim=-1).values
+        top1 = top2[..., 0]
+        margin = top1 - (top2[..., 1] if top2.shape[-1] > 1 else torch.zeros_like(top1))
         return {
             "centers": centers,
             "scores": scores,
+            "scales": scales,
             "valid_bool": valid_bool,
             "has_peak": has_peak,
             "ownership": ownership,
+            "ownership_entropy": entropy,
+            "ownership_margin": margin,
             "tau": points_mm.new_tensor(tau),
+        }
+
+    def _source_slots_pack(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+        use_all_slots: bool = True,
+        top_k: int | None = None,
+        canonical_feature: torch.Tensor | None = None,
+        pcfs_feature: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor] | None:
+        """Pack over-complete measurement-derived source slots for query decoding."""
+        pack = self._source_ownership_pack(points_mm, source_hypotheses)
+        if pack is None:
+            return None
+
+        centers = pack["centers"]
+        scores = pack["scores"]
+        scales = pack["scales"]
+        valid_bool = pack["valid_bool"]
+        distance_ownership = pack["ownership"]
+        tau = pack["tau"].clamp_min(1.0e-6)
+        B, N, M_total = distance_ownership.shape
+
+        if use_all_slots:
+            slot_idx = torch.arange(M_total, device=points_mm.device).view(1, 1, M_total)
+            slot_idx = slot_idx.expand(B, N, -1)
+            slot_centers = centers[:, None, :, :].expand(-1, N, -1, -1)
+            slot_scores = scores[:, None, :].expand(-1, N, -1)
+            slot_scales = scales[:, None, :].expand(-1, N, -1)
+            slot_valid_bool = valid_bool
+            query_slot_valid_bool = valid_bool[:, None, :].expand(-1, N, -1)
+        else:
+            k = min(int(top_k if top_k is not None else 2), M_total)
+            _top_own, slot_idx = torch.topk(distance_ownership, k=k, dim=-1)
+            centers_exp = centers[:, None, :, :].expand(-1, N, -1, -1)
+            scores_exp = scores[:, None, :].expand(-1, N, -1)
+            scales_exp = scales[:, None, :].expand(-1, N, -1)
+            valid_exp = valid_bool[:, None, :].expand(-1, N, -1)
+            slot_centers = centers_exp.gather(2, slot_idx[..., None].expand(-1, -1, -1, 3))
+            slot_scores = scores_exp.gather(-1, slot_idx)
+            slot_scales = scales_exp.gather(-1, slot_idx)
+            query_slot_valid_bool = valid_exp.gather(-1, slot_idx)
+            slot_valid_bool = query_slot_valid_bool.any(dim=1)
+
+        rel_xyz = points_mm[:, :, None, :] - slot_centers
+        dist = torch.linalg.norm(rel_xyz, dim=-1, keepdim=True)
+        score_term = slot_scores[:, :, :, None]
+        scale_term = slot_scales[:, :, :, None]
+        geom_features = torch.cat([rel_xyz / tau, dist / tau, score_term, scale_term / tau], dim=-1)
+        geom_features = torch.nan_to_num(geom_features, nan=0.0, posinf=0.0, neginf=0.0)
+
+        if (
+            self.source_instance_ownership_mode == "evidence_aware"
+            and canonical_feature is not None
+            and pcfs_feature is not None
+        ):
+            own_canonical = canonical_feature
+            own_pcfs = pcfs_feature
+            if self.source_instance_detach_ownership_feature:
+                own_canonical = own_canonical.detach()
+                own_pcfs = own_pcfs.detach()
+            ownership_logits = self.source_ownership_net(
+                own_canonical, own_pcfs, geom_features.to(dtype=canonical_feature.dtype)
+            ).to(dtype=points_mm.dtype)
+            ownership_logits = ownership_logits / max(
+                float(self.source_instance_ownership_temperature), 1.0e-6
+            )
+        else:
+            ownership_logits = slot_scores[:, :, :] - dist.squeeze(-1).square()
+
+        own_clip = max(float(getattr(self, "source_instance_ownership_logit_clip", 30.0)), 1.0)
+        ownership_logits = torch.nan_to_num(
+            ownership_logits, nan=0.0, posinf=own_clip, neginf=-own_clip
+        ).clamp(-own_clip, own_clip)
+        ownership_logits = ownership_logits.masked_fill(~query_slot_valid_bool, -1.0e9)
+        has_slot = query_slot_valid_bool.any(dim=-1)
+        ownership = torch.softmax(ownership_logits, dim=-1)
+        ownership = torch.nan_to_num(ownership, nan=0.0, posinf=0.0, neginf=0.0)
+        ownership = torch.where(has_slot[:, :, None], ownership, torch.zeros_like(ownership))
+        ownership = ownership.masked_fill(~query_slot_valid_bool, 0.0)
+
+        entropy = -(ownership * torch.log(ownership.clamp_min(1.0e-8))).sum(dim=-1)
+        valid_count = query_slot_valid_bool.float().sum(dim=-1).clamp_min(1.0)
+        entropy_denom = valid_count.clamp_min(2.0).log()
+        entropy = torch.where(
+            valid_count > 1.0,
+            entropy / entropy_denom,
+            entropy,
+        )
+        top2 = torch.topk(ownership, k=min(2, ownership.shape[-1]), dim=-1).values
+        top1 = top2[..., 0]
+        margin = top1 - (top2[..., 1] if top2.shape[-1] > 1 else torch.zeros_like(top1))
+
+        return {
+            **pack,
+            "slot_idx": slot_idx,
+            "slot_centers": slot_centers,
+            "slot_scores": slot_scores,
+            "slot_scales": slot_scales,
+            "slot_valid_bool": slot_valid_bool,
+            "query_slot_valid_bool": query_slot_valid_bool,
+            "slot_rel_xyz": rel_xyz,
+            "slot_dist": dist,
+            "slot_geom_features": geom_features,
+            "ownership_logits": ownership_logits,
+            "ownership": ownership,
+            "ownership_entropy": entropy,
+            "ownership_margin": margin,
+            "has_slot": has_slot,
         }
 
     def _source_topk_pack(
@@ -1663,31 +1860,20 @@ class PointDensityNet(nn.Module):
         source_hypotheses: dict[str, torch.Tensor] | None,
         top_k: int,
     ) -> dict[str, torch.Tensor] | None:
-        pack = self._source_ownership_pack(points_mm, source_hypotheses)
+        pack = self._source_slots_pack(
+            points_mm, source_hypotheses, use_all_slots=False, top_k=top_k
+        )
         if pack is None:
             return None
 
-        centers = pack["centers"]
-        scores = pack["scores"]
-        ownership = pack["ownership"]
-        B, N, _ = points_mm.shape
-        top_k = min(int(top_k), centers.shape[1])
-        top_own, top_idx = torch.topk(ownership, k=top_k, dim=-1)
-        centers_exp = centers[:, None, :, :].expand(-1, N, -1, -1)
-        scores_exp = scores[:, None, :].expand(-1, N, -1)
-        gather_idx = top_idx[..., None].expand(-1, -1, -1, 3)
-        top_centers = centers_exp.gather(2, gather_idx)
-        top_scores = scores_exp.gather(-1, top_idx)
-        rel_xyz = points_mm[:, :, None, :] - top_centers
-        dist = torch.linalg.norm(rel_xyz, dim=-1, keepdim=True)
         return {
             **pack,
-            "top_idx": top_idx,
-            "top_ownership": top_own,
-            "top_centers": top_centers,
-            "top_scores": top_scores,
-            "top_rel_xyz": rel_xyz,
-            "top_dist": dist,
+            "top_idx": pack["slot_idx"],
+            "top_ownership": pack["ownership"],
+            "top_centers": pack["slot_centers"],
+            "top_scores": pack["slot_scores"],
+            "top_rel_xyz": pack["slot_rel_xyz"],
+            "top_dist": pack["slot_dist"],
         }
 
     def _source_instance_cue(
@@ -1775,48 +1961,142 @@ class PointDensityNet(nn.Module):
         source_hypotheses: dict[str, torch.Tensor] | None,
         canonical_feature: torch.Tensor,
         pcfs_feature: torch.Tensor,
-    ) -> torch.Tensor | None:
-        """Decode local source fields and merge top-k hypotheses into query logits."""
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]] | None:
+        """Decode local source fields and merge source slots into query logits."""
         if not self.source_instance_decoder_enabled:
             self.last_source_decoder_stats = {}
             return None
 
-        topk = self._source_topk_pack(
-            points_mm, source_hypotheses, top_k=self.source_instance_decoder_top_k
+        slots = self._source_slots_pack(
+            points_mm,
+            source_hypotheses,
+            use_all_slots=self.source_instance_decoder_use_all_slots,
+            top_k=self.source_instance_decoder_top_k,
+            canonical_feature=canonical_feature,
+            pcfs_feature=pcfs_feature,
         )
-        if topk is None:
+        if slots is None:
             self.last_source_decoder_stats = {
-                "active_query_ratio": points_mm.new_zeros(()),
-                "topk_ownership_sum_mean": points_mm.new_zeros(()),
+                "fallback_density_head": points_mm.new_ones(()),
+                "valid_slot_count_mean": points_mm.new_zeros(()),
+                "ownership_entropy_mean": points_mm.new_zeros(()),
+                "ownership_top1_mean": points_mm.new_zeros(()),
+                "ownership_margin_mean": points_mm.new_zeros(()),
+                "inactive_slot_ratio": points_mm.new_ones(()),
             }
             return None
 
-        tau = topk["tau"]
-        rel_xyz = topk["top_rel_xyz"] / tau
-        dist = topk["top_dist"] / tau
-        peak_score = topk["top_scores"][..., None]
-        ownership = topk["top_ownership"][..., None]
-        local_features = torch.cat([rel_xyz, dist, peak_score, ownership], dim=-1)
+        has_slot = slots["has_slot"]
+        if not bool(has_slot.any().item()):
+            zero = points_mm.new_zeros(())
+            self.last_source_decoder_stats = {
+                "fallback_density_head": points_mm.new_ones(()),
+                "valid_slot_count_mean": zero,
+                "ownership_entropy_mean": zero,
+                "ownership_top1_mean": zero,
+                "ownership_margin_mean": zero,
+                "inactive_slot_ratio": points_mm.new_ones(()),
+            }
+            return None
+
+        tau = slots["tau"]
+        rel_xyz = slots["slot_rel_xyz"] / tau
+        dist = slots["slot_dist"] / tau
+        peak_score = slots["slot_scores"][..., None]
+        scale = slots["slot_scales"][..., None] / tau
+        ownership = slots["ownership"]
+        slot_count = ownership.shape[-1]
+        margin = slots["ownership_margin"][:, :, None, None].expand(-1, -1, slot_count, -1)
+        if self.source_instance_decoder_local_dim <= 6:
+            local_features = torch.cat([rel_xyz, dist, peak_score, ownership[..., None]], dim=-1)
+        else:
+            local_features = torch.cat(
+                [rel_xyz, dist, peak_score, scale, ownership[..., None], margin], dim=-1
+            )
+        if local_features.shape[-1] < self.source_instance_decoder_local_dim:
+            pad = local_features.new_zeros(
+                (
+                    *local_features.shape[:-1],
+                    self.source_instance_decoder_local_dim - local_features.shape[-1],
+                )
+            )
+            local_features = torch.cat([local_features, pad], dim=-1)
+        elif local_features.shape[-1] > self.source_instance_decoder_local_dim:
+            local_features = local_features[..., : self.source_instance_decoder_local_dim]
         local_features = torch.nan_to_num(local_features, nan=0.0, posinf=0.0, neginf=0.0)
 
         local_logits = self.source_instance_decoder(
             canonical_feature, pcfs_feature, local_features.to(dtype=canonical_feature.dtype)
         )
-        has_peak = topk["has_peak"]
+        logit_clip = max(float(getattr(self, "source_instance_component_logit_clip", 30.0)), 1.0)
+        local_logits = torch.nan_to_num(
+            local_logits, nan=0.0, posinf=logit_clip, neginf=-logit_clip
+        ).clamp(-logit_clip, logit_clip)
+        slot_valid = slots["slot_valid_bool"]
+        query_slot_valid = slots["query_slot_valid_bool"]
+        raw_local_logits = local_logits
+        masked_local_logits = raw_local_logits.masked_fill(~query_slot_valid[:, :, :, None], -1.0e9)
+        local_prob = torch.sigmoid(raw_local_logits).masked_fill(
+            ~query_slot_valid[:, :, :, None], 0.0
+        )
+        ownership_exp = ownership[..., None].to(dtype=local_logits.dtype)
         if self.source_instance_decoder_merge == "weighted_sum":
-            logits = (ownership.to(dtype=local_logits.dtype) * local_logits).sum(dim=2)
+            logits = (ownership_exp * raw_local_logits).sum(dim=2)
+            density_prob = torch.sigmoid(logits)
+            union_prob_mean = density_prob.detach().mean()
+        elif self.source_instance_decoder_merge == "soft_union":
+            weighted_prob = (ownership_exp * local_prob).clamp(0.0, 1.0)
+            density_prob = 1.0 - torch.prod(1.0 - weighted_prob, dim=2)
+            density_prob = density_prob.clamp(1.0e-6, 1.0 - 1.0e-6)
+            logits = torch.logit(density_prob)
+            union_prob_mean = density_prob.detach().mean()
         else:
-            logits = local_logits.max(dim=2).values
-        logits = torch.where(has_peak[:, None, None], logits, torch.zeros_like(logits))
+            logits = masked_local_logits.max(dim=2).values
+            density_prob = torch.sigmoid(logits)
+            union_prob_mean = density_prob.detach().mean()
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=logit_clip, neginf=-logit_clip)
+        logits = logits.clamp(-logit_clip, logit_clip)
+        logits = torch.where(has_slot[:, :, None], logits, torch.zeros_like(logits))
+
+        top2 = torch.topk(ownership, k=min(2, ownership.shape[-1]), dim=-1).values
+        top1 = top2[..., 0]
+        margin_mean = top1 - (top2[..., 1] if top2.shape[-1] > 1 else torch.zeros_like(top1))
+
+        valid_local_logits = raw_local_logits[query_slot_valid[:, :, :, None]]
+        if valid_local_logits.numel() == 0:
+            local_logit_mean = points_mm.new_zeros(())
+            local_logit_std = points_mm.new_zeros(())
+        else:
+            local_logit_mean = valid_local_logits.detach().mean()
+            local_logit_std = valid_local_logits.detach().std()
 
         self.last_source_decoder_stats = {
-            "active_query_ratio": has_peak.float().mean().detach(),
-            "topk_ownership_sum_mean": topk["top_ownership"].sum(dim=-1).detach().mean(),
-            "top1_ownership_mean": topk["top_ownership"][..., 0].detach().mean(),
-            "local_logit_mean": local_logits.detach().mean(),
-            "local_logit_std": local_logits.detach().std(),
+            "fallback_density_head": points_mm.new_zeros(()),
+            "valid_slot_count_mean": slot_valid.float().sum(dim=1).detach().mean(),
+            "ownership_entropy_mean": slots["ownership_entropy"].detach().mean(),
+            "ownership_top1_mean": top1.detach().mean(),
+            "ownership_margin_mean": margin_mean.detach().mean(),
+            "local_logit_mean": local_logit_mean,
+            "local_logit_std": local_logit_std,
+            "local_prob_mean": local_prob.detach().mean(),
+            "soft_union_prob_mean": union_prob_mean,
+            "inactive_slot_ratio": (~slot_valid).float().detach().mean(),
+            "topk_ownership_sum_mean": ownership.sum(dim=-1).detach().mean(),
         }
-        return logits
+        if self.source_instance_decoder_merge == "weighted_sum":
+            self.last_source_decoder_stats["weighted_sum_prob_mean"] = density_prob.detach().mean()
+
+        source_aux = {}
+        if self.source_instance_decoder_output_components:
+            source_aux = {
+                "source_component_logits": raw_local_logits,
+                "source_component_prob": local_prob,
+                "source_component_ownership": ownership,
+                "source_component_valid": slot_valid,
+                "source_slot_centers": slots["slot_centers"][:, 0, :, :],
+                "source_slot_scores": slots["slot_scores"][:, 0, :],
+            }
+        return logits, source_aux
 
     def forward(
         self,
@@ -2051,17 +2331,20 @@ class PointDensityNet(nn.Module):
             self.last_feature_refinement_debug = {}
 
         # 隐式密度预测
+        source_instance_aux_outputs = {}
         if self.source_instance_decoder_enabled:
             if points_mm is None:
                 raise ValueError("source_instance_decoder requires FMT-SimGen points_mm")
-            logits = self._source_instance_decode(
+            source_decoded = self._source_instance_decode(
                 points_mm,
                 source_hypotheses,
                 canonical_feature=source_decoder_canonical_feat,
                 pcfs_feature=fused_feat,
             )
-            if logits is None:
+            if source_decoded is None:
                 logits = self.density_head(gamma_x, fused_feat)
+            else:
+                logits, source_instance_aux_outputs = source_decoded
         else:
             self.last_source_decoder_stats = {}
             logits = self.density_head(gamma_x, fused_feat)
@@ -2097,6 +2380,7 @@ class PointDensityNet(nn.Module):
         if distance_logits_for_aux is not None:
             aux_projections["distance_logits"] = distance_logits_for_aux
 
+        aux_projections.update(source_instance_aux_outputs)
         aux_projections = self._add_query_aux_outputs(aux_projections, fused_feat)
 
         # Background branch (optional)

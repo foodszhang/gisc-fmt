@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_main
+  - _self_
+
+name: fmt_simgen_v2_ssq_no_source_cue
+description: SSQ ablation without measurement-derived source-instance query cue
+
+model:
+  feature_refinement:
+    geom_dim: 5
+
+  source_instance_cue:
+    enabled: false

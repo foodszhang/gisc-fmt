@@ -215,7 +215,6 @@ def estimate_conv_linear_flops(net, projections, batch, device: torch.device) ->
 
     def conv_hook(module, inputs, output):
         nonlocal flops
-        x = inputs[0]
         if not torch.is_tensor(output):
             return
         batch_size = int(output.shape[0])
@@ -260,6 +259,19 @@ def points_to_norm(ijk: np.ndarray, shape: tuple[int, int, int]) -> torch.Tensor
     return torch.from_numpy(ijk.astype(np.float32) / denom).unsqueeze(0)
 
 
+def source_hypotheses_batch(loader, cfg, sample_dir: Path, device: torch.device):
+    source_cfg = getattr(cfg.data, "source_hypothesis", None)
+    if source_cfg is None or not bool(getattr(source_cfg, "enabled", False)):
+        return None
+    source_hyp = loader._load_source_hypotheses(sample_dir)
+    return {
+        "centers": torch.from_numpy(source_hyp["centers"]).unsqueeze(0).to(device),
+        "peak_scores": torch.from_numpy(source_hyp["peak_scores"]).unsqueeze(0).to(device),
+        "scales": torch.from_numpy(source_hyp["scales"]).unsqueeze(0).to(device),
+        "valid": torch.from_numpy(source_hyp["valid"]).unsqueeze(0).to(device),
+    }
+
+
 def predict_query_volume(
     net,
     projections_packed: torch.Tensor,
@@ -268,6 +280,7 @@ def predict_query_volume(
     voxel_size_mm: float,
     chunk_size: int,
     device: torch.device,
+    source_hypotheses: dict[str, torch.Tensor] | None = None,
 ) -> np.ndarray:
     total = int(np.prod(shape))
     pred = np.empty(total, dtype=np.float32)
@@ -280,7 +293,13 @@ def predict_query_volume(
             points = points_to_norm(ijk, shape).to(device)
             points_mm = torch.from_numpy((ijk.astype(np.float32) + 0.5) * voxel_size_mm)
             points_mm = points_mm.unsqueeze(0).to(device)
-            logits, _aux = net(proj_in, points, points_mm=points_mm, depth_maps=depth_maps)
+            logits, _aux = net(
+                proj_in,
+                points,
+                points_mm=points_mm,
+                depth_maps=depth_maps,
+                source_hypotheses=source_hypotheses,
+            )
             values = torch.sigmoid(logits.squeeze(0).squeeze(-1))
             if not torch.isfinite(values).all():
                 raise RuntimeError("Query model prediction contains NaN/Inf")
@@ -617,6 +636,7 @@ def main() -> None:
         if voxel_model:
             pred = predict_voxel_volume(net, cfg, projections, batch, gt_shape, device)
         else:
+            source_hypotheses = source_hypotheses_batch(loader, cfg, sample_dir, device)
             pred = predict_query_volume(
                 net,
                 projections_packed,
@@ -625,6 +645,7 @@ def main() -> None:
                 voxel_size_mm,
                 args.chunk_size,
                 device,
+                source_hypotheses=source_hypotheses,
             )
         if device.type == "cuda":
             torch.cuda.synchronize(device)
