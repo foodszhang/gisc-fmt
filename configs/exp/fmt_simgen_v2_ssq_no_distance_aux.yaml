@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 name: fmt_simgen_v2_ssq_no_distance_aux
-description: SSQ ablation without distance-to-boundary auxiliary supervision
+description: Backward-compatible alias for the SSQ mainline without distance-to-boundary auxiliary supervision
 
 model:
   aux_heads:

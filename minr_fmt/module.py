@@ -485,13 +485,15 @@ class TrainingLightningModule(LightningModule):
             return {}
         center_logits = aux_outputs.get("center_logits")
         distance_logits = aux_outputs.get("distance_logits")
-        if center_logits is None and distance_logits is None:
+        use_center_loss = center_logits is not None and self._center_distance_center_weight > 0.0
+        use_distance_loss = distance_logits is not None and self._center_distance_weight > 0.0
+        if not use_center_loss and not use_distance_loss:
             return {}
         center_target, distance_target, fg_mask = self._center_distance_query_targets(
             batch, points_mm, points_ijk
         )
         losses = {}
-        if center_logits is not None:
+        if use_center_loss:
             center_pred = torch.sigmoid(center_logits)
             # center_loss = F.mse_loss(center_pred, center_target)
             center_loss = self._center_focal_loss(center_logits, center_target)
@@ -499,7 +501,7 @@ class TrainingLightningModule(LightningModule):
             losses["center_target_pos_ratio"] = (center_target > 0.5).float().mean()
             losses["center_target_mean"] = center_target.mean()
             losses["pred_center_mean"] = center_pred.mean()
-        if distance_logits is not None:
+        if use_distance_loss:
             distance_pred = torch.sigmoid(distance_logits)
             fg = fg_mask > 0.5
             if fg.any():

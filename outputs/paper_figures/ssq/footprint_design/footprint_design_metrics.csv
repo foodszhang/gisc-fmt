@@ -1,0 +1,5 @@
+method,dice,iou,precision,recall,assd,hd95,component_recall,component_precision,miss_per_sample,merge_per_sample,split_per_sample,status
+Point sampling,,,,,,,,,,,,missing_unified_test300_prediction
+Fixed footprint,,,,,,,,,,,,missing_unified_test300_prediction
+Depth-conditioned footprint,,,,,,,,,,,,missing_unified_test300_prediction
+Adaptive constrained footprint,,,,,,,,,,,,missing_unified_test300_prediction

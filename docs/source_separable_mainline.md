@@ -20,13 +20,9 @@ query with measurement-derived source-separable evidence:
   `proj.npz` and geometry.
 - `source_instance_cue` encodes over-complete source-hypothesis geometry, score,
   ownership-like distance cues, and entropy/margin statistics into the query feature.
-- The distance head remains a simulation-derived auxiliary training regularizer. It is
-  not an inference input and is not used for post-processing, component splitting, or
-  threshold adjustment.
-- Center auxiliary supervision is retained as an ablation rather than the formal
-  mainline. The no-center run produced slightly stronger test300 Dice while preserving
-  component-level separation, so the paper should not frame center supervision as the
-  core source-separation mechanism.
+- Center and distance auxiliary supervision are retained as explicit ablations rather
+  than the formal mainline. The mainline does not load precomputed center/distance
+  targets and does not inject simulation-derived center/distance labels into training.
 - The final density is still produced by the established density head. The
   `source_instance_decoder` is disabled in the formal mainline.
 
@@ -66,8 +62,9 @@ Each formal run should report:
 - Source hypotheses and source cues do not use GT source centers, GT boxes, GT masks,
   GT foreground, or `tumor_params.json`.
 - The Non-GT sampler keeps the existing no-GT-leakage query allocation policy.
-- Center/distance targets are generated from synthetic source support only for training
-  auxiliary supervision.
+- Center/distance targets, when an auxiliary ablation explicitly enables them, are
+  generated from synthetic source support only for training auxiliary supervision.
+- The formal SSQ mainline does not require precomputed `center_distance` files.
 - Real-experiment inference requires only multi-view surface fluorescence measurements
   and geometric calibration. It does not require GT source centers, masks, boxes,
   center targets, distance targets, or GT component annotations.
@@ -80,10 +77,12 @@ Formal SSQ ablations:
 - `exp=fmt_simgen_v2_ssq_no_canonical_reliability`
 - `exp=fmt_simgen_v2_ssq_no_source_cue`
 - `exp=fmt_simgen_v2_ssq_center_aux`
-- `exp=fmt_simgen_v2_ssq_no_distance_aux`
+- `exp=fmt_simgen_v2_ssq_distance_aux`
 
 `exp=fmt_simgen_v2_ssq_no_center_aux` remains available as a backward-compatible alias
 for `fmt_simgen_v2_ssq_main`.
+`exp=fmt_simgen_v2_ssq_no_distance_aux` also remains available as a backward-compatible
+alias for the current no-distance mainline behavior.
 
 Source-slot decoder experiments are retained only as ablations:
 

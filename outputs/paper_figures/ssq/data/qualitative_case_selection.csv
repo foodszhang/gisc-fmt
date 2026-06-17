@@ -1,0 +1,5 @@
+figure_id,sample_id,selection_note
+fig_qualitative_adjacent,sample_1081,median multi-source case
+fig_qualitative_weak_source,sample_0712,SSQ-FMT improved case
+fig_qualitative_three_source,sample_2378,representative three-source case
+fig_qualitative_failure,sample_2769,failure case

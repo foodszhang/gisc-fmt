@@ -5,9 +5,12 @@ defaults:
   - _self_
 
 name: fmt_simgen_v2_ssq_main
-description: Source-separable query representation mainline with measurement-derived source cue, canonical reliability, and distance auxiliary supervision
+description: Source-separable query representation mainline with measurement-derived source cue and canonical reliability, without center/distance target injection
 
 data:
+  center_distance_targets: false
+  center_distance_require_precomputed: false
+
   source_hypothesis:
     enabled: true
     top_m: 5
@@ -36,7 +39,8 @@ model:
     center:
       enabled: false
     distance:
-      enabled: true
+      enabled: false
 
 loss:
   center_weight: 0.0
+  distance_weight: 0.0

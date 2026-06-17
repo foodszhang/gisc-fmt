@@ -1,0 +1,4 @@
+{
+  "task": "footprint_scale",
+  "reason": "No per-query-view export of exit depth, effective footprint radius, and reliability was found in existing artifacts."
+}

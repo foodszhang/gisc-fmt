@@ -1,0 +1,20 @@
+{
+  "generated_figures": 12,
+  "missing_entries": 6,
+  "methods": [
+    "SSQ-FMT",
+    "w/o transport-aware footprint",
+    "w/o query-canonical reliability",
+    "w/o source-relative query cue",
+    "w/o distance-field regularization"
+  ],
+  "evaluation_protocol": {
+    "test_set": "fixed 300-sample test.txt",
+    "voxel_threshold": 0.5,
+    "component_iou_threshold": 0.01,
+    "component_centroid_threshold_vox": 3.0,
+    "component_connectivity": 26,
+    "minimum_region_size": 10
+  },
+  "git_commit": "12b0986"
+}

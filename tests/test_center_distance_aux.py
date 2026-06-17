@@ -1,6 +1,6 @@
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 
@@ -26,3 +26,27 @@ def test_center_distance_targets_and_losses():
     assert fg.shape == (1, 2, 1)
     assert center[0, 0, 0] > center[0, 1, 0]
     assert distance[0, 0, 0] > distance[0, 1, 0]
+
+
+def test_center_distance_aux_losses_skip_targets_when_weights_zero(monkeypatch):
+    module = TrainingLightningModule.__new__(TrainingLightningModule)
+    module._center_distance_center_weight = 0.0
+    module._center_distance_weight = 0.0
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("center-distance targets should not be constructed")
+
+    monkeypatch.setattr(module, "_center_distance_query_targets", fail_if_called)
+
+    aux_outputs = {
+        "center_logits": torch.zeros(1, 2, 1),
+        "distance_logits": torch.zeros(1, 2, 1),
+    }
+    losses = module._center_distance_aux_losses(
+        batch={},
+        aux_outputs=aux_outputs,
+        points_mm=torch.zeros(1, 2, 3),
+        points_ijk=torch.zeros(1, 2, 3),
+    )
+
+    assert losses == {}

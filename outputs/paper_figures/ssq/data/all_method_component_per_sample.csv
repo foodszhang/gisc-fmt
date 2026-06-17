@@ -1,0 +1,1501 @@
+sample_id,num_foci,depth_tier,source_type,shape_set,gt_component_count,pred_component_count,matched_component_count,missed_component_count,false_component_count,merge_count,split_count,component_recall,component_precision,mean_matched_iou,small_component_recall,method
+sample_0002,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8015605603830467,,SSQ-FMT
+sample_0006,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.845233399079553,,SSQ-FMT
+sample_0022,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.46174898198062,,SSQ-FMT
+sample_0032,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.8262890158889656,,SSQ-FMT
+sample_0038,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6517311777984331,,SSQ-FMT
+sample_0079,2,medium,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.5238329280536662,,SSQ-FMT
+sample_0096,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7152626442267296,,SSQ-FMT
+sample_0100,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.2756244727673113,,SSQ-FMT
+sample_0108,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4651240778001341,,SSQ-FMT
+sample_0113,3,medium,uniform,ellipsoid,3,3,3,0,0,0,0,1.0,1.0,0.5258403423473106,,SSQ-FMT
+sample_0122,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.557492767933069,,SSQ-FMT
+sample_0128,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.7355292903121643,,SSQ-FMT
+sample_0130,2,shallow,uniform,ellipsoid+sphere,2,1,1,1,0,0,0,0.5,1.0,0.8702727481090993,,SSQ-FMT
+sample_0158,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7893926432848588,,SSQ-FMT
+sample_0163,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5885210595599875,,SSQ-FMT
+sample_0180,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.4505928853754941,,SSQ-FMT
+sample_0187,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4901459994306915,,SSQ-FMT
+sample_0189,3,shallow,uniform,irregular+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.7129198234117458,,SSQ-FMT
+sample_0192,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3152739043077984,,SSQ-FMT
+sample_0207,2,medium,uniform,irregular+sphere,2,1,1,1,0,0,0,0.5,1.0,0.6738254321773253,,SSQ-FMT
+sample_0234,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.4075230949858269,,SSQ-FMT
+sample_0240,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7642152010645666,,SSQ-FMT
+sample_0248,3,deep,uniform,irregular,3,3,3,0,0,0,0,1.0,1.0,0.6355373147801444,,SSQ-FMT
+sample_0260,3,medium,uniform,sphere,2,3,2,0,1,0,1,1.0,0.6666666666666666,0.3977313602889565,,SSQ-FMT
+sample_0276,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6933822338829962,,SSQ-FMT
+sample_0280,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.2500439290107187,,SSQ-FMT
+sample_0290,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4785973328056925,,SSQ-FMT
+sample_0297,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5955336575377528,,SSQ-FMT
+sample_0300,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4881695623392503,,SSQ-FMT
+sample_0308,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.7618778973357156,,SSQ-FMT
+sample_0322,2,deep,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.5200098661898008,,SSQ-FMT
+sample_0328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7958888888888889,,SSQ-FMT
+sample_0335,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.622636019784696,,SSQ-FMT
+sample_0347,2,deep,uniform,ellipsoid+irregular,2,1,1,1,0,0,0,0.5,1.0,0.4148842142478345,,SSQ-FMT
+sample_0350,3,shallow,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.4390669631264805,,SSQ-FMT
+sample_0378,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6098319932717023,,SSQ-FMT
+sample_0382,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5429011217207236,,SSQ-FMT
+sample_0386,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4576576268047697,,SSQ-FMT
+sample_0396,3,deep,uniform,ellipsoid,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5957329128079031,,SSQ-FMT
+sample_0397,3,medium,uniform,ellipsoid,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.4769669494004094,,SSQ-FMT
+sample_0401,3,deep,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4069575475890817,,SSQ-FMT
+sample_0409,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5704478502817611,,SSQ-FMT
+sample_0418,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.3913133484697479,,SSQ-FMT
+sample_0436,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.3003511047901373,,SSQ-FMT
+sample_0438,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4297601681307728,,SSQ-FMT
+sample_0447,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.8346416382252559,,SSQ-FMT
+sample_0449,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5839490052764595,,SSQ-FMT
+sample_0456,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5166356352133488,,SSQ-FMT
+sample_0458,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7914285714285715,,SSQ-FMT
+sample_0469,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3849812785038207,,SSQ-FMT
+sample_0472,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7842401500938087,,SSQ-FMT
+sample_0473,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6322021662518124,,SSQ-FMT
+sample_0511,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6573448199690745,,SSQ-FMT
+sample_0521,3,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6169930325944589,,SSQ-FMT
+sample_0525,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.4940569655500711,,SSQ-FMT
+sample_0535,2,medium,uniform,ellipsoid+sphere,1,1,1,0,0,0,0,1.0,1.0,0.7021744757960134,,SSQ-FMT
+sample_0536,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5338153419614093,,SSQ-FMT
+sample_0541,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.764816076294278,,SSQ-FMT
+sample_0566,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4436423146640789,,SSQ-FMT
+sample_0585,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3509954025897338,,SSQ-FMT
+sample_0603,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7903725050699114,,SSQ-FMT
+sample_0610,2,medium,uniform,sphere,2,1,1,1,0,1,0,0.5,1.0,0.5395178197064989,,SSQ-FMT
+sample_0626,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3117786375241733,,SSQ-FMT
+sample_0633,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5329982675668241,,SSQ-FMT
+sample_0646,3,deep,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.769117191652025,,SSQ-FMT
+sample_0647,3,deep,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.7694858499586847,,SSQ-FMT
+sample_0652,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5499311781908877,,SSQ-FMT
+sample_0661,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.8063467995234485,,SSQ-FMT
+sample_0666,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6072745558162923,,SSQ-FMT
+sample_0674,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5185013633817529,,SSQ-FMT
+sample_0676,3,medium,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.5426954732510288,,SSQ-FMT
+sample_0681,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6997586833000375,,SSQ-FMT
+sample_0712,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5488632181104631,,SSQ-FMT
+sample_0751,3,shallow,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.7025100264888731,,SSQ-FMT
+sample_0761,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.8203033838973163,,SSQ-FMT
+sample_0777,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7850100825654367,,SSQ-FMT
+sample_0778,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6043923692887423,,SSQ-FMT
+sample_0791,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.8445195557701594,,SSQ-FMT
+sample_0796,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8723049281314168,,SSQ-FMT
+sample_0807,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7822354300808981,,SSQ-FMT
+sample_0817,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7064985036340317,,SSQ-FMT
+sample_0823,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4174582479667225,,SSQ-FMT
+sample_0858,3,deep,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6503256024313006,,SSQ-FMT
+sample_0860,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.7642778281166559,,SSQ-FMT
+sample_0867,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6292749061484781,,SSQ-FMT
+sample_0870,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.466781204244704,,SSQ-FMT
+sample_0875,3,shallow,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.6713965341810885,,SSQ-FMT
+sample_0881,3,deep,uniform,ellipsoid+irregular,1,2,1,0,1,0,1,1.0,0.5,0.4213777611381505,,SSQ-FMT
+sample_0895,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5416847556832884,,SSQ-FMT
+sample_0911,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3241474038142979,,SSQ-FMT
+sample_0913,2,shallow,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.4749674138887813,,SSQ-FMT
+sample_0914,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.316372624222279,,SSQ-FMT
+sample_0920,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5756891634980988,,SSQ-FMT
+sample_0932,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.232434683043614,,SSQ-FMT
+sample_0942,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5245195675346429,,SSQ-FMT
+sample_0953,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8205867069771836,,SSQ-FMT
+sample_0960,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.896780303030303,,SSQ-FMT
+sample_0974,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6056420586756489,,SSQ-FMT
+sample_0977,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.7020357410875961,,SSQ-FMT
+sample_0979,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7122360584731998,,SSQ-FMT
+sample_1000,3,medium,uniform,irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6780024984929506,,SSQ-FMT
+sample_1002,2,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4604487073479962,,SSQ-FMT
+sample_1003,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6430922383239841,,SSQ-FMT
+sample_1015,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6244920832790076,,SSQ-FMT
+sample_1018,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.751908908238446,,SSQ-FMT
+sample_1028,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4607526556859035,,SSQ-FMT
+sample_1068,3,shallow,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.4360539013338769,,SSQ-FMT
+sample_1069,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3824857726122663,,SSQ-FMT
+sample_1072,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2862687147579233,,SSQ-FMT
+sample_1078,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6094614468133988,,SSQ-FMT
+sample_1081,2,shallow,uniform,ellipsoid+sphere,1,2,1,0,1,0,1,1.0,0.5,0.3900575793854398,,SSQ-FMT
+sample_1085,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.7866150507301092,,SSQ-FMT
+sample_1086,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6216033750218879,,SSQ-FMT
+sample_1092,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4858075720094357,,SSQ-FMT
+sample_1093,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.8449277980848078,,SSQ-FMT
+sample_1096,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.559456516734537,,SSQ-FMT
+sample_1112,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6928847023909337,,SSQ-FMT
+sample_1126,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6085881989496448,,SSQ-FMT
+sample_1133,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.817676679979163,,SSQ-FMT
+sample_1135,3,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5844361411064231,,SSQ-FMT
+sample_1139,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3942883463841548,,SSQ-FMT
+sample_1167,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7720918665340293,,SSQ-FMT
+sample_1175,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7904153354632588,,SSQ-FMT
+sample_1185,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3481654423317712,,SSQ-FMT
+sample_1211,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7845476494816077,,SSQ-FMT
+sample_1215,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4250032837195319,,SSQ-FMT
+sample_1230,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4973316856848306,,SSQ-FMT
+sample_1244,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7900594602835798,,SSQ-FMT
+sample_1259,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5438665663078083,,SSQ-FMT
+sample_1262,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6270277895330795,,SSQ-FMT
+sample_1266,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4615708220895299,,SSQ-FMT
+sample_1276,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.8350128896179986,,SSQ-FMT
+sample_1285,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4697614495444413,,SSQ-FMT
+sample_1286,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5528572162037275,,SSQ-FMT
+sample_1288,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4777719390436153,,SSQ-FMT
+sample_1292,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6370765623736762,,SSQ-FMT
+sample_1319,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5056726094003241,,SSQ-FMT
+sample_1327,3,shallow,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4750147013087899,,SSQ-FMT
+sample_1328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6882278658622141,,SSQ-FMT
+sample_1366,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.3902475179193655,,SSQ-FMT
+sample_1372,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4258341731049154,,SSQ-FMT
+sample_1378,3,shallow,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3956972846315955,,SSQ-FMT
+sample_1384,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.2672703096308491,,SSQ-FMT
+sample_1389,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7245343473184076,,SSQ-FMT
+sample_1404,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.644698474618355,,SSQ-FMT
+sample_1429,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.592017931907385,,SSQ-FMT
+sample_1432,2,medium,uniform,sphere,2,1,1,1,0,0,0,0.5,1.0,0.8699505358615004,,SSQ-FMT
+sample_1438,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5146641438032167,,SSQ-FMT
+sample_1455,2,shallow,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.5265743073047859,,SSQ-FMT
+sample_1470,3,medium,uniform,ellipsoid+irregular,2,2,1,1,1,0,1,0.5,0.5,0.3328552075862618,,SSQ-FMT
+sample_1482,3,medium,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5165842813200381,,SSQ-FMT
+sample_1486,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.8214142177893247,,SSQ-FMT
+sample_1513,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4025216211049257,,SSQ-FMT
+sample_1516,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5910882345992621,,SSQ-FMT
+sample_1529,2,medium,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.5112247797669792,,SSQ-FMT
+sample_1566,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4060552480632172,,SSQ-FMT
+sample_1572,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4615143830594458,,SSQ-FMT
+sample_1599,3,medium,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3227082271091411,,SSQ-FMT
+sample_1620,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.440337949338131,,SSQ-FMT
+sample_1634,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5472009605282906,,SSQ-FMT
+sample_1635,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5966066029585156,,SSQ-FMT
+sample_1642,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4826728498901265,,SSQ-FMT
+sample_1643,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.7049770185513549,,SSQ-FMT
+sample_1683,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6864452912357104,,SSQ-FMT
+sample_1686,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.7019673245004479,,SSQ-FMT
+sample_1688,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4900374629575872,,SSQ-FMT
+sample_1697,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4663321285658964,,SSQ-FMT
+sample_1717,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6457465270194681,,SSQ-FMT
+sample_1718,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5700280254544432,,SSQ-FMT
+sample_1729,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.7082979035289465,,SSQ-FMT
+sample_1731,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4977676530457925,,SSQ-FMT
+sample_1734,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4651188695694793,,SSQ-FMT
+sample_1741,3,deep,uniform,irregular,3,3,3,0,0,0,0,1.0,1.0,0.6018168464153565,,SSQ-FMT
+sample_1760,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4961612365005011,,SSQ-FMT
+sample_1765,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.596452496954933,,SSQ-FMT
+sample_1787,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4613666820307965,,SSQ-FMT
+sample_1809,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7588399898244721,,SSQ-FMT
+sample_1811,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5381078662743224,,SSQ-FMT
+sample_1812,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5466325263811297,,SSQ-FMT
+sample_1815,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.1989163420780389,,SSQ-FMT
+sample_1826,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.7070419970869073,,SSQ-FMT
+sample_1837,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7445108571125261,,SSQ-FMT
+sample_1839,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.8256501841723407,,SSQ-FMT
+sample_1843,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7862534125582142,,SSQ-FMT
+sample_1858,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.7029679433178803,,SSQ-FMT
+sample_1863,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5786024569640905,,SSQ-FMT
+sample_1865,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.838251241423055,,SSQ-FMT
+sample_1869,3,deep,uniform,ellipsoid+irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.5324165029469549,,SSQ-FMT
+sample_1881,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.2854850678143628,,SSQ-FMT
+sample_1885,3,shallow,uniform,ellipsoid+sphere,3,4,3,0,1,0,0,1.0,0.75,0.3459844985645318,,SSQ-FMT
+sample_1893,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.658939191649472,,SSQ-FMT
+sample_1894,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.3886397608370702,,SSQ-FMT
+sample_1904,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7903651903651904,,SSQ-FMT
+sample_1927,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3198684015237718,,SSQ-FMT
+sample_1944,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5830617488317555,,SSQ-FMT
+sample_1989,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6283786151438807,,SSQ-FMT
+sample_1993,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6012922743473895,,SSQ-FMT
+sample_2021,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6249959951790213,,SSQ-FMT
+sample_2024,2,deep,uniform,irregular,2,1,1,1,0,1,0,0.5,1.0,0.4236999910498523,,SSQ-FMT
+sample_2044,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5001753777175559,,SSQ-FMT
+sample_2059,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5107322838692386,,SSQ-FMT
+sample_2067,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6486759913376343,,SSQ-FMT
+sample_2069,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5338159555222548,,SSQ-FMT
+sample_2070,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.634402445563389,,SSQ-FMT
+sample_2072,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6240629802433564,,SSQ-FMT
+sample_2077,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6194786103317902,,SSQ-FMT
+sample_2079,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4355857466978814,,SSQ-FMT
+sample_2086,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.8023410875685286,,SSQ-FMT
+sample_2087,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.372301548793543,,SSQ-FMT
+sample_2111,2,medium,uniform,ellipsoid+sphere,2,1,1,1,0,0,0,0.5,1.0,0.8361488135924227,,SSQ-FMT
+sample_2119,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7356875996181056,,SSQ-FMT
+sample_2121,2,shallow,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6397043105389809,,SSQ-FMT
+sample_2129,3,medium,uniform,ellipsoid+irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.20389983628694,,SSQ-FMT
+sample_2166,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3465741318759695,,SSQ-FMT
+sample_2167,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5225627736574032,,SSQ-FMT
+sample_2172,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7289514178940426,,SSQ-FMT
+sample_2175,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.3925046992481203,,SSQ-FMT
+sample_2196,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.642754600739577,,SSQ-FMT
+sample_2199,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7896026263293427,,SSQ-FMT
+sample_2202,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3778588858756374,,SSQ-FMT
+sample_2207,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7047436735766628,,SSQ-FMT
+sample_2208,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5700894443234463,,SSQ-FMT
+sample_2209,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6642764950523448,,SSQ-FMT
+sample_2225,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5482751583685775,,SSQ-FMT
+sample_2234,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.787666394975276,,SSQ-FMT
+sample_2259,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4370700131008644,,SSQ-FMT
+sample_2263,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5692944179121067,,SSQ-FMT
+sample_2266,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.2817411875294463,,SSQ-FMT
+sample_2270,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3093068644522129,,SSQ-FMT
+sample_2271,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4400625162213751,,SSQ-FMT
+sample_2281,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5971740400123846,,SSQ-FMT
+sample_2293,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8030402092186989,,SSQ-FMT
+sample_2299,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.456135556162886,,SSQ-FMT
+sample_2306,3,shallow,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4320729223901631,,SSQ-FMT
+sample_2323,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6511660664214176,,SSQ-FMT
+sample_2357,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6136889520093732,,SSQ-FMT
+sample_2361,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5463963836668162,,SSQ-FMT
+sample_2372,3,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5224262027186273,,SSQ-FMT
+sample_2375,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6112868631518547,,SSQ-FMT
+sample_2378,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.55249130422285,,SSQ-FMT
+sample_2385,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.5261262341828727,,SSQ-FMT
+sample_2409,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4921154292299978,,SSQ-FMT
+sample_2413,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.2889918466237748,,SSQ-FMT
+sample_2418,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5995402298850575,,SSQ-FMT
+sample_2435,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4456250677653692,,SSQ-FMT
+sample_2440,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.2461937267649682,,SSQ-FMT
+sample_2442,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6032724798972622,,SSQ-FMT
+sample_2453,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7126753507014028,,SSQ-FMT
+sample_2472,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5016730122927381,,SSQ-FMT
+sample_2477,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7266372868629569,,SSQ-FMT
+sample_2478,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.3751072344991632,,SSQ-FMT
+sample_2483,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6742422150611832,,SSQ-FMT
+sample_2494,3,deep,uniform,irregular+sphere,1,2,1,0,1,0,1,1.0,0.5,0.2293510863998829,,SSQ-FMT
+sample_2505,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.449127624698008,,SSQ-FMT
+sample_2533,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.8219157320400121,,SSQ-FMT
+sample_2536,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5228218481000618,,SSQ-FMT
+sample_2584,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.8550742422383114,,SSQ-FMT
+sample_2589,3,shallow,uniform,ellipsoid+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.5137613499682465,,SSQ-FMT
+sample_2600,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6482351523912782,,SSQ-FMT
+sample_2603,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8405237535672319,,SSQ-FMT
+sample_2614,3,medium,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.5717677372800152,,SSQ-FMT
+sample_2643,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.666925326807139,,SSQ-FMT
+sample_2650,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5146678311059495,,SSQ-FMT
+sample_2655,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6239168110918544,,SSQ-FMT
+sample_2676,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4157411226648266,,SSQ-FMT
+sample_2682,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.6121647111843957,,SSQ-FMT
+sample_2684,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6087184809278845,,SSQ-FMT
+sample_2698,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6135221842644415,,SSQ-FMT
+sample_2702,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4180830434355062,,SSQ-FMT
+sample_2711,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4837127082624785,,SSQ-FMT
+sample_2719,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6828709192949174,,SSQ-FMT
+sample_2741,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.574099036051203,,SSQ-FMT
+sample_2745,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4084773686034814,,SSQ-FMT
+sample_2747,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4837754480436743,,SSQ-FMT
+sample_2751,2,medium,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.7837761165283312,,SSQ-FMT
+sample_2759,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7819112292097234,,SSQ-FMT
+sample_2769,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2054853370055793,,SSQ-FMT
+sample_2771,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8656970060478832,,SSQ-FMT
+sample_2784,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7430816535702084,,SSQ-FMT
+sample_2799,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6014129596219149,,SSQ-FMT
+sample_2804,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6197232825196693,,SSQ-FMT
+sample_2833,3,medium,uniform,irregular+sphere,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.5120912807974918,,SSQ-FMT
+sample_2844,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6824794846837436,,SSQ-FMT
+sample_2850,3,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6879989600496246,,SSQ-FMT
+sample_2872,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6681483087597572,,SSQ-FMT
+sample_2873,2,shallow,uniform,irregular,2,1,1,1,0,0,0,0.5,1.0,0.2921035021191167,,SSQ-FMT
+sample_2874,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6716784733265867,,SSQ-FMT
+sample_2887,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5456987361168552,,SSQ-FMT
+sample_2909,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.5342341454405789,,SSQ-FMT
+sample_2932,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7048558076131151,,SSQ-FMT
+sample_2934,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7940790433134024,,SSQ-FMT
+sample_2936,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.2619939577039274,,SSQ-FMT
+sample_2945,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6486500232287099,,SSQ-FMT
+sample_2948,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7764764273920397,,SSQ-FMT
+sample_2951,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4131375113167689,,SSQ-FMT
+sample_2956,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6553063046691232,,SSQ-FMT
+sample_2961,2,medium,uniform,irregular,2,1,1,1,0,1,0,0.5,1.0,0.286597292856584,,SSQ-FMT
+sample_2977,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6620445344129555,,SSQ-FMT
+sample_2987,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.2927765898343089,,SSQ-FMT
+sample_2993,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5593421654615712,,SSQ-FMT
+sample_0002,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7885666246321984,,w/o transport-aware footprint
+sample_0006,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7687313335930399,,w/o transport-aware footprint
+sample_0022,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.3412141111731337,,w/o transport-aware footprint
+sample_0032,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7923250564334086,,w/o transport-aware footprint
+sample_0038,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4418845545816469,,w/o transport-aware footprint
+sample_0079,2,medium,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.269087754090233,,w/o transport-aware footprint
+sample_0096,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6233705294011775,,w/o transport-aware footprint
+sample_0100,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.1665054107633831,,w/o transport-aware footprint
+sample_0108,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7296790189640153,,w/o transport-aware footprint
+sample_0113,3,medium,uniform,ellipsoid,3,3,3,0,0,0,0,1.0,1.0,0.4832186185350425,,w/o transport-aware footprint
+sample_0122,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6007836745693871,,w/o transport-aware footprint
+sample_0128,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6054770470601393,,w/o transport-aware footprint
+sample_0130,2,shallow,uniform,ellipsoid+sphere,2,3,2,0,1,0,0,1.0,0.6666666666666666,0.4965203470609435,,w/o transport-aware footprint
+sample_0158,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7395993836671803,,w/o transport-aware footprint
+sample_0163,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.511773172090848,,w/o transport-aware footprint
+sample_0180,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.3377152379189039,,w/o transport-aware footprint
+sample_0187,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5578584926751496,,w/o transport-aware footprint
+sample_0189,3,shallow,uniform,irregular+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.6650432263635633,,w/o transport-aware footprint
+sample_0192,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2892388063779583,,w/o transport-aware footprint
+sample_0207,2,medium,uniform,irregular+sphere,2,1,1,1,0,0,0,0.5,1.0,0.6901105980886932,,w/o transport-aware footprint
+sample_0234,3,deep,uniform,ellipsoid+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.4081146104664016,,w/o transport-aware footprint
+sample_0240,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7226317405732242,,w/o transport-aware footprint
+sample_0248,3,deep,uniform,irregular,3,3,3,0,0,0,0,1.0,1.0,0.4952971109247903,,w/o transport-aware footprint
+sample_0260,3,medium,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4155611443097584,,w/o transport-aware footprint
+sample_0276,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.682668201835281,,w/o transport-aware footprint
+sample_0280,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.1671757518796992,,w/o transport-aware footprint
+sample_0290,3,medium,uniform,ellipsoid+irregular,3,4,3,0,1,0,1,1.0,0.75,0.4679138710017285,,w/o transport-aware footprint
+sample_0297,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6853298611111112,,w/o transport-aware footprint
+sample_0300,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.484500785381768,,w/o transport-aware footprint
+sample_0308,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.6771413081272373,,w/o transport-aware footprint
+sample_0322,2,deep,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.3970241335510797,,w/o transport-aware footprint
+sample_0328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7161642727088813,,w/o transport-aware footprint
+sample_0335,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6152077044703177,,w/o transport-aware footprint
+sample_0347,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4363517525927912,,w/o transport-aware footprint
+sample_0350,3,shallow,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.4953798602278979,,w/o transport-aware footprint
+sample_0378,2,deep,uniform,ellipsoid+sphere,2,1,1,1,0,1,0,0.5,1.0,0.3956922717721223,,w/o transport-aware footprint
+sample_0382,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3939015174068782,,w/o transport-aware footprint
+sample_0386,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4468564732756864,,w/o transport-aware footprint
+sample_0396,3,deep,uniform,ellipsoid,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5670467651757847,,w/o transport-aware footprint
+sample_0397,3,medium,uniform,ellipsoid,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.6198954359191748,,w/o transport-aware footprint
+sample_0401,3,deep,uniform,irregular+sphere,3,5,3,0,2,0,0,1.0,0.6,0.3290452632897837,,w/o transport-aware footprint
+sample_0409,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3216615509907155,,w/o transport-aware footprint
+sample_0418,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.3250617514066413,,w/o transport-aware footprint
+sample_0436,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.2756699939721646,,w/o transport-aware footprint
+sample_0438,2,shallow,uniform,ellipsoid+sphere,2,1,1,1,0,1,0,0.5,1.0,0.445360824742268,,w/o transport-aware footprint
+sample_0447,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7403873140611844,,w/o transport-aware footprint
+sample_0449,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4992559882463409,,w/o transport-aware footprint
+sample_0456,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4343898128324548,,w/o transport-aware footprint
+sample_0458,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6202710665880966,,w/o transport-aware footprint
+sample_0469,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4656747928680571,,w/o transport-aware footprint
+sample_0472,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8334607100673939,,w/o transport-aware footprint
+sample_0473,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4904841396258301,,w/o transport-aware footprint
+sample_0511,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.641505063563887,,w/o transport-aware footprint
+sample_0521,3,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5306080923574825,,w/o transport-aware footprint
+sample_0525,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4184292026338971,,w/o transport-aware footprint
+sample_0535,2,medium,uniform,ellipsoid+sphere,1,1,1,0,0,0,0,1.0,1.0,0.6470990610036689,,w/o transport-aware footprint
+sample_0536,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5235593924247227,,w/o transport-aware footprint
+sample_0541,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5160163656321725,,w/o transport-aware footprint
+sample_0566,3,medium,uniform,irregular+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.2990079499898077,,w/o transport-aware footprint
+sample_0585,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5112362148455134,,w/o transport-aware footprint
+sample_0603,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7017407371389672,,w/o transport-aware footprint
+sample_0610,2,medium,uniform,sphere,2,1,1,1,0,1,0,0.5,1.0,0.3799187788825094,,w/o transport-aware footprint
+sample_0626,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.2927485386704628,,w/o transport-aware footprint
+sample_0633,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3530686493645596,,w/o transport-aware footprint
+sample_0646,3,deep,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6522539719774401,,w/o transport-aware footprint
+sample_0647,3,deep,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6442895255817839,,w/o transport-aware footprint
+sample_0652,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5695901362020375,,w/o transport-aware footprint
+sample_0661,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4539023541690827,,w/o transport-aware footprint
+sample_0666,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.2799294532627866,,w/o transport-aware footprint
+sample_0674,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5042837860097233,,w/o transport-aware footprint
+sample_0676,3,medium,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.3635789207633009,,w/o transport-aware footprint
+sample_0681,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6610248784673807,,w/o transport-aware footprint
+sample_0712,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.1491929724325096,,w/o transport-aware footprint
+sample_0751,3,shallow,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6751676963635586,,w/o transport-aware footprint
+sample_0761,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6214107703976596,,w/o transport-aware footprint
+sample_0777,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7466317486094223,,w/o transport-aware footprint
+sample_0778,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5541623726096416,,w/o transport-aware footprint
+sample_0791,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.8636763412489006,,w/o transport-aware footprint
+sample_0796,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8048115667219721,,w/o transport-aware footprint
+sample_0807,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5733161833489242,,w/o transport-aware footprint
+sample_0817,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.4184584433547089,,w/o transport-aware footprint
+sample_0823,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5941535150645624,,w/o transport-aware footprint
+sample_0858,3,deep,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6188471873060916,,w/o transport-aware footprint
+sample_0860,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5804448451266347,,w/o transport-aware footprint
+sample_0867,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.3953293243025992,,w/o transport-aware footprint
+sample_0870,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4704437061191584,,w/o transport-aware footprint
+sample_0875,3,shallow,uniform,sphere,3,4,3,0,1,0,0,1.0,0.75,0.562849378452303,,w/o transport-aware footprint
+sample_0881,3,deep,uniform,ellipsoid+irregular,1,1,1,0,0,0,0,1.0,1.0,0.5781088012222404,,w/o transport-aware footprint
+sample_0895,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.6298038778360374,,w/o transport-aware footprint
+sample_0911,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4370640923859625,,w/o transport-aware footprint
+sample_0913,2,shallow,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.3054939117217136,,w/o transport-aware footprint
+sample_0914,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.3937625967964357,,w/o transport-aware footprint
+sample_0920,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5141022942538414,,w/o transport-aware footprint
+sample_0932,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.2754749568221071,,w/o transport-aware footprint
+sample_0942,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6968905443315496,,w/o transport-aware footprint
+sample_0953,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7411066207653545,,w/o transport-aware footprint
+sample_0960,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6614406315097029,,w/o transport-aware footprint
+sample_0974,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4627425043338948,,w/o transport-aware footprint
+sample_0977,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4470763945123395,,w/o transport-aware footprint
+sample_0979,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5921564390665515,,w/o transport-aware footprint
+sample_1000,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4741817790543828,,w/o transport-aware footprint
+sample_1002,2,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5537289285527895,,w/o transport-aware footprint
+sample_1003,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.598631311818391,,w/o transport-aware footprint
+sample_1015,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6873237401057019,,w/o transport-aware footprint
+sample_1018,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6005825047705132,,w/o transport-aware footprint
+sample_1028,2,shallow,uniform,ellipsoid+sphere,2,1,1,1,0,1,0,0.5,1.0,0.4948478312964294,,w/o transport-aware footprint
+sample_1068,3,shallow,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6670993568013316,,w/o transport-aware footprint
+sample_1069,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5067344850487143,,w/o transport-aware footprint
+sample_1072,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.1987472874359453,,w/o transport-aware footprint
+sample_1078,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6034895897739307,,w/o transport-aware footprint
+sample_1081,2,shallow,uniform,ellipsoid+sphere,1,1,1,0,0,0,0,1.0,1.0,0.6440081394709344,,w/o transport-aware footprint
+sample_1085,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.7304192807528568,,w/o transport-aware footprint
+sample_1086,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4921560872003402,,w/o transport-aware footprint
+sample_1092,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4551474928965787,,w/o transport-aware footprint
+sample_1093,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7506823228107151,,w/o transport-aware footprint
+sample_1096,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4371641954760463,,w/o transport-aware footprint
+sample_1112,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5757616057240031,,w/o transport-aware footprint
+sample_1126,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4906911798929486,,w/o transport-aware footprint
+sample_1133,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7181543116490167,,w/o transport-aware footprint
+sample_1135,3,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5636572867252533,,w/o transport-aware footprint
+sample_1139,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3340487804878049,,w/o transport-aware footprint
+sample_1167,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6051127231588641,,w/o transport-aware footprint
+sample_1175,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6889916281394477,,w/o transport-aware footprint
+sample_1185,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3416788915923482,,w/o transport-aware footprint
+sample_1211,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5086129553202943,,w/o transport-aware footprint
+sample_1215,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4956556985465941,,w/o transport-aware footprint
+sample_1230,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.343619590797965,,w/o transport-aware footprint
+sample_1244,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6958118187033849,,w/o transport-aware footprint
+sample_1259,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5334115278208609,,w/o transport-aware footprint
+sample_1262,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4820217096336499,,w/o transport-aware footprint
+sample_1266,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.2838849528043667,,w/o transport-aware footprint
+sample_1276,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6514687331050639,,w/o transport-aware footprint
+sample_1285,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4971289202013723,,w/o transport-aware footprint
+sample_1286,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6509486465975208,,w/o transport-aware footprint
+sample_1288,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3997883784498721,,w/o transport-aware footprint
+sample_1292,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6459986202138669,,w/o transport-aware footprint
+sample_1319,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4171122994652406,,w/o transport-aware footprint
+sample_1327,3,shallow,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.7105841421220659,,w/o transport-aware footprint
+sample_1328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.516104513064133,,w/o transport-aware footprint
+sample_1366,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.234593656005563,,w/o transport-aware footprint
+sample_1372,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3523801489899998,,w/o transport-aware footprint
+sample_1378,3,shallow,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4263633026441453,,w/o transport-aware footprint
+sample_1384,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.3227857799570947,,w/o transport-aware footprint
+sample_1389,2,medium,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.4058096415327565,,w/o transport-aware footprint
+sample_1404,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6382289121738297,,w/o transport-aware footprint
+sample_1429,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.5710847959865804,,w/o transport-aware footprint
+sample_1432,2,medium,uniform,sphere,2,1,1,1,0,0,0,0.5,1.0,0.8259180104915484,,w/o transport-aware footprint
+sample_1438,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4078480484241286,,w/o transport-aware footprint
+sample_1455,2,shallow,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.4880869178473854,,w/o transport-aware footprint
+sample_1470,3,medium,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.7309235509063552,,w/o transport-aware footprint
+sample_1482,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6119575800485251,,w/o transport-aware footprint
+sample_1486,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7575575629213985,,w/o transport-aware footprint
+sample_1513,3,shallow,uniform,ellipsoid+sphere,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.421633930242122,,w/o transport-aware footprint
+sample_1516,3,deep,uniform,ellipsoid+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.7000472981897458,,w/o transport-aware footprint
+sample_1529,2,medium,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.4541882838865662,,w/o transport-aware footprint
+sample_1566,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2908433484341945,,w/o transport-aware footprint
+sample_1572,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6128099313330853,,w/o transport-aware footprint
+sample_1599,3,medium,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.2936879991771881,,w/o transport-aware footprint
+sample_1620,2,medium,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.2272832103321033,,w/o transport-aware footprint
+sample_1634,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3481997898959029,,w/o transport-aware footprint
+sample_1635,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6562637732125226,,w/o transport-aware footprint
+sample_1642,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5358509346788046,,w/o transport-aware footprint
+sample_1643,3,shallow,uniform,ellipsoid+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.6166853215850987,,w/o transport-aware footprint
+sample_1683,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4911437246963562,,w/o transport-aware footprint
+sample_1686,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6095228480408785,,w/o transport-aware footprint
+sample_1688,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5952608349580285,,w/o transport-aware footprint
+sample_1697,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3607838389167845,,w/o transport-aware footprint
+sample_1717,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4278983652898681,,w/o transport-aware footprint
+sample_1718,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4144321917963394,,w/o transport-aware footprint
+sample_1729,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6283765545747908,,w/o transport-aware footprint
+sample_1731,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4641963141359319,,w/o transport-aware footprint
+sample_1734,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5227767242224807,,w/o transport-aware footprint
+sample_1741,3,deep,uniform,irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5203976455223615,,w/o transport-aware footprint
+sample_1760,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5592217230666859,,w/o transport-aware footprint
+sample_1765,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6701666286236019,,w/o transport-aware footprint
+sample_1787,2,deep,uniform,sphere,2,2,1,1,1,0,0,0.5,0.5,0.7980015673981191,,w/o transport-aware footprint
+sample_1809,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7202292506898748,,w/o transport-aware footprint
+sample_1811,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4333384429801393,,w/o transport-aware footprint
+sample_1812,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6714739861983406,,w/o transport-aware footprint
+sample_1815,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.1728426841881168,,w/o transport-aware footprint
+sample_1826,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.691364279737616,,w/o transport-aware footprint
+sample_1837,2,shallow,uniform,irregular+sphere,2,3,2,0,1,0,0,1.0,0.6666666666666666,0.5507431467370982,,w/o transport-aware footprint
+sample_1839,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6641522372707012,,w/o transport-aware footprint
+sample_1843,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6842929886408148,,w/o transport-aware footprint
+sample_1858,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6007976332231411,,w/o transport-aware footprint
+sample_1863,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3997888845453125,,w/o transport-aware footprint
+sample_1865,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6678649986836183,,w/o transport-aware footprint
+sample_1869,3,deep,uniform,ellipsoid+irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.617631797426318,,w/o transport-aware footprint
+sample_1881,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3186324399349294,,w/o transport-aware footprint
+sample_1885,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3919836885412422,,w/o transport-aware footprint
+sample_1893,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4834696054034838,,w/o transport-aware footprint
+sample_1894,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.3300190395599746,,w/o transport-aware footprint
+sample_1904,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5573092098931768,,w/o transport-aware footprint
+sample_1927,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2648368305828545,,w/o transport-aware footprint
+sample_1944,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5317504910808424,,w/o transport-aware footprint
+sample_1989,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6989087076560012,,w/o transport-aware footprint
+sample_1993,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5004226117288259,,w/o transport-aware footprint
+sample_2021,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5725868491365695,,w/o transport-aware footprint
+sample_2024,2,deep,uniform,irregular,2,1,1,1,0,1,0,0.5,1.0,0.3893307468477207,,w/o transport-aware footprint
+sample_2044,2,medium,uniform,ellipsoid+sphere,2,3,2,0,1,0,0,1.0,0.6666666666666666,0.4612137971774805,,w/o transport-aware footprint
+sample_2059,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6075046942123572,,w/o transport-aware footprint
+sample_2067,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5632134918388546,,w/o transport-aware footprint
+sample_2069,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4995215362798904,,w/o transport-aware footprint
+sample_2070,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5885936353003466,,w/o transport-aware footprint
+sample_2072,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6013114458113384,,w/o transport-aware footprint
+sample_2077,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.48478916773797,,w/o transport-aware footprint
+sample_2079,2,medium,uniform,ellipsoid+sphere,2,3,2,0,1,0,0,1.0,0.6666666666666666,0.3787300631632617,,w/o transport-aware footprint
+sample_2086,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.8090337335620355,,w/o transport-aware footprint
+sample_2087,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3417369426718927,,w/o transport-aware footprint
+sample_2111,2,medium,uniform,ellipsoid+sphere,2,1,1,1,0,0,0,0.5,1.0,0.7623343445633083,,w/o transport-aware footprint
+sample_2119,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.667549673992536,,w/o transport-aware footprint
+sample_2121,2,shallow,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.7330330535136593,,w/o transport-aware footprint
+sample_2129,3,medium,uniform,ellipsoid+irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6509885033513394,,w/o transport-aware footprint
+sample_2166,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3759111984267523,,w/o transport-aware footprint
+sample_2167,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4296536000588365,,w/o transport-aware footprint
+sample_2172,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.685963365657753,,w/o transport-aware footprint
+sample_2175,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.2812846068660022,,w/o transport-aware footprint
+sample_2196,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5233705753831003,,w/o transport-aware footprint
+sample_2199,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7623138535705882,,w/o transport-aware footprint
+sample_2202,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4241052494176897,,w/o transport-aware footprint
+sample_2207,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5228526913015151,,w/o transport-aware footprint
+sample_2208,3,medium,uniform,ellipsoid+irregular,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.2433000514524371,,w/o transport-aware footprint
+sample_2209,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5339513325608343,,w/o transport-aware footprint
+sample_2225,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6675348149856083,,w/o transport-aware footprint
+sample_2234,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6794250402495245,,w/o transport-aware footprint
+sample_2259,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6452154134729504,,w/o transport-aware footprint
+sample_2263,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5545288495903304,,w/o transport-aware footprint
+sample_2266,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3508134291029028,,w/o transport-aware footprint
+sample_2270,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2258964207935621,,w/o transport-aware footprint
+sample_2271,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.48767393477801,,w/o transport-aware footprint
+sample_2281,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6297033681842474,,w/o transport-aware footprint
+sample_2293,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8096652484546841,,w/o transport-aware footprint
+sample_2299,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3744671303567422,,w/o transport-aware footprint
+sample_2306,3,shallow,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4425478371894422,,w/o transport-aware footprint
+sample_2323,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6286678335930692,,w/o transport-aware footprint
+sample_2357,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6173671206274496,,w/o transport-aware footprint
+sample_2361,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.568191780696827,,w/o transport-aware footprint
+sample_2372,3,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.347052373816353,,w/o transport-aware footprint
+sample_2375,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5944495215595282,,w/o transport-aware footprint
+sample_2378,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4702093625483136,,w/o transport-aware footprint
+sample_2385,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.4603693007250829,,w/o transport-aware footprint
+sample_2409,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3151379764412498,,w/o transport-aware footprint
+sample_2413,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2953087301404717,,w/o transport-aware footprint
+sample_2418,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.4907637888117385,,w/o transport-aware footprint
+sample_2435,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4389957264957265,,w/o transport-aware footprint
+sample_2440,2,deep,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.4785507611020254,,w/o transport-aware footprint
+sample_2442,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3374223862233708,,w/o transport-aware footprint
+sample_2453,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7343164208947763,,w/o transport-aware footprint
+sample_2472,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6871082461853915,,w/o transport-aware footprint
+sample_2477,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5628233930295548,,w/o transport-aware footprint
+sample_2478,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6184852295898562,,w/o transport-aware footprint
+sample_2483,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5591536852530776,,w/o transport-aware footprint
+sample_2494,3,deep,uniform,irregular+sphere,1,1,1,0,0,0,0,1.0,1.0,0.4234034699150978,,w/o transport-aware footprint
+sample_2505,3,medium,uniform,ellipsoid+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.2882816216501929,,w/o transport-aware footprint
+sample_2533,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5181366230896705,,w/o transport-aware footprint
+sample_2536,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4256136103086983,,w/o transport-aware footprint
+sample_2584,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7901193997151933,,w/o transport-aware footprint
+sample_2589,3,shallow,uniform,ellipsoid+sphere,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.4633566286748886,,w/o transport-aware footprint
+sample_2600,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7039893617021277,,w/o transport-aware footprint
+sample_2603,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8029861888764465,,w/o transport-aware footprint
+sample_2614,3,medium,uniform,sphere,3,4,3,0,1,0,0,1.0,0.75,0.3981099328141731,,w/o transport-aware footprint
+sample_2643,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8146485715794476,,w/o transport-aware footprint
+sample_2650,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.268650009979992,,w/o transport-aware footprint
+sample_2655,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4890355132932272,,w/o transport-aware footprint
+sample_2676,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4241853960060021,,w/o transport-aware footprint
+sample_2682,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.6984413486766848,,w/o transport-aware footprint
+sample_2684,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6702486984409788,,w/o transport-aware footprint
+sample_2698,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6470515732661748,,w/o transport-aware footprint
+sample_2702,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.522904904953526,,w/o transport-aware footprint
+sample_2711,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5200415714149345,,w/o transport-aware footprint
+sample_2719,1,shallow,uniform,ellipsoid,1,2,1,0,1,0,0,1.0,0.5,0.6719673965159022,,w/o transport-aware footprint
+sample_2741,3,medium,uniform,ellipsoid+sphere,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.5472309523818502,,w/o transport-aware footprint
+sample_2745,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6495044298399892,,w/o transport-aware footprint
+sample_2747,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6047940474907013,,w/o transport-aware footprint
+sample_2751,2,medium,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5437706701826859,,w/o transport-aware footprint
+sample_2759,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7359778044391122,,w/o transport-aware footprint
+sample_2769,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4518718674398954,,w/o transport-aware footprint
+sample_2771,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8344594594594594,,w/o transport-aware footprint
+sample_2784,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5003248159376353,,w/o transport-aware footprint
+sample_2799,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6315970281315817,,w/o transport-aware footprint
+sample_2804,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.626352028131629,,w/o transport-aware footprint
+sample_2833,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.422109591968778,,w/o transport-aware footprint
+sample_2844,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6907570142864261,,w/o transport-aware footprint
+sample_2850,3,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6564870367738845,,w/o transport-aware footprint
+sample_2872,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5795475789867265,,w/o transport-aware footprint
+sample_2873,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.2360133621730823,,w/o transport-aware footprint
+sample_2874,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5180776504616754,,w/o transport-aware footprint
+sample_2887,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7505082839223751,,w/o transport-aware footprint
+sample_2909,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.5364569829413338,,w/o transport-aware footprint
+sample_2932,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6634648923561045,,w/o transport-aware footprint
+sample_2934,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5822803627174075,,w/o transport-aware footprint
+sample_2936,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.2263048016701461,,w/o transport-aware footprint
+sample_2945,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5654791537363902,,w/o transport-aware footprint
+sample_2948,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7381065452268277,,w/o transport-aware footprint
+sample_2951,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3856079871903551,,w/o transport-aware footprint
+sample_2956,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.486099488687261,,w/o transport-aware footprint
+sample_2961,2,medium,uniform,irregular,2,2,1,1,1,1,0,0.5,0.5,0.3057009680889208,,w/o transport-aware footprint
+sample_2977,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5182693302970707,,w/o transport-aware footprint
+sample_2987,3,deep,uniform,ellipsoid+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.2148451036107838,,w/o transport-aware footprint
+sample_2993,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4074382870590095,,w/o transport-aware footprint
+sample_0002,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8115454807415234,,w/o query-canonical reliability
+sample_0006,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7696585618210037,,w/o query-canonical reliability
+sample_0022,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.3997031178413601,,w/o query-canonical reliability
+sample_0032,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.81282302911351,,w/o query-canonical reliability
+sample_0038,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6316083248055411,,w/o query-canonical reliability
+sample_0079,2,medium,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.3383610635981962,,w/o query-canonical reliability
+sample_0096,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6348714657814383,,w/o query-canonical reliability
+sample_0100,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.2742971325040568,,w/o query-canonical reliability
+sample_0108,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7313317440886541,,w/o query-canonical reliability
+sample_0113,3,medium,uniform,ellipsoid,3,3,3,0,0,0,0,1.0,1.0,0.4311318937742743,,w/o query-canonical reliability
+sample_0122,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5443078598645514,,w/o query-canonical reliability
+sample_0128,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6801122928686084,,w/o query-canonical reliability
+sample_0130,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4673788855080246,,w/o query-canonical reliability
+sample_0158,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7506929724441546,,w/o query-canonical reliability
+sample_0163,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5218712414350725,,w/o query-canonical reliability
+sample_0180,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.3738087918844144,,w/o query-canonical reliability
+sample_0187,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5396249288008761,,w/o query-canonical reliability
+sample_0189,3,shallow,uniform,irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.609817993113835,,w/o query-canonical reliability
+sample_0192,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2812799120346596,,w/o query-canonical reliability
+sample_0207,2,medium,uniform,irregular+sphere,2,1,1,1,0,0,0,0.5,1.0,0.6146643303033622,,w/o query-canonical reliability
+sample_0234,3,deep,uniform,ellipsoid+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.3576551178544315,,w/o query-canonical reliability
+sample_0240,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7287758266978013,,w/o query-canonical reliability
+sample_0248,3,deep,uniform,irregular,3,3,3,0,0,0,0,1.0,1.0,0.5093564833945288,,w/o query-canonical reliability
+sample_0260,3,medium,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4175592602472227,,w/o query-canonical reliability
+sample_0276,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6513125852723327,,w/o query-canonical reliability
+sample_0280,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.1175644415069398,,w/o query-canonical reliability
+sample_0290,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4827881382027274,,w/o query-canonical reliability
+sample_0297,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6723562385841154,,w/o query-canonical reliability
+sample_0300,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.427254590574588,,w/o query-canonical reliability
+sample_0308,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.684951944390408,,w/o query-canonical reliability
+sample_0322,2,deep,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.4660106382978723,,w/o query-canonical reliability
+sample_0328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7477605418396329,,w/o query-canonical reliability
+sample_0335,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7485051002462187,,w/o query-canonical reliability
+sample_0347,2,deep,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.3036294308713458,,w/o query-canonical reliability
+sample_0350,3,shallow,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.3048503791815706,,w/o query-canonical reliability
+sample_0378,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5151871168666518,,w/o query-canonical reliability
+sample_0382,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5457060360495842,,w/o query-canonical reliability
+sample_0386,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.451305925151478,,w/o query-canonical reliability
+sample_0396,3,deep,uniform,ellipsoid,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6716057724657424,,w/o query-canonical reliability
+sample_0397,3,medium,uniform,ellipsoid,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.6400900900900901,,w/o query-canonical reliability
+sample_0401,3,deep,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3926728882343349,,w/o query-canonical reliability
+sample_0409,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3251119882514127,,w/o query-canonical reliability
+sample_0418,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.2534228915151456,,w/o query-canonical reliability
+sample_0436,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.244112643753125,,w/o query-canonical reliability
+sample_0438,2,shallow,uniform,ellipsoid+sphere,2,1,1,1,0,1,0,0.5,1.0,0.3752855659397715,,w/o query-canonical reliability
+sample_0447,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7919349892670959,,w/o query-canonical reliability
+sample_0449,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.511873987552221,,w/o query-canonical reliability
+sample_0456,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5162553221445076,,w/o query-canonical reliability
+sample_0458,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7221598877980364,,w/o query-canonical reliability
+sample_0469,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3910711594259981,,w/o query-canonical reliability
+sample_0472,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8202710665880967,,w/o query-canonical reliability
+sample_0473,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.494740035794125,,w/o query-canonical reliability
+sample_0511,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6878419076416977,,w/o query-canonical reliability
+sample_0521,3,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5847777116946471,,w/o query-canonical reliability
+sample_0525,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.1962381205369825,,w/o query-canonical reliability
+sample_0535,2,medium,uniform,ellipsoid+sphere,1,1,1,0,0,0,0,1.0,1.0,0.7071338341865567,,w/o query-canonical reliability
+sample_0536,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5166189678289216,,w/o query-canonical reliability
+sample_0541,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6849352419904567,,w/o query-canonical reliability
+sample_0566,3,medium,uniform,irregular+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.3796583511730526,,w/o query-canonical reliability
+sample_0585,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5735621650486564,,w/o query-canonical reliability
+sample_0603,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6723633273534133,,w/o query-canonical reliability
+sample_0610,2,medium,uniform,sphere,2,1,1,1,0,1,0,0.5,1.0,0.3914529914529914,,w/o query-canonical reliability
+sample_0626,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.2891451595783422,,w/o query-canonical reliability
+sample_0633,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5279344306529952,,w/o query-canonical reliability
+sample_0646,3,deep,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4590230640568373,,w/o query-canonical reliability
+sample_0647,3,deep,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.7110934342269977,,w/o query-canonical reliability
+sample_0652,3,medium,uniform,ellipsoid+irregular+sphere,3,3,2,1,1,1,1,0.6666666666666666,0.6666666666666666,0.5568822890024041,,w/o query-canonical reliability
+sample_0661,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5775511712111135,,w/o query-canonical reliability
+sample_0666,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.3144963144963145,,w/o query-canonical reliability
+sample_0674,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4461368393010638,,w/o query-canonical reliability
+sample_0676,3,medium,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.3660426081342802,,w/o query-canonical reliability
+sample_0681,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6113275391615244,,w/o query-canonical reliability
+sample_0712,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.1791756659467242,,w/o query-canonical reliability
+sample_0751,3,shallow,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6487183739114037,,w/o query-canonical reliability
+sample_0761,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7066749072929542,,w/o query-canonical reliability
+sample_0777,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7229405542446508,,w/o query-canonical reliability
+sample_0778,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6288150543957659,,w/o query-canonical reliability
+sample_0791,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.712073732718894,,w/o query-canonical reliability
+sample_0796,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7377245508982035,,w/o query-canonical reliability
+sample_0807,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5508388694966783,,w/o query-canonical reliability
+sample_0817,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5071507150715071,,w/o query-canonical reliability
+sample_0823,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4881802511696626,,w/o query-canonical reliability
+sample_0858,3,deep,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5716170434356097,,w/o query-canonical reliability
+sample_0860,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6022042306608147,,w/o query-canonical reliability
+sample_0867,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5768674741496177,,w/o query-canonical reliability
+sample_0870,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5015407360331587,,w/o query-canonical reliability
+sample_0875,3,shallow,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.6838737296714749,,w/o query-canonical reliability
+sample_0881,3,deep,uniform,ellipsoid+irregular,1,1,1,0,0,0,0,1.0,1.0,0.5993021761087136,,w/o query-canonical reliability
+sample_0895,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.6916302719931307,,w/o query-canonical reliability
+sample_0911,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4205828958489048,,w/o query-canonical reliability
+sample_0913,2,shallow,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.3487852863082137,,w/o query-canonical reliability
+sample_0914,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4512521274009239,,w/o query-canonical reliability
+sample_0920,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5197746354396818,,w/o query-canonical reliability
+sample_0932,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.2478082343802019,,w/o query-canonical reliability
+sample_0942,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6118460025953959,,w/o query-canonical reliability
+sample_0953,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7497534900617572,,w/o query-canonical reliability
+sample_0960,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7661464281182591,,w/o query-canonical reliability
+sample_0974,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4622003034964384,,w/o query-canonical reliability
+sample_0977,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5064235401807455,,w/o query-canonical reliability
+sample_0979,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7120826069464933,,w/o query-canonical reliability
+sample_1000,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4194475263632387,,w/o query-canonical reliability
+sample_1002,2,deep,uniform,irregular,1,2,1,0,1,0,1,1.0,0.5,0.5472346460128723,,w/o query-canonical reliability
+sample_1003,3,medium,uniform,ellipsoid+sphere,3,4,3,0,1,0,0,1.0,0.75,0.6258707703616865,,w/o query-canonical reliability
+sample_1015,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6974451965771523,,w/o query-canonical reliability
+sample_1018,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.668660422074258,,w/o query-canonical reliability
+sample_1028,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4552705998788633,,w/o query-canonical reliability
+sample_1068,3,shallow,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6479023579571462,,w/o query-canonical reliability
+sample_1069,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4891719234663642,,w/o query-canonical reliability
+sample_1072,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2986727935413987,,w/o query-canonical reliability
+sample_1078,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6336142199533128,,w/o query-canonical reliability
+sample_1081,2,shallow,uniform,ellipsoid+sphere,1,1,1,0,0,0,0,1.0,1.0,0.5885815467075038,,w/o query-canonical reliability
+sample_1085,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.7450131174761179,,w/o query-canonical reliability
+sample_1086,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.590478107881701,,w/o query-canonical reliability
+sample_1092,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4515649372304247,,w/o query-canonical reliability
+sample_1093,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7532741767106387,,w/o query-canonical reliability
+sample_1096,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4984197001225886,,w/o query-canonical reliability
+sample_1112,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.4379936575133396,,w/o query-canonical reliability
+sample_1126,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4766944381895969,,w/o query-canonical reliability
+sample_1133,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7334457388105456,,w/o query-canonical reliability
+sample_1135,3,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4033100560902262,,w/o query-canonical reliability
+sample_1139,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3989281137131539,,w/o query-canonical reliability
+sample_1167,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6499631115380513,,w/o query-canonical reliability
+sample_1175,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7113733905579399,,w/o query-canonical reliability
+sample_1185,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4669305942595748,,w/o query-canonical reliability
+sample_1211,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5119198121726567,,w/o query-canonical reliability
+sample_1215,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4808619705102104,,w/o query-canonical reliability
+sample_1230,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4050833094216175,,w/o query-canonical reliability
+sample_1244,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7535692116697703,,w/o query-canonical reliability
+sample_1259,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4841856633905937,,w/o query-canonical reliability
+sample_1262,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6010906612133606,,w/o query-canonical reliability
+sample_1266,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.2558353002884868,,w/o query-canonical reliability
+sample_1276,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6466927453769559,,w/o query-canonical reliability
+sample_1285,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5656400684398818,,w/o query-canonical reliability
+sample_1286,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.56647161482394,,w/o query-canonical reliability
+sample_1288,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4874544284795196,,w/o query-canonical reliability
+sample_1292,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6533154121863799,,w/o query-canonical reliability
+sample_1319,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5528249303268306,,w/o query-canonical reliability
+sample_1327,3,shallow,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6623148927087752,,w/o query-canonical reliability
+sample_1328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6187058687348073,,w/o query-canonical reliability
+sample_1366,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.3568288677365127,,w/o query-canonical reliability
+sample_1372,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3858016570622674,,w/o query-canonical reliability
+sample_1378,3,shallow,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3593659362746109,,w/o query-canonical reliability
+sample_1384,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.379782711384034,,w/o query-canonical reliability
+sample_1389,2,medium,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.3406637345061975,,w/o query-canonical reliability
+sample_1404,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5336123159710455,,w/o query-canonical reliability
+sample_1429,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.5109342418968941,,w/o query-canonical reliability
+sample_1432,2,medium,uniform,sphere,2,1,1,1,0,0,0,0.5,1.0,0.8492307692307692,,w/o query-canonical reliability
+sample_1438,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6424180327868853,,w/o query-canonical reliability
+sample_1455,2,shallow,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.5053366174055829,,w/o query-canonical reliability
+sample_1470,3,medium,uniform,ellipsoid+irregular,2,1,1,1,0,0,0,0.5,1.0,0.7041967091883897,,w/o query-canonical reliability
+sample_1482,3,medium,uniform,irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.7216932727963208,,w/o query-canonical reliability
+sample_1486,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7547335616060555,,w/o query-canonical reliability
+sample_1513,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4698904847154474,,w/o query-canonical reliability
+sample_1516,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6563165954450487,,w/o query-canonical reliability
+sample_1529,2,medium,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.4172169949155514,,w/o query-canonical reliability
+sample_1566,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3762115155535243,,w/o query-canonical reliability
+sample_1572,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5163138407020679,,w/o query-canonical reliability
+sample_1599,3,medium,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4162690509422919,,w/o query-canonical reliability
+sample_1620,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.2318721532364842,,w/o query-canonical reliability
+sample_1634,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4702349869451697,,w/o query-canonical reliability
+sample_1635,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6616046152141177,,w/o query-canonical reliability
+sample_1642,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6062953422435687,,w/o query-canonical reliability
+sample_1643,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6128120013712526,,w/o query-canonical reliability
+sample_1683,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6271241830065359,,w/o query-canonical reliability
+sample_1686,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.5380942122305528,,w/o query-canonical reliability
+sample_1688,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6073591755035396,,w/o query-canonical reliability
+sample_1697,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.380851133996157,,w/o query-canonical reliability
+sample_1717,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4473133917326189,,w/o query-canonical reliability
+sample_1718,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5248398931107481,,w/o query-canonical reliability
+sample_1729,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6214916038979206,,w/o query-canonical reliability
+sample_1731,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4317348396928749,,w/o query-canonical reliability
+sample_1734,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.528457832501892,,w/o query-canonical reliability
+sample_1741,3,deep,uniform,irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5125701153881485,,w/o query-canonical reliability
+sample_1760,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6208309414905355,,w/o query-canonical reliability
+sample_1765,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4804354445797807,,w/o query-canonical reliability
+sample_1787,2,deep,uniform,sphere,2,1,1,1,0,0,0,0.5,1.0,0.7301882407622589,,w/o query-canonical reliability
+sample_1809,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6940275333816375,,w/o query-canonical reliability
+sample_1811,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4527167015794865,,w/o query-canonical reliability
+sample_1812,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7679136690647482,,w/o query-canonical reliability
+sample_1815,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.1804294304949769,,w/o query-canonical reliability
+sample_1826,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.7070367939518954,,w/o query-canonical reliability
+sample_1837,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.640367377799332,,w/o query-canonical reliability
+sample_1839,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7967213114754098,,w/o query-canonical reliability
+sample_1843,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7340851758421131,,w/o query-canonical reliability
+sample_1858,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5454954316358606,,w/o query-canonical reliability
+sample_1863,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4438386634106706,,w/o query-canonical reliability
+sample_1865,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7334725979037895,,w/o query-canonical reliability
+sample_1869,3,deep,uniform,ellipsoid+irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.5163133876402098,,w/o query-canonical reliability
+sample_1881,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3078964305527852,,w/o query-canonical reliability
+sample_1885,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4511979385737937,,w/o query-canonical reliability
+sample_1893,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4906647424912059,,w/o query-canonical reliability
+sample_1894,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.3448008849557522,,w/o query-canonical reliability
+sample_1904,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6783668494820232,,w/o query-canonical reliability
+sample_1927,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.276487967392616,,w/o query-canonical reliability
+sample_1944,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5663275079237382,,w/o query-canonical reliability
+sample_1989,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7009620491482471,,w/o query-canonical reliability
+sample_1993,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5466881901661012,,w/o query-canonical reliability
+sample_2021,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6409933129049661,,w/o query-canonical reliability
+sample_2024,2,deep,uniform,irregular,2,1,1,1,0,1,0,0.5,1.0,0.3404043752071594,,w/o query-canonical reliability
+sample_2044,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4223483036988292,,w/o query-canonical reliability
+sample_2059,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.596411715529706,,w/o query-canonical reliability
+sample_2067,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5615522178407044,,w/o query-canonical reliability
+sample_2069,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.463683928501333,,w/o query-canonical reliability
+sample_2070,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5429021772973366,,w/o query-canonical reliability
+sample_2072,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5685812312261106,,w/o query-canonical reliability
+sample_2077,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4181183741503051,,w/o query-canonical reliability
+sample_2079,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.407083198000756,,w/o query-canonical reliability
+sample_2086,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6542695626301696,,w/o query-canonical reliability
+sample_2087,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3197457768603394,,w/o query-canonical reliability
+sample_2111,2,medium,uniform,ellipsoid+sphere,2,1,1,1,0,0,0,0.5,1.0,0.8441411682892906,,w/o query-canonical reliability
+sample_2119,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6708530317000874,,w/o query-canonical reliability
+sample_2121,2,shallow,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6929157548921971,,w/o query-canonical reliability
+sample_2129,3,medium,uniform,ellipsoid+irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4101351717130262,,w/o query-canonical reliability
+sample_2166,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.415183757703067,,w/o query-canonical reliability
+sample_2167,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.545284080255016,,w/o query-canonical reliability
+sample_2172,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6563290546238171,,w/o query-canonical reliability
+sample_2175,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.2663354411321891,,w/o query-canonical reliability
+sample_2196,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5443078855144733,,w/o query-canonical reliability
+sample_2199,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6874778876805676,,w/o query-canonical reliability
+sample_2202,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4056316477893937,,w/o query-canonical reliability
+sample_2207,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6909939738977371,,w/o query-canonical reliability
+sample_2208,3,medium,uniform,ellipsoid+irregular,3,2,1,2,1,1,0,0.3333333333333333,0.5,0.4086135147631944,,w/o query-canonical reliability
+sample_2209,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6340365682137834,,w/o query-canonical reliability
+sample_2225,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6485947339836606,,w/o query-canonical reliability
+sample_2234,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7516096767951409,,w/o query-canonical reliability
+sample_2259,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.648423805548775,,w/o query-canonical reliability
+sample_2263,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.583063927770833,,w/o query-canonical reliability
+sample_2266,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4264520701143672,,w/o query-canonical reliability
+sample_2270,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3002593494612174,,w/o query-canonical reliability
+sample_2271,3,shallow,uniform,ellipsoid+irregular,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.4116511905980507,,w/o query-canonical reliability
+sample_2281,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.554199548226345,,w/o query-canonical reliability
+sample_2293,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7820184624932123,,w/o query-canonical reliability
+sample_2299,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4723362105561058,,w/o query-canonical reliability
+sample_2306,3,shallow,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3726900669406423,,w/o query-canonical reliability
+sample_2323,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6103364353720788,,w/o query-canonical reliability
+sample_2357,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4618945817456029,,w/o query-canonical reliability
+sample_2361,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5410079339566963,,w/o query-canonical reliability
+sample_2372,3,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3645857916221074,,w/o query-canonical reliability
+sample_2375,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.52310454430282,,w/o query-canonical reliability
+sample_2378,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4117043176464628,,w/o query-canonical reliability
+sample_2385,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.4733428042434991,,w/o query-canonical reliability
+sample_2409,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3987750537646097,,w/o query-canonical reliability
+sample_2413,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3415333701555739,,w/o query-canonical reliability
+sample_2418,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.693799158587891,,w/o query-canonical reliability
+sample_2435,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4914504364462513,,w/o query-canonical reliability
+sample_2440,2,deep,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.5136950518695425,,w/o query-canonical reliability
+sample_2442,3,medium,uniform,ellipsoid+irregular+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.4753974150770087,,w/o query-canonical reliability
+sample_2453,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7848481060132516,,w/o query-canonical reliability
+sample_2472,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6813402641206587,,w/o query-canonical reliability
+sample_2477,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5318632836957613,,w/o query-canonical reliability
+sample_2478,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6812375515256478,,w/o query-canonical reliability
+sample_2483,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6224760455290439,,w/o query-canonical reliability
+sample_2494,3,deep,uniform,irregular+sphere,1,1,1,0,0,0,0,1.0,1.0,0.3013141218064172,,w/o query-canonical reliability
+sample_2505,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5409908955256157,,w/o query-canonical reliability
+sample_2533,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6976714267335649,,w/o query-canonical reliability
+sample_2536,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.3728816372232874,,w/o query-canonical reliability
+sample_2584,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7229677168416958,,w/o query-canonical reliability
+sample_2589,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4033225104858272,,w/o query-canonical reliability
+sample_2600,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5754023233507407,,w/o query-canonical reliability
+sample_2603,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8349201474201474,,w/o query-canonical reliability
+sample_2614,3,medium,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.592953262503544,,w/o query-canonical reliability
+sample_2643,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7385408819609434,,w/o query-canonical reliability
+sample_2650,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3475433634137706,,w/o query-canonical reliability
+sample_2655,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6460557146576412,,w/o query-canonical reliability
+sample_2676,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4585559615454591,,w/o query-canonical reliability
+sample_2682,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.6843911367896874,,w/o query-canonical reliability
+sample_2684,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.7079617811955923,,w/o query-canonical reliability
+sample_2698,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6088128433795542,,w/o query-canonical reliability
+sample_2702,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5145997998136196,,w/o query-canonical reliability
+sample_2711,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5356242830980591,,w/o query-canonical reliability
+sample_2719,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7617037245520217,,w/o query-canonical reliability
+sample_2741,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4722604802445762,,w/o query-canonical reliability
+sample_2745,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7573941184050114,,w/o query-canonical reliability
+sample_2747,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5668652858875631,,w/o query-canonical reliability
+sample_2751,2,medium,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.6606713722720781,,w/o query-canonical reliability
+sample_2759,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.8049540966568508,,w/o query-canonical reliability
+sample_2769,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3335281739097758,,w/o query-canonical reliability
+sample_2771,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8612669245647969,,w/o query-canonical reliability
+sample_2784,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6019091153535897,,w/o query-canonical reliability
+sample_2799,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5890049839844065,,w/o query-canonical reliability
+sample_2804,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6280215489975232,,w/o query-canonical reliability
+sample_2833,3,medium,uniform,irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5824807740929183,,w/o query-canonical reliability
+sample_2844,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6857760757143525,,w/o query-canonical reliability
+sample_2850,3,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6619878733348915,,w/o query-canonical reliability
+sample_2872,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5762493085008298,,w/o query-canonical reliability
+sample_2873,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.2704330466405101,,w/o query-canonical reliability
+sample_2874,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4970647881310706,,w/o query-canonical reliability
+sample_2887,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.67803425357055,,w/o query-canonical reliability
+sample_2909,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.5864555976598501,,w/o query-canonical reliability
+sample_2932,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6414376516721636,,w/o query-canonical reliability
+sample_2934,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4604321907600596,,w/o query-canonical reliability
+sample_2936,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.2749175754501649,,w/o query-canonical reliability
+sample_2945,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.644391771707589,,w/o query-canonical reliability
+sample_2948,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6929504743533206,,w/o query-canonical reliability
+sample_2951,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3966183574879227,,w/o query-canonical reliability
+sample_2956,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5255856017406717,,w/o query-canonical reliability
+sample_2961,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.4935879733894535,,w/o query-canonical reliability
+sample_2977,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4295868502887605,,w/o query-canonical reliability
+sample_2987,3,deep,uniform,ellipsoid+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.2744940714986181,,w/o query-canonical reliability
+sample_2993,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5254463112826584,,w/o query-canonical reliability
+sample_0002,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7898804197510778,,w/o source-relative query cue
+sample_0006,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7011007620660458,,w/o source-relative query cue
+sample_0022,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.3481731254592826,,w/o source-relative query cue
+sample_0032,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6480250293312475,,w/o source-relative query cue
+sample_0038,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6247062328219044,,w/o source-relative query cue
+sample_0079,2,medium,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.280988887931777,,w/o source-relative query cue
+sample_0096,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5438287035949523,,w/o source-relative query cue
+sample_0100,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.2558176898365747,,w/o source-relative query cue
+sample_0108,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7419204990377596,,w/o source-relative query cue
+sample_0113,3,medium,uniform,ellipsoid,3,3,3,0,0,0,0,1.0,1.0,0.4515290074079696,,w/o source-relative query cue
+sample_0122,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5636656936766831,,w/o source-relative query cue
+sample_0128,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.7010611777960066,,w/o source-relative query cue
+sample_0130,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4870682299631076,,w/o source-relative query cue
+sample_0158,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.792140063326504,,w/o source-relative query cue
+sample_0163,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5479422535164743,,w/o source-relative query cue
+sample_0180,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.3424708974840406,,w/o source-relative query cue
+sample_0187,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5357180389570976,,w/o source-relative query cue
+sample_0189,3,shallow,uniform,irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.7376627334901704,,w/o source-relative query cue
+sample_0192,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2599975234518352,,w/o source-relative query cue
+sample_0207,2,medium,uniform,irregular+sphere,2,1,1,1,0,0,0,0.5,1.0,0.6002313232742758,,w/o source-relative query cue
+sample_0234,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.3872840239829841,,w/o source-relative query cue
+sample_0240,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6273741786251499,,w/o source-relative query cue
+sample_0248,3,deep,uniform,irregular,3,3,3,0,0,0,0,1.0,1.0,0.5168316220373671,,w/o source-relative query cue
+sample_0260,3,medium,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4024871514943429,,w/o source-relative query cue
+sample_0276,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7181920680150544,,w/o source-relative query cue
+sample_0280,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.1771663346613546,,w/o source-relative query cue
+sample_0290,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5656947894335089,,w/o source-relative query cue
+sample_0297,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7331907090464548,,w/o source-relative query cue
+sample_0300,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.440896069995234,,w/o source-relative query cue
+sample_0308,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.6744922144783518,,w/o source-relative query cue
+sample_0322,2,deep,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.4634907206683233,,w/o source-relative query cue
+sample_0328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7847978436657682,,w/o source-relative query cue
+sample_0335,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6203559163284421,,w/o source-relative query cue
+sample_0347,2,deep,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.2979494732072051,,w/o source-relative query cue
+sample_0350,3,shallow,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.4607090833716221,,w/o source-relative query cue
+sample_0378,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.550764441845573,,w/o source-relative query cue
+sample_0382,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4458871590752119,,w/o source-relative query cue
+sample_0386,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4667103970217205,,w/o source-relative query cue
+sample_0396,3,deep,uniform,ellipsoid,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6141289799631716,,w/o source-relative query cue
+sample_0397,3,medium,uniform,ellipsoid,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.6551724137931034,,w/o source-relative query cue
+sample_0401,3,deep,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3294521208692227,,w/o source-relative query cue
+sample_0409,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3430380464874236,,w/o source-relative query cue
+sample_0418,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.3328275324068242,,w/o source-relative query cue
+sample_0436,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.2829657479169297,,w/o source-relative query cue
+sample_0438,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5836421135330447,,w/o source-relative query cue
+sample_0447,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7543324552890615,,w/o source-relative query cue
+sample_0449,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5883757475697267,,w/o source-relative query cue
+sample_0456,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4298617832244323,,w/o source-relative query cue
+sample_0458,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7059699472045485,,w/o source-relative query cue
+sample_0469,3,shallow,uniform,ellipsoid+sphere,3,4,3,0,1,0,1,1.0,0.75,0.4629485591523265,,w/o source-relative query cue
+sample_0472,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8372379778051788,,w/o source-relative query cue
+sample_0473,3,medium,uniform,ellipsoid+irregular,3,4,3,0,1,0,0,1.0,0.75,0.5722121223912412,,w/o source-relative query cue
+sample_0511,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5651017176455553,,w/o source-relative query cue
+sample_0521,3,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5026230550642847,,w/o source-relative query cue
+sample_0525,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4375725958343481,,w/o source-relative query cue
+sample_0535,2,medium,uniform,ellipsoid+sphere,1,1,1,0,0,0,0,1.0,1.0,0.6424849926378978,,w/o source-relative query cue
+sample_0536,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5905626586377055,,w/o source-relative query cue
+sample_0541,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.584166288050886,,w/o source-relative query cue
+sample_0566,3,medium,uniform,irregular+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.3762598477179701,,w/o source-relative query cue
+sample_0585,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4372514447275213,,w/o source-relative query cue
+sample_0603,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6918834451695928,,w/o source-relative query cue
+sample_0610,2,medium,uniform,sphere,2,1,1,1,0,1,0,0.5,1.0,0.4555041152263374,,w/o source-relative query cue
+sample_0626,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3648346409828265,,w/o source-relative query cue
+sample_0633,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4001452328798268,,w/o source-relative query cue
+sample_0646,3,deep,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5391868767040972,,w/o source-relative query cue
+sample_0647,3,deep,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6482079594339439,,w/o source-relative query cue
+sample_0652,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5044457039539144,,w/o source-relative query cue
+sample_0661,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5719508628253875,,w/o source-relative query cue
+sample_0666,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.3427485531657597,,w/o source-relative query cue
+sample_0674,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5986809816966397,,w/o source-relative query cue
+sample_0676,3,medium,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.5325,,w/o source-relative query cue
+sample_0681,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6417962794657261,,w/o source-relative query cue
+sample_0712,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.2103488249552113,,w/o source-relative query cue
+sample_0751,3,shallow,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6427478305470167,,w/o source-relative query cue
+sample_0761,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5766300583753834,,w/o source-relative query cue
+sample_0777,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7749538683808126,,w/o source-relative query cue
+sample_0778,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6135774846914743,,w/o source-relative query cue
+sample_0791,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.8215586307356154,,w/o source-relative query cue
+sample_0796,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8689271255060729,,w/o source-relative query cue
+sample_0807,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.524846690632269,,w/o source-relative query cue
+sample_0817,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.4578346402531297,,w/o source-relative query cue
+sample_0823,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4990050988682999,,w/o source-relative query cue
+sample_0858,3,deep,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6156245632084713,,w/o source-relative query cue
+sample_0860,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.432288019240457,,w/o source-relative query cue
+sample_0867,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5540493049594264,,w/o source-relative query cue
+sample_0870,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4746089844205942,,w/o source-relative query cue
+sample_0875,3,shallow,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.5808016513352267,,w/o source-relative query cue
+sample_0881,3,deep,uniform,ellipsoid+irregular,1,1,1,0,0,0,0,1.0,1.0,0.582534509202454,,w/o source-relative query cue
+sample_0895,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.7700992504736018,,w/o source-relative query cue
+sample_0911,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.473823854774374,,w/o source-relative query cue
+sample_0913,2,shallow,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.3251866376266426,,w/o source-relative query cue
+sample_0914,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.3428782560502494,,w/o source-relative query cue
+sample_0920,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5505705106901517,,w/o source-relative query cue
+sample_0932,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.2641040804257835,,w/o source-relative query cue
+sample_0942,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7415835666429818,,w/o source-relative query cue
+sample_0953,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7468989816110816,,w/o source-relative query cue
+sample_0960,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7661943319838057,,w/o source-relative query cue
+sample_0974,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5259821369592943,,w/o source-relative query cue
+sample_0977,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5033405767724083,,w/o source-relative query cue
+sample_0979,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6140054127198917,,w/o source-relative query cue
+sample_1000,3,medium,uniform,irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6163507457073188,,w/o source-relative query cue
+sample_1002,2,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6169573383418299,,w/o source-relative query cue
+sample_1003,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.630544325156755,,w/o source-relative query cue
+sample_1015,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6943056674834467,,w/o source-relative query cue
+sample_1018,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5718282682103232,,w/o source-relative query cue
+sample_1028,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4891252544122603,,w/o source-relative query cue
+sample_1068,3,shallow,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5894789093745352,,w/o source-relative query cue
+sample_1069,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4817969534730086,,w/o source-relative query cue
+sample_1072,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3838102253466734,,w/o source-relative query cue
+sample_1078,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5874795878984713,,w/o source-relative query cue
+sample_1081,2,shallow,uniform,ellipsoid+sphere,1,1,1,0,0,0,0,1.0,1.0,0.5181535517818704,,w/o source-relative query cue
+sample_1085,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.7394380975364222,,w/o source-relative query cue
+sample_1086,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6364923122275428,,w/o source-relative query cue
+sample_1092,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5469518133266523,,w/o source-relative query cue
+sample_1093,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7707332698573797,,w/o source-relative query cue
+sample_1096,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5361752054717748,,w/o source-relative query cue
+sample_1112,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6140102225054553,,w/o source-relative query cue
+sample_1126,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4562222222222222,,w/o source-relative query cue
+sample_1133,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.634393434213901,,w/o source-relative query cue
+sample_1135,3,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4833590325016572,,w/o source-relative query cue
+sample_1139,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3018867924528302,,w/o source-relative query cue
+sample_1167,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7128994054987289,,w/o source-relative query cue
+sample_1175,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6879566641471403,,w/o source-relative query cue
+sample_1185,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4563210873227022,,w/o source-relative query cue
+sample_1211,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5737854251012146,,w/o source-relative query cue
+sample_1215,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4778485746684879,,w/o source-relative query cue
+sample_1230,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4314452628473496,,w/o source-relative query cue
+sample_1244,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6658329708568943,,w/o source-relative query cue
+sample_1259,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4959514572356064,,w/o source-relative query cue
+sample_1262,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5699009900990099,,w/o source-relative query cue
+sample_1266,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.2682265104628062,,w/o source-relative query cue
+sample_1276,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7058246715042165,,w/o source-relative query cue
+sample_1285,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.566104073284794,,w/o source-relative query cue
+sample_1286,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7372574978359387,,w/o source-relative query cue
+sample_1288,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4352038369304556,,w/o source-relative query cue
+sample_1292,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6755652410787252,,w/o source-relative query cue
+sample_1319,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4827052713006962,,w/o source-relative query cue
+sample_1327,3,shallow,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5514927298637072,,w/o source-relative query cue
+sample_1328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4715782242830156,,w/o source-relative query cue
+sample_1366,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.3169429976419184,,w/o source-relative query cue
+sample_1372,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3698157151273979,,w/o source-relative query cue
+sample_1378,3,shallow,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3770799414086169,,w/o source-relative query cue
+sample_1384,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.396224486053639,,w/o source-relative query cue
+sample_1389,2,medium,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.4001367053998633,,w/o source-relative query cue
+sample_1404,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6142336973332481,,w/o source-relative query cue
+sample_1429,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.6906209594228342,,w/o source-relative query cue
+sample_1432,2,medium,uniform,sphere,2,1,1,1,0,0,0,0.5,1.0,0.8212708773277021,,w/o source-relative query cue
+sample_1438,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.410958904109589,,w/o source-relative query cue
+sample_1455,2,shallow,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.5028824239174152,,w/o source-relative query cue
+sample_1470,3,medium,uniform,ellipsoid+irregular,2,1,1,1,0,0,0,0.5,1.0,0.7426632494675667,,w/o source-relative query cue
+sample_1482,3,medium,uniform,irregular+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.6256059496915534,,w/o source-relative query cue
+sample_1486,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7651127399034499,,w/o source-relative query cue
+sample_1513,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4823568492220198,,w/o source-relative query cue
+sample_1516,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6738757817054684,,w/o source-relative query cue
+sample_1529,2,medium,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.3702839037812148,,w/o source-relative query cue
+sample_1566,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3840267976390663,,w/o source-relative query cue
+sample_1572,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6242845117845117,,w/o source-relative query cue
+sample_1599,3,medium,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.360279820941558,,w/o source-relative query cue
+sample_1620,2,medium,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.2765666243034509,,w/o source-relative query cue
+sample_1634,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4277836442567171,,w/o source-relative query cue
+sample_1635,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6952260778018787,,w/o source-relative query cue
+sample_1642,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6101068137553122,,w/o source-relative query cue
+sample_1643,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6143787070182392,,w/o source-relative query cue
+sample_1683,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4874434957307885,,w/o source-relative query cue
+sample_1686,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6606031096029419,,w/o source-relative query cue
+sample_1688,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6203203280507386,,w/o source-relative query cue
+sample_1697,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3796486853766708,,w/o source-relative query cue
+sample_1717,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.429816165636463,,w/o source-relative query cue
+sample_1718,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5111564927417923,,w/o source-relative query cue
+sample_1729,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6432109853895568,,w/o source-relative query cue
+sample_1731,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4716042059715744,,w/o source-relative query cue
+sample_1734,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4831086740138975,,w/o source-relative query cue
+sample_1741,3,deep,uniform,irregular,3,3,3,0,0,0,0,1.0,1.0,0.4080499061718435,,w/o source-relative query cue
+sample_1760,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5685927031595123,,w/o source-relative query cue
+sample_1765,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.59607783520827,,w/o source-relative query cue
+sample_1787,2,deep,uniform,sphere,2,1,1,1,0,0,0,0.5,1.0,0.8480291638186375,,w/o source-relative query cue
+sample_1809,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7387783433595557,,w/o source-relative query cue
+sample_1811,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5162812098792545,,w/o source-relative query cue
+sample_1812,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6559291772057729,,w/o source-relative query cue
+sample_1815,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.1994278854827003,,w/o source-relative query cue
+sample_1826,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.677471968779543,,w/o source-relative query cue
+sample_1837,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6711744110018765,,w/o source-relative query cue
+sample_1839,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.8039028529006257,,w/o source-relative query cue
+sample_1843,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5553701772679875,,w/o source-relative query cue
+sample_1858,3,medium,uniform,ellipsoid+irregular,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.5375126442354807,,w/o source-relative query cue
+sample_1863,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4443208013840156,,w/o source-relative query cue
+sample_1865,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7255470604004245,,w/o source-relative query cue
+sample_1869,3,deep,uniform,ellipsoid+irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.5629723560740553,,w/o source-relative query cue
+sample_1881,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.2576290828473175,,w/o source-relative query cue
+sample_1885,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4804127628923141,,w/o source-relative query cue
+sample_1893,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4232145635599813,,w/o source-relative query cue
+sample_1894,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.315310763011622,,w/o source-relative query cue
+sample_1904,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5613202981318363,,w/o source-relative query cue
+sample_1927,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2922439269624148,,w/o source-relative query cue
+sample_1944,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5584643456244467,,w/o source-relative query cue
+sample_1989,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5901416322900803,,w/o source-relative query cue
+sample_1993,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.457003088026715,,w/o source-relative query cue
+sample_2021,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.53434734585047,,w/o source-relative query cue
+sample_2024,2,deep,uniform,irregular,2,1,1,1,0,1,0,0.5,1.0,0.3311238324796625,,w/o source-relative query cue
+sample_2044,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4327983188943894,,w/o source-relative query cue
+sample_2059,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5504840058639887,,w/o source-relative query cue
+sample_2067,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4904289073403269,,w/o source-relative query cue
+sample_2069,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4325351814823297,,w/o source-relative query cue
+sample_2070,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.582841101452519,,w/o source-relative query cue
+sample_2072,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5610925097884137,,w/o source-relative query cue
+sample_2077,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4758347256581823,,w/o source-relative query cue
+sample_2079,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3442524315403227,,w/o source-relative query cue
+sample_2086,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7321639150943396,,w/o source-relative query cue
+sample_2087,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3956062061751327,,w/o source-relative query cue
+sample_2111,2,medium,uniform,ellipsoid+sphere,2,1,1,1,0,0,0,0.5,1.0,0.7859277809192988,,w/o source-relative query cue
+sample_2119,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7002175160336931,,w/o source-relative query cue
+sample_2121,2,shallow,uniform,ellipsoid,2,3,2,0,1,0,0,1.0,0.6666666666666666,0.6106438224196439,,w/o source-relative query cue
+sample_2129,3,medium,uniform,ellipsoid+irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4639380902850772,,w/o source-relative query cue
+sample_2166,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3516157150350273,,w/o source-relative query cue
+sample_2167,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4607788924875582,,w/o source-relative query cue
+sample_2172,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6943897637795275,,w/o source-relative query cue
+sample_2175,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.3582042364843503,,w/o source-relative query cue
+sample_2196,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.610788654462988,,w/o source-relative query cue
+sample_2199,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.696091122119797,,w/o source-relative query cue
+sample_2202,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4181210958079325,,w/o source-relative query cue
+sample_2207,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7412626383991077,,w/o source-relative query cue
+sample_2208,3,medium,uniform,ellipsoid+irregular,3,2,1,2,1,1,0,0.3333333333333333,0.5,0.3947100020398449,,w/o source-relative query cue
+sample_2209,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5175654508838666,,w/o source-relative query cue
+sample_2225,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6456889482523894,,w/o source-relative query cue
+sample_2234,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7944364045053951,,w/o source-relative query cue
+sample_2259,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6542248682729761,,w/o source-relative query cue
+sample_2263,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5529006517941678,,w/o source-relative query cue
+sample_2266,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3619031216910967,,w/o source-relative query cue
+sample_2270,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2902398899380266,,w/o source-relative query cue
+sample_2271,3,shallow,uniform,ellipsoid+irregular,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.4335163328041802,,w/o source-relative query cue
+sample_2281,2,deep,uniform,ellipsoid+sphere,2,3,2,0,1,0,1,1.0,0.6666666666666666,0.4874012394936656,,w/o source-relative query cue
+sample_2293,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8296189244694607,,w/o source-relative query cue
+sample_2299,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4084455324357405,,w/o source-relative query cue
+sample_2306,3,shallow,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3833036817855892,,w/o source-relative query cue
+sample_2323,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5965512929977536,,w/o source-relative query cue
+sample_2357,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5129568024646849,,w/o source-relative query cue
+sample_2361,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6641951820652243,,w/o source-relative query cue
+sample_2372,3,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3513677144553668,,w/o source-relative query cue
+sample_2375,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5078609331935596,,w/o source-relative query cue
+sample_2378,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5558529721804498,,w/o source-relative query cue
+sample_2385,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.4388202714576192,,w/o source-relative query cue
+sample_2409,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3663393008301115,,w/o source-relative query cue
+sample_2413,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4006485962050043,,w/o source-relative query cue
+sample_2418,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6328593455542231,,w/o source-relative query cue
+sample_2435,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4358892777601018,,w/o source-relative query cue
+sample_2440,2,deep,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.5803578404562857,,w/o source-relative query cue
+sample_2442,3,medium,uniform,ellipsoid+irregular+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.458522999487898,,w/o source-relative query cue
+sample_2453,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6850669670797347,,w/o source-relative query cue
+sample_2472,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.645950349880265,,w/o source-relative query cue
+sample_2477,2,medium,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.4704112337011033,,w/o source-relative query cue
+sample_2478,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5921569225397263,,w/o source-relative query cue
+sample_2483,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5917716587552243,,w/o source-relative query cue
+sample_2494,3,deep,uniform,irregular+sphere,1,1,1,0,0,0,0,1.0,1.0,0.34962689121654,,w/o source-relative query cue
+sample_2505,3,medium,uniform,ellipsoid+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.3266846007479824,,w/o source-relative query cue
+sample_2533,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7074709742554266,,w/o source-relative query cue
+sample_2536,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4220392488664211,,w/o source-relative query cue
+sample_2584,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7174938667673146,,w/o source-relative query cue
+sample_2589,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6327733610506815,,w/o source-relative query cue
+sample_2600,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6368576491435322,,w/o source-relative query cue
+sample_2603,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7833220441032588,,w/o source-relative query cue
+sample_2614,3,medium,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.5802143575050182,,w/o source-relative query cue
+sample_2643,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7816484395838891,,w/o source-relative query cue
+sample_2650,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3697364961220526,,w/o source-relative query cue
+sample_2655,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4712041884816754,,w/o source-relative query cue
+sample_2676,3,shallow,uniform,ellipsoid+sphere,3,4,2,1,2,0,0,0.6666666666666666,0.5,0.5423915453327304,,w/o source-relative query cue
+sample_2682,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.7244683020698476,,w/o source-relative query cue
+sample_2684,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.7104114823345262,,w/o source-relative query cue
+sample_2698,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.7674031602962896,,w/o source-relative query cue
+sample_2702,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4129991735624755,,w/o source-relative query cue
+sample_2711,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5451381175933312,,w/o source-relative query cue
+sample_2719,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6746658328773548,,w/o source-relative query cue
+sample_2741,3,medium,uniform,ellipsoid+sphere,3,6,3,0,3,0,0,1.0,0.5,0.4300837668788351,,w/o source-relative query cue
+sample_2745,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5639105450985645,,w/o source-relative query cue
+sample_2747,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.589613679581444,,w/o source-relative query cue
+sample_2751,2,medium,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.6126236439770563,,w/o source-relative query cue
+sample_2759,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7428870919436957,,w/o source-relative query cue
+sample_2769,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.415718998260516,,w/o source-relative query cue
+sample_2771,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8770272848692997,,w/o source-relative query cue
+sample_2784,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5041322314049587,,w/o source-relative query cue
+sample_2799,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.6914386643685642,,w/o source-relative query cue
+sample_2804,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5521611242500926,,w/o source-relative query cue
+sample_2833,3,medium,uniform,irregular+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.6362705364372948,,w/o source-relative query cue
+sample_2844,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6760063885680867,,w/o source-relative query cue
+sample_2850,3,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6602254079425414,,w/o source-relative query cue
+sample_2872,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5366838487972508,,w/o source-relative query cue
+sample_2873,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.3839110962566845,,w/o source-relative query cue
+sample_2874,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5464147400539843,,w/o source-relative query cue
+sample_2887,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.698286737840323,,w/o source-relative query cue
+sample_2909,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.5498818673777499,,w/o source-relative query cue
+sample_2932,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5572836026942953,,w/o source-relative query cue
+sample_2934,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4600312895775907,,w/o source-relative query cue
+sample_2936,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.2491667624410987,,w/o source-relative query cue
+sample_2945,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6140648870564176,,w/o source-relative query cue
+sample_2948,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7348567670553587,,w/o source-relative query cue
+sample_2951,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3562630117973629,,w/o source-relative query cue
+sample_2956,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4575825338699848,,w/o source-relative query cue
+sample_2961,2,medium,uniform,irregular,2,1,1,1,0,1,0,0.5,1.0,0.2493504083147735,,w/o source-relative query cue
+sample_2977,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5754470354491269,,w/o source-relative query cue
+sample_2987,3,deep,uniform,ellipsoid+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.1871091871091871,,w/o source-relative query cue
+sample_2993,3,deep,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.593272115686816,,w/o source-relative query cue
+sample_0002,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8811155530173235,,w/o distance-field regularization
+sample_0006,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7592592592592593,,w/o distance-field regularization
+sample_0022,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.3776768097978206,,w/o distance-field regularization
+sample_0032,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6441781713988017,,w/o distance-field regularization
+sample_0038,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6039027258123486,,w/o distance-field regularization
+sample_0079,2,medium,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.3805777430784938,,w/o distance-field regularization
+sample_0096,2,medium,uniform,ellipsoid+sphere,2,3,2,0,1,0,0,1.0,0.6666666666666666,0.5973617355190499,,w/o distance-field regularization
+sample_0100,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.224521691178943,,w/o distance-field regularization
+sample_0108,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.654555776326994,,w/o distance-field regularization
+sample_0113,3,medium,uniform,ellipsoid,3,3,3,0,0,0,0,1.0,1.0,0.4588376618139704,,w/o distance-field regularization
+sample_0122,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5734296003381184,,w/o distance-field regularization
+sample_0128,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6833408581667721,,w/o distance-field regularization
+sample_0130,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.549034238089875,,w/o distance-field regularization
+sample_0158,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.8042358328563252,,w/o distance-field regularization
+sample_0163,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5986532363939739,,w/o distance-field regularization
+sample_0180,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.3765094436990401,,w/o distance-field regularization
+sample_0187,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4971621582834091,,w/o distance-field regularization
+sample_0189,3,shallow,uniform,irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6392254552018335,,w/o distance-field regularization
+sample_0192,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3039734055345851,,w/o distance-field regularization
+sample_0207,2,medium,uniform,irregular+sphere,2,1,1,1,0,0,0,0.5,1.0,0.6027717391304348,,w/o distance-field regularization
+sample_0234,3,deep,uniform,ellipsoid+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.5043235353450952,,w/o distance-field regularization
+sample_0240,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7574996572104769,,w/o distance-field regularization
+sample_0248,3,deep,uniform,irregular,3,3,3,0,0,0,0,1.0,1.0,0.5602561040196542,,w/o distance-field regularization
+sample_0260,3,medium,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.3363198659750573,,w/o distance-field regularization
+sample_0276,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5390768242353194,,w/o distance-field regularization
+sample_0280,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.1644136337377238,,w/o distance-field regularization
+sample_0290,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.3425461454036494,,w/o distance-field regularization
+sample_0297,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.586688,,w/o distance-field regularization
+sample_0300,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5375607968324617,,w/o distance-field regularization
+sample_0308,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.6984467184633394,,w/o distance-field regularization
+sample_0322,2,deep,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.5083249985291522,,w/o distance-field regularization
+sample_0328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7658808120497708,,w/o distance-field regularization
+sample_0335,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6645476772616137,,w/o distance-field regularization
+sample_0347,2,deep,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.1968356127648163,,w/o distance-field regularization
+sample_0350,3,shallow,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.437125693110844,,w/o distance-field regularization
+sample_0378,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6040177491427016,,w/o distance-field regularization
+sample_0382,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.441773631646187,,w/o distance-field regularization
+sample_0386,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4445658208970549,,w/o distance-field regularization
+sample_0396,3,deep,uniform,ellipsoid,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6194872212810683,,w/o distance-field regularization
+sample_0397,3,medium,uniform,ellipsoid,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.6396966745512731,,w/o distance-field regularization
+sample_0401,3,deep,uniform,irregular+sphere,3,4,3,0,1,0,0,1.0,0.75,0.4310445293639569,,w/o distance-field regularization
+sample_0409,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3307005979747173,,w/o distance-field regularization
+sample_0418,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.3329250151525748,,w/o distance-field regularization
+sample_0436,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.2827070450089722,,w/o distance-field regularization
+sample_0438,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6232237457095263,,w/o distance-field regularization
+sample_0447,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.800585500258309,,w/o distance-field regularization
+sample_0449,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5959342601719203,,w/o distance-field regularization
+sample_0456,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4383682146994778,,w/o distance-field regularization
+sample_0458,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7224145092067008,,w/o distance-field regularization
+sample_0469,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.468647550496137,,w/o distance-field regularization
+sample_0472,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7951000690131125,,w/o distance-field regularization
+sample_0473,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5313396102480459,,w/o distance-field regularization
+sample_0511,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7405995297363062,,w/o distance-field regularization
+sample_0521,3,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5424803014731072,,w/o distance-field regularization
+sample_0525,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.407661089887235,,w/o distance-field regularization
+sample_0535,2,medium,uniform,ellipsoid+sphere,1,1,1,0,0,0,0,1.0,1.0,0.60592974540767,,w/o distance-field regularization
+sample_0536,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.5621985825935074,,w/o distance-field regularization
+sample_0541,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5996945129831982,,w/o distance-field regularization
+sample_0566,3,medium,uniform,irregular+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.3197519929140832,,w/o distance-field regularization
+sample_0585,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5413816718125579,,w/o distance-field regularization
+sample_0603,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6991752972765631,,w/o distance-field regularization
+sample_0610,2,medium,uniform,sphere,2,1,1,1,0,1,0,0.5,1.0,0.4278471711976488,,w/o distance-field regularization
+sample_0626,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3063761003673301,,w/o distance-field regularization
+sample_0633,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3836696229033152,,w/o distance-field regularization
+sample_0646,3,deep,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4928094508223337,,w/o distance-field regularization
+sample_0647,3,deep,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6746644352657458,,w/o distance-field regularization
+sample_0652,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5685865764855353,,w/o distance-field regularization
+sample_0661,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6009558881140797,,w/o distance-field regularization
+sample_0666,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.3333053338933221,,w/o distance-field regularization
+sample_0674,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4988557219459985,,w/o distance-field regularization
+sample_0676,3,medium,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.4729439809296782,,w/o distance-field regularization
+sample_0681,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6608254813063696,,w/o distance-field regularization
+sample_0712,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.2418227525839571,,w/o distance-field regularization
+sample_0751,3,shallow,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6942865882583291,,w/o distance-field regularization
+sample_0761,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6210149642160052,,w/o distance-field regularization
+sample_0777,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7722945796014048,,w/o distance-field regularization
+sample_0778,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6513552068473609,,w/o distance-field regularization
+sample_0791,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.8482483524106833,,w/o distance-field regularization
+sample_0796,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7486652429257875,,w/o distance-field regularization
+sample_0807,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5996910646387833,,w/o distance-field regularization
+sample_0817,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.4740740740740741,,w/o distance-field regularization
+sample_0823,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5392349190779794,,w/o distance-field regularization
+sample_0858,3,deep,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5310363419748849,,w/o distance-field regularization
+sample_0860,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4748716611497461,,w/o distance-field regularization
+sample_0867,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.4990400889222415,,w/o distance-field regularization
+sample_0870,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4497144127397763,,w/o distance-field regularization
+sample_0875,3,shallow,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.6279682581991751,,w/o distance-field regularization
+sample_0881,3,deep,uniform,ellipsoid+irregular,1,1,1,0,0,0,0,1.0,1.0,0.6123128119800333,,w/o distance-field regularization
+sample_0895,2,deep,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.562214907340455,,w/o distance-field regularization
+sample_0911,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5085418961014921,,w/o distance-field regularization
+sample_0913,2,shallow,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.4524288488370251,,w/o distance-field regularization
+sample_0914,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4073748902546093,,w/o distance-field regularization
+sample_0920,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5656103144957224,,w/o distance-field regularization
+sample_0932,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.2825866869147051,,w/o distance-field regularization
+sample_0942,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6947226839507028,,w/o distance-field regularization
+sample_0953,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7312019501218826,,w/o distance-field regularization
+sample_0960,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8170449911648769,,w/o distance-field regularization
+sample_0974,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4963017636287992,,w/o distance-field regularization
+sample_0977,3,shallow,uniform,ellipsoid+sphere,3,4,3,0,1,0,1,1.0,0.75,0.4676314632003889,,w/o distance-field regularization
+sample_0979,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.6141625056740808,,w/o distance-field regularization
+sample_1000,3,medium,uniform,irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6210641669858867,,w/o distance-field regularization
+sample_1002,2,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5643328644086137,,w/o distance-field regularization
+sample_1003,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5733120115949573,,w/o distance-field regularization
+sample_1015,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.7011939139479546,,w/o distance-field regularization
+sample_1018,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6338264963012777,,w/o distance-field regularization
+sample_1028,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4554441902566489,,w/o distance-field regularization
+sample_1068,3,shallow,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6230800365163931,,w/o distance-field regularization
+sample_1069,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3891315739052894,,w/o distance-field regularization
+sample_1072,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3352487098114068,,w/o distance-field regularization
+sample_1078,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6019027972685801,,w/o distance-field regularization
+sample_1081,2,shallow,uniform,ellipsoid+sphere,1,1,1,0,0,0,0,1.0,1.0,0.6253872875786312,,w/o distance-field regularization
+sample_1085,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.7646030834825182,,w/o distance-field regularization
+sample_1086,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5326391058000074,,w/o distance-field regularization
+sample_1092,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.510703858298143,,w/o distance-field regularization
+sample_1093,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.8015073840531084,,w/o distance-field regularization
+sample_1096,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5901024499549968,,w/o distance-field regularization
+sample_1112,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.6544834686816099,,w/o distance-field regularization
+sample_1126,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4971771347918137,,w/o distance-field regularization
+sample_1133,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7888929088277858,,w/o distance-field regularization
+sample_1135,3,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4453009461237242,,w/o distance-field regularization
+sample_1139,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3966337782936738,,w/o distance-field regularization
+sample_1167,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6779783297028592,,w/o distance-field regularization
+sample_1175,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7190155288602402,,w/o distance-field regularization
+sample_1185,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3882518489044401,,w/o distance-field regularization
+sample_1211,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6437005617333487,,w/o distance-field regularization
+sample_1215,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5102998186747629,,w/o distance-field regularization
+sample_1230,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3546189014781488,,w/o distance-field regularization
+sample_1244,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.7361614696640078,,w/o distance-field regularization
+sample_1259,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4303954014372809,,w/o distance-field regularization
+sample_1262,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5888284463314316,,w/o distance-field regularization
+sample_1266,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3231844057271002,,w/o distance-field regularization
+sample_1276,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7102803738317757,,w/o distance-field regularization
+sample_1285,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.503569676463536,,w/o distance-field regularization
+sample_1286,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.6142725315287604,,w/o distance-field regularization
+sample_1288,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4799659900095653,,w/o distance-field regularization
+sample_1292,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7272727272727273,,w/o distance-field regularization
+sample_1319,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4887546156428332,,w/o distance-field regularization
+sample_1327,3,shallow,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4665783989676651,,w/o distance-field regularization
+sample_1328,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5455622470135255,,w/o distance-field regularization
+sample_1366,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.3108212563540235,,w/o distance-field regularization
+sample_1372,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4176083295439454,,w/o distance-field regularization
+sample_1378,3,shallow,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4572061921177277,,w/o distance-field regularization
+sample_1384,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4197048318959754,,w/o distance-field regularization
+sample_1389,2,medium,uniform,ellipsoid+irregular,2,1,1,1,0,1,0,0.5,1.0,0.3987459153934469,,w/o distance-field regularization
+sample_1404,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5103667428428541,,w/o distance-field regularization
+sample_1429,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.5641737090904695,,w/o distance-field regularization
+sample_1432,2,medium,uniform,sphere,2,2,1,1,1,0,0,0.5,0.5,0.7854644383987563,,w/o distance-field regularization
+sample_1438,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.5822235986373491,,w/o distance-field regularization
+sample_1455,2,shallow,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.449291742013261,,w/o distance-field regularization
+sample_1470,3,medium,uniform,ellipsoid+irregular,2,1,1,1,0,0,0,0.5,1.0,0.7143861018934218,,w/o distance-field regularization
+sample_1482,3,medium,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5149453516311873,,w/o distance-field regularization
+sample_1486,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7661643272098315,,w/o distance-field regularization
+sample_1513,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4781571817173432,,w/o distance-field regularization
+sample_1516,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5233825187260618,,w/o distance-field regularization
+sample_1529,2,medium,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.4054141302342741,,w/o distance-field regularization
+sample_1566,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3958032149041168,,w/o distance-field regularization
+sample_1572,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.641948778811108,,w/o distance-field regularization
+sample_1599,3,medium,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3690797709734243,,w/o distance-field regularization
+sample_1620,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.2975835226531179,,w/o distance-field regularization
+sample_1634,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4060133630289532,,w/o distance-field regularization
+sample_1635,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5709577660330338,,w/o distance-field regularization
+sample_1642,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5885739805721057,,w/o distance-field regularization
+sample_1643,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5991030695893479,,w/o distance-field regularization
+sample_1683,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4569746909947028,,w/o distance-field regularization
+sample_1686,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.62648422886461,,w/o distance-field regularization
+sample_1688,3,deep,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6521206915397596,,w/o distance-field regularization
+sample_1697,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4681932853318769,,w/o distance-field regularization
+sample_1717,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.634555989479063,,w/o distance-field regularization
+sample_1718,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5379920120025699,,w/o distance-field regularization
+sample_1729,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6255727978046972,,w/o distance-field regularization
+sample_1731,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4410499513689007,,w/o distance-field regularization
+sample_1734,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.442891392091711,,w/o distance-field regularization
+sample_1741,3,deep,uniform,irregular,3,3,3,0,0,0,0,1.0,1.0,0.4744336886470044,,w/o distance-field regularization
+sample_1760,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5959897576173357,,w/o distance-field regularization
+sample_1765,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5632690262798117,,w/o distance-field regularization
+sample_1787,2,deep,uniform,sphere,2,1,1,1,0,0,0,0.5,1.0,0.8965367022435199,,w/o distance-field regularization
+sample_1809,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.71529284164859,,w/o distance-field regularization
+sample_1811,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.4784469873069057,,w/o distance-field regularization
+sample_1812,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.7203944891967176,,w/o distance-field regularization
+sample_1815,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2250038537369732,,w/o distance-field regularization
+sample_1826,2,shallow,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.7311453239734117,,w/o distance-field regularization
+sample_1837,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6167686090070754,,w/o distance-field regularization
+sample_1839,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7909993232573878,,w/o distance-field regularization
+sample_1843,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6573972435662886,,w/o distance-field regularization
+sample_1858,3,medium,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5218855613611089,,w/o distance-field regularization
+sample_1863,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3652103659610439,,w/o distance-field regularization
+sample_1865,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7198912156717958,,w/o distance-field regularization
+sample_1869,3,deep,uniform,ellipsoid+irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.5893874814424597,,w/o distance-field regularization
+sample_1881,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3008341372269371,,w/o distance-field regularization
+sample_1885,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5358654358482523,,w/o distance-field regularization
+sample_1893,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4837275475724702,,w/o distance-field regularization
+sample_1894,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.3242569112450634,,w/o distance-field regularization
+sample_1904,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5485446773865256,,w/o distance-field regularization
+sample_1927,3,medium,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2845801384351913,,w/o distance-field regularization
+sample_1944,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5677168666620668,,w/o distance-field regularization
+sample_1989,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6895109734590987,,w/o distance-field regularization
+sample_1993,3,deep,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4589303810485853,,w/o distance-field regularization
+sample_2021,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5705591920516354,,w/o distance-field regularization
+sample_2024,2,deep,uniform,irregular,2,1,1,1,0,1,0,0.5,1.0,0.3507954986418315,,w/o distance-field regularization
+sample_2044,2,medium,uniform,ellipsoid+sphere,2,3,2,0,1,0,0,1.0,0.6666666666666666,0.3340592215954078,,w/o distance-field regularization
+sample_2059,3,shallow,uniform,ellipsoid+irregular,3,4,3,0,1,0,0,1.0,0.75,0.4235710757703968,,w/o distance-field regularization
+sample_2067,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.5742639331386469,,w/o distance-field regularization
+sample_2069,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5669740527697528,,w/o distance-field regularization
+sample_2070,2,deep,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6462174567737757,,w/o distance-field regularization
+sample_2072,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.625158251762679,,w/o distance-field regularization
+sample_2077,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5491053563467986,,w/o distance-field regularization
+sample_2079,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.3836174322000935,,w/o distance-field regularization
+sample_2086,1,medium,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5648866348448688,,w/o distance-field regularization
+sample_2087,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.3100163395335946,,w/o distance-field regularization
+sample_2111,2,medium,uniform,ellipsoid+sphere,2,1,1,1,0,0,0,0.5,1.0,0.7436811406351264,,w/o distance-field regularization
+sample_2119,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6327097777335372,,w/o distance-field regularization
+sample_2121,2,shallow,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6218609393964583,,w/o distance-field regularization
+sample_2129,3,medium,uniform,ellipsoid+irregular+sphere,2,3,2,0,1,0,0,1.0,0.6666666666666666,0.4571145023696682,,w/o distance-field regularization
+sample_2166,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4437565129520613,,w/o distance-field regularization
+sample_2167,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.4367438386855862,,w/o distance-field regularization
+sample_2172,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6798995460253067,,w/o distance-field regularization
+sample_2175,2,shallow,uniform,irregular+sphere,2,1,1,1,0,1,0,0.5,1.0,0.3380160857908847,,w/o distance-field regularization
+sample_2196,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5726774258921871,,w/o distance-field regularization
+sample_2199,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6867792638525604,,w/o distance-field regularization
+sample_2202,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5165524807570883,,w/o distance-field regularization
+sample_2207,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6305231309418418,,w/o distance-field regularization
+sample_2208,3,medium,uniform,ellipsoid+irregular,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.5653023750071386,,w/o distance-field regularization
+sample_2209,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5942680889345843,,w/o distance-field regularization
+sample_2225,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.6172285044468525,,w/o distance-field regularization
+sample_2234,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7436855628352145,,w/o distance-field regularization
+sample_2259,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.706259645263175,,w/o distance-field regularization
+sample_2263,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5913195956180133,,w/o distance-field regularization
+sample_2266,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4086028781659592,,w/o distance-field regularization
+sample_2270,3,deep,uniform,irregular+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.2507950426179373,,w/o distance-field regularization
+sample_2271,3,shallow,uniform,ellipsoid+irregular,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.5053825816243686,,w/o distance-field regularization
+sample_2281,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5886279164230689,,w/o distance-field regularization
+sample_2293,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8151494093120223,,w/o distance-field regularization
+sample_2299,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4675214879526561,,w/o distance-field regularization
+sample_2306,3,shallow,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.487361130722852,,w/o distance-field regularization
+sample_2323,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.6440436889450636,,w/o distance-field regularization
+sample_2357,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.57196558224932,,w/o distance-field regularization
+sample_2361,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6417818672353657,,w/o distance-field regularization
+sample_2372,3,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4453049393758186,,w/o distance-field regularization
+sample_2375,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6011651694130502,,w/o distance-field regularization
+sample_2378,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.4204230260662778,,w/o distance-field regularization
+sample_2385,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.4080117797896299,,w/o distance-field regularization
+sample_2409,2,shallow,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4033125592904739,,w/o distance-field regularization
+sample_2413,3,shallow,uniform,ellipsoid+irregular,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.3238198591907048,,w/o distance-field regularization
+sample_2418,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.5598586364305699,,w/o distance-field regularization
+sample_2435,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4622673434856176,,w/o distance-field regularization
+sample_2440,2,deep,uniform,ellipsoid,2,1,1,1,0,1,0,0.5,1.0,0.520299566417028,,w/o distance-field regularization
+sample_2442,3,medium,uniform,ellipsoid+irregular+sphere,3,3,2,1,1,0,0,0.6666666666666666,0.6666666666666666,0.5025113728459183,,w/o distance-field regularization
+sample_2453,1,medium,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.84617280907186,,w/o distance-field regularization
+sample_2472,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7180218259583475,,w/o distance-field regularization
+sample_2477,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.5519452652343484,,w/o distance-field regularization
+sample_2478,3,medium,uniform,ellipsoid+irregular+sphere,3,2,2,1,0,0,0,0.6666666666666666,1.0,0.5960436599535386,,w/o distance-field regularization
+sample_2483,3,medium,uniform,ellipsoid+irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.609248009003181,,w/o distance-field regularization
+sample_2494,3,deep,uniform,irregular+sphere,1,1,1,0,0,0,0,1.0,1.0,0.2999033015609891,,w/o distance-field regularization
+sample_2505,3,medium,uniform,ellipsoid+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.3218472891745522,,w/o distance-field regularization
+sample_2533,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7420010845986985,,w/o distance-field regularization
+sample_2536,3,shallow,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.4784292348586803,,w/o distance-field regularization
+sample_2584,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7530998477267783,,w/o distance-field regularization
+sample_2589,3,shallow,uniform,ellipsoid+sphere,3,4,3,0,1,0,0,1.0,0.75,0.5434380915544584,,w/o distance-field regularization
+sample_2600,1,shallow,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.718504470333243,,w/o distance-field regularization
+sample_2603,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8448156946892482,,w/o distance-field regularization
+sample_2614,3,medium,uniform,sphere,3,3,3,0,0,0,0,1.0,1.0,0.451156953590181,,w/o distance-field regularization
+sample_2643,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8490576780732221,,w/o distance-field regularization
+sample_2650,3,medium,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.3127091072318755,,w/o distance-field regularization
+sample_2655,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.5344078040504718,,w/o distance-field regularization
+sample_2676,3,shallow,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4703777064696338,,w/o distance-field regularization
+sample_2682,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.675155647386616,,w/o distance-field regularization
+sample_2684,3,medium,uniform,ellipsoid+irregular,3,3,3,0,0,0,0,1.0,1.0,0.74464531781229,,w/o distance-field regularization
+sample_2698,2,deep,uniform,ellipsoid,2,2,2,0,0,0,0,1.0,1.0,0.6225988941591504,,w/o distance-field regularization
+sample_2702,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4466773565703765,,w/o distance-field regularization
+sample_2711,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5012507568098022,,w/o distance-field regularization
+sample_2719,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.6232034375463031,,w/o distance-field regularization
+sample_2741,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5322773452778907,,w/o distance-field regularization
+sample_2745,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6602431000565085,,w/o distance-field regularization
+sample_2747,2,shallow,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.5878427575997915,,w/o distance-field regularization
+sample_2751,2,medium,uniform,sphere,2,2,2,0,0,0,0,1.0,1.0,0.6216152763549703,,w/o distance-field regularization
+sample_2759,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.7618537148511586,,w/o distance-field regularization
+sample_2769,3,shallow,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.5107755812358549,,w/o distance-field regularization
+sample_2771,1,shallow,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.8822985147309471,,w/o distance-field regularization
+sample_2784,1,deep,uniform,sphere,1,1,1,0,0,0,0,1.0,1.0,0.4938166311300639,,w/o distance-field regularization
+sample_2799,3,medium,uniform,ellipsoid+sphere,3,2,2,1,0,1,0,0.6666666666666666,1.0,0.7072495059544086,,w/o distance-field regularization
+sample_2804,2,medium,uniform,irregular+sphere,2,2,2,0,0,0,0,1.0,1.0,0.4589044939267008,,w/o distance-field regularization
+sample_2833,3,medium,uniform,irregular+sphere,3,3,2,1,1,1,0,0.6666666666666666,0.6666666666666666,0.5536077832930787,,w/o distance-field regularization
+sample_2844,2,medium,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6858096170578378,,w/o distance-field regularization
+sample_2850,3,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.6648161229572195,,w/o distance-field regularization
+sample_2872,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.640165091777995,,w/o distance-field regularization
+sample_2873,2,shallow,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.2572397298178317,,w/o distance-field regularization
+sample_2874,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.4395469561113733,,w/o distance-field regularization
+sample_2887,2,shallow,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.7130900589713184,,w/o distance-field regularization
+sample_2909,2,deep,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.4820449604725731,,w/o distance-field regularization
+sample_2932,2,medium,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.6604312180071923,,w/o distance-field regularization
+sample_2934,1,deep,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.2633383010432191,,w/o distance-field regularization
+sample_2936,1,deep,uniform,ellipsoid,1,1,1,0,0,0,0,1.0,1.0,0.281302711820423,,w/o distance-field regularization
+sample_2945,3,deep,uniform,ellipsoid+sphere,3,3,3,0,0,0,0,1.0,1.0,0.4445454025802016,,w/o distance-field regularization
+sample_2948,2,deep,uniform,ellipsoid+sphere,2,2,2,0,0,0,0,1.0,1.0,0.7668828546853215,,w/o distance-field regularization
+sample_2951,1,shallow,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.3763401447814533,,w/o distance-field regularization
+sample_2956,2,deep,uniform,ellipsoid+irregular,2,2,2,0,0,0,0,1.0,1.0,0.4931011631584435,,w/o distance-field regularization
+sample_2961,2,medium,uniform,irregular,2,2,2,0,0,0,0,1.0,1.0,0.4074677293860955,,w/o distance-field regularization
+sample_2977,1,medium,uniform,irregular,1,1,1,0,0,0,0,1.0,1.0,0.472875816993464,,w/o distance-field regularization
+sample_2987,3,deep,uniform,ellipsoid+sphere,3,1,1,2,0,1,0,0.3333333333333333,1.0,0.2560724578015644,,w/o distance-field regularization
+sample_2993,3,deep,uniform,irregular+sphere,3,3,3,0,0,0,0,1.0,1.0,0.5682710681162347,,w/o distance-field regularization
