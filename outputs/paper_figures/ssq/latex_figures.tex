@@ -1,8 +1,8 @@
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/component_analysis/fig_component_error_by_foci.pdf}
-\caption{Component-level error decomposition grouped by source count. SSQ-FMT improves multi-source recovery while preserving the shared voxel threshold and component matching protocol.}
-\label{fig:fig_component_error_by_foci}
+\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/component_analysis/fig_component_recovery_by_source_count.pdf}
+\caption{Component recovery by source count. SSQ-FMT maintains higher component recall and fewer merged components per sample as source multiplicity increases.}
+\label{fig:fig_component_recovery_by_source_count}
 \end{figure}
 
 \begin{figure}[t]
@@ -15,15 +15,8 @@
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{outputs/paper_figures/ssq/paired_improvement/fig_paired_improvement.pdf}
-\caption{Per-sample paired improvement of SSQ-FMT over ablations using identical sample IDs.}
+\caption{Forest plots of paired SSQ-FMT improvements over ablations using identical sample IDs. Points show median paired differences or merge-reduction probabilities with 95% paired bootstrap confidence intervals.}
 \label{fig:fig_paired_improvement}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/paired_improvement/fig_accuracy_separation_scatter.pdf}
-\caption{Accuracy-separation trade-off for paired changes. The favorable region has positive Delta Dice and negative Delta merge count.}
-\label{fig:fig_accuracy_separation_scatter}
 \end{figure}
 
 \begin{figure}[t]
@@ -35,49 +28,14 @@
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_adjacent.pdf}
-\caption{SSQ-FMT simulation result generated from fixed test-set predictions.}
-\label{fig:fig_qualitative_adjacent}
+\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_comparison.pdf}
+\caption{Qualitative simulation cases selected by quantitative criteria. Each row uses GT-derived shared slice indices across all methods.}
+\label{fig:fig_qualitative_comparison}
 \end{figure}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_weak_source.pdf}
-\caption{SSQ-FMT simulation result generated from fixed test-set predictions.}
-\label{fig:fig_qualitative_weak_source}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_three_source.pdf}
-\caption{SSQ-FMT simulation result generated from fixed test-set predictions.}
-\label{fig:fig_qualitative_three_source}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_failure.pdf}
-\caption{SSQ-FMT simulation result generated from fixed test-set predictions.}
-\label{fig:fig_qualitative_failure}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/source_hypotheses/fig_source_hypotheses_sample_0022.pdf}
-\caption{SSQ-FMT simulation result generated from fixed test-set predictions.}
-\label{fig:fig_source_hypotheses_sample_0022}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/source_hypotheses/fig_source_hypotheses_sample_0038.pdf}
-\caption{SSQ-FMT simulation result generated from fixed test-set predictions.}
-\label{fig:fig_source_hypotheses_sample_0038}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/source_hypotheses/fig_source_hypotheses_sample_0079.pdf}
-\caption{SSQ-FMT simulation result generated from fixed test-set predictions.}
-\label{fig:fig_source_hypotheses_sample_0079}
+\includegraphics[width=\linewidth]{outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_orthogonal_supplement.pdf}
+\caption{Supplementary orthogonal views for the same qualitative cases using fixed GT-derived slice indices.}
+\label{fig:fig_qualitative_orthogonal_supplement}
 \end{figure}

@@ -1,12 +1,11 @@
 {
-  "generated_figures": 12,
-  "missing_entries": 6,
+  "generated_figures": 6,
+  "missing_entries": 7,
   "methods": [
     "SSQ-FMT",
     "w/o transport-aware footprint",
     "w/o query-canonical reliability",
-    "w/o source-relative query cue",
-    "w/o distance-field regularization"
+    "w/o source-relative query cue"
   ],
   "evaluation_protocol": {
     "test_set": "fixed 300-sample test.txt",
@@ -16,5 +15,5 @@
     "component_connectivity": 26,
     "minimum_region_size": 10
   },
-  "git_commit": "12b0986"
+  "git_commit": "f142b0f"
 }

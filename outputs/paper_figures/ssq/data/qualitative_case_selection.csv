@@ -1,5 +1,4 @@
-figure_id,sample_id,selection_note
-fig_qualitative_adjacent,sample_1081,median multi-source case
-fig_qualitative_weak_source,sample_0712,SSQ-FMT improved case
-fig_qualitative_three_source,sample_2378,representative three-source case
-fig_qualitative_failure,sample_2769,failure case
+case,sample_id,main_plane,sagittal_index,coronal_index,axial_index,crop_y,crop_x
+Adjacent sources,sample_0712,sagittal,107,171,47,"[10, 85]","[138, 200]"
+Weak secondary source,sample_2505,coronal,116,132,26,"[18, 76]","[87, 145]"
+Three-source case,sample_1516,axial,56,130,32,"[84, 195]","[29, 127]"

@@ -13,8 +13,8 @@ uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py
 
 ## Existing Prediction Inputs
 
-The generated component, paired-improvement, source-separability, qualitative, and source-hypothesis
-figures use existing 300-sample prediction/evaluator outputs under:
+The generated component, paired-improvement, source-separability, and qualitative figures use
+existing 300-sample prediction/evaluator outputs under:
 
 ```text
 outputs/fmt_simgen_v2_ssq_ablation/test300
@@ -32,4 +32,11 @@ simulation outputs. Missing entries are not replaced with hand-filled values.
 All figures have corresponding CSV/JSON/NPZ data files under `data/` or the figure-specific
 subdirectory. Figure-level provenance is recorded in `figure_manifest.json`.
 
-Current missing-data entries: 6
+## Source Hypotheses
+
+Proposal and peak data are exported, but actual source-relative cue export unavailable. No
+source-hypotheses result figure is generated until analysis mode exports hypothesis centers,
+hypothesis confidence, query-relative distances, soft ownership, entropy/margin, and cue
+embedding or an interpretable scalar projection.
+
+Current missing-data entries: 7

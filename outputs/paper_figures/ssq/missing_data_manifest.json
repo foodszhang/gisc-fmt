@@ -32,6 +32,11 @@
     "checkpoint": "available checkpoint; internal path intentionally omitted from paper manifest"
   },
   {
+    "task": "source_hypotheses_visualization",
+    "reason": "actual source-relative cue export unavailable; proposal peaks are saved, but model hypothesis confidence, query-relative distances, soft ownership, ownership entropy/margin, and cue embedding are not exported.",
+    "required_action": "Enable model analysis-mode export before drawing source cue figures."
+  },
+  {
     "task": "query_canonical_reliability",
     "reason": "No analysis-mode export with projected detector coordinate, local footprint weights, view reliability, and aggregated feature norm was found in existing artifacts.",
     "required_action": "Run an analysis-mode export pass; do not infer these quantities from final predictions."

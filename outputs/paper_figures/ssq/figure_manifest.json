@@ -31,19 +31,18 @@
       "minimum_region_size": 10
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986",
+    "git_commit": "f142b0f",
     "status": "metrics_missing_until_unified_inference_is_run"
   },
   {
-    "figure_id": "fig_component_error_by_foci",
-    "figure_path": "outputs/paper_figures/ssq/component_analysis/fig_component_error_by_foci.pdf",
+    "figure_id": "fig_component_recovery_by_source_count",
+    "figure_path": "outputs/paper_figures/ssq/component_analysis/fig_component_recovery_by_source_count.pdf",
     "source_data_path": "outputs/paper_figures/ssq/component_analysis/component_error_by_foci.csv",
     "methods": [
       "SSQ-FMT",
       "w/o transport-aware footprint",
       "w/o query-canonical reliability",
-      "w/o source-relative query cue",
-      "w/o distance-field regularization"
+      "w/o source-relative query cue"
     ],
     "samples": "test300",
     "checkpoint": "existing SSQ ablation checkpoints recorded in metrics_summary.json",
@@ -57,7 +56,7 @@
       "minimum_region_size": 10
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986"
+    "git_commit": "f142b0f"
   },
   {
     "figure_id": "fig_source_count_confusion",
@@ -79,7 +78,7 @@
       "minimum_region_size": 10
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986"
+    "git_commit": "f142b0f"
   },
   {
     "figure_id": "fig_paired_improvement",
@@ -89,8 +88,7 @@
       "SSQ-FMT",
       "w/o transport-aware footprint",
       "w/o query-canonical reliability",
-      "w/o source-relative query cue",
-      "w/o distance-field regularization"
+      "w/o source-relative query cue"
     ],
     "samples": "test300 paired by sample_id",
     "checkpoint": "existing SSQ ablation checkpoints recorded in metrics_summary.json",
@@ -104,32 +102,7 @@
       "minimum_region_size": 10
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986"
-  },
-  {
-    "figure_id": "fig_accuracy_separation_scatter",
-    "figure_path": "outputs/paper_figures/ssq/paired_improvement/fig_accuracy_separation_scatter.pdf",
-    "source_data_path": "outputs/paper_figures/ssq/paired_improvement/paired_improvement.csv",
-    "methods": [
-      "SSQ-FMT",
-      "w/o transport-aware footprint",
-      "w/o query-canonical reliability",
-      "w/o source-relative query cue",
-      "w/o distance-field regularization"
-    ],
-    "samples": "test300 two- and three-source samples",
-    "checkpoint": "existing SSQ ablation checkpoints recorded in metrics_summary.json",
-    "config": "existing SSQ ablation configs",
-    "evaluation_protocol": {
-      "test_set": "fixed 300-sample test.txt",
-      "voxel_threshold": 0.5,
-      "component_iou_threshold": 0.01,
-      "component_centroid_threshold_vox": 3.0,
-      "component_connectivity": 26,
-      "minimum_region_size": 10
-    },
-    "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986"
+    "git_commit": "f142b0f"
   },
   {
     "figure_id": "fig_source_separability_phase",
@@ -153,12 +126,12 @@
       "binning": "quantile bins due empirical spacing distribution"
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986"
+    "git_commit": "f142b0f"
   },
   {
-    "figure_id": "fig_qualitative_adjacent",
-    "figure_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_adjacent.pdf",
-    "source_data_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_adjacent_data.npz",
+    "figure_id": "fig_qualitative_comparison",
+    "figure_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_comparison.pdf",
+    "source_data_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_comparison_data.npz",
     "methods": [
       "GT",
       "w/o transport-aware footprint",
@@ -167,7 +140,9 @@
       "SSQ-FMT"
     ],
     "samples": [
-      "sample_1081"
+      "sample_0712",
+      "sample_2505",
+      "sample_1516"
     ],
     "checkpoint": "existing SSQ ablation checkpoints recorded in metrics_summary.json",
     "config": "existing SSQ ablation configs",
@@ -180,101 +155,23 @@
       "minimum_region_size": 10
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986"
+    "git_commit": "f142b0f",
+    "suitability": "main text"
   },
   {
-    "figure_id": "fig_qualitative_weak_source",
-    "figure_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_weak_source.pdf",
-    "source_data_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_weak_source_data.npz",
-    "methods": [
-      "GT",
-      "w/o transport-aware footprint",
-      "w/o query-canonical reliability",
-      "w/o source-relative query cue",
-      "SSQ-FMT"
-    ],
-    "samples": [
-      "sample_0712"
-    ],
-    "checkpoint": "existing SSQ ablation checkpoints recorded in metrics_summary.json",
-    "config": "existing SSQ ablation configs",
-    "evaluation_protocol": {
-      "test_set": "fixed 300-sample test.txt",
-      "voxel_threshold": 0.5,
-      "component_iou_threshold": 0.01,
-      "component_centroid_threshold_vox": 3.0,
-      "component_connectivity": 26,
-      "minimum_region_size": 10
-    },
-    "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986"
-  },
-  {
-    "figure_id": "fig_qualitative_three_source",
-    "figure_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_three_source.pdf",
-    "source_data_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_three_source_data.npz",
-    "methods": [
-      "GT",
-      "w/o transport-aware footprint",
-      "w/o query-canonical reliability",
-      "w/o source-relative query cue",
-      "SSQ-FMT"
-    ],
-    "samples": [
-      "sample_2378"
-    ],
-    "checkpoint": "existing SSQ ablation checkpoints recorded in metrics_summary.json",
-    "config": "existing SSQ ablation configs",
-    "evaluation_protocol": {
-      "test_set": "fixed 300-sample test.txt",
-      "voxel_threshold": 0.5,
-      "component_iou_threshold": 0.01,
-      "component_centroid_threshold_vox": 3.0,
-      "component_connectivity": 26,
-      "minimum_region_size": 10
-    },
-    "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986"
-  },
-  {
-    "figure_id": "fig_qualitative_failure",
-    "figure_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_failure.pdf",
-    "source_data_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_failure_data.npz",
-    "methods": [
-      "GT",
-      "w/o transport-aware footprint",
-      "w/o query-canonical reliability",
-      "w/o source-relative query cue",
-      "SSQ-FMT"
-    ],
-    "samples": [
-      "sample_2769"
-    ],
-    "checkpoint": "existing SSQ ablation checkpoints recorded in metrics_summary.json",
-    "config": "existing SSQ ablation configs",
-    "evaluation_protocol": {
-      "test_set": "fixed 300-sample test.txt",
-      "voxel_threshold": 0.5,
-      "component_iou_threshold": 0.01,
-      "component_centroid_threshold_vox": 3.0,
-      "component_connectivity": 26,
-      "minimum_region_size": 10
-    },
-    "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986"
-  },
-  {
-    "figure_id": "fig_source_hypotheses_sample_0022",
-    "figure_path": "outputs/paper_figures/ssq/source_hypotheses/fig_source_hypotheses_sample_0022.pdf",
-    "source_data_path": "outputs/paper_figures/ssq/source_hypotheses/source_hypotheses_sample_0022.npz",
+    "figure_id": "fig_qualitative_orthogonal_supplement",
+    "figure_path": "outputs/paper_figures/ssq/qualitative_cases/fig_qualitative_orthogonal_supplement.pdf",
+    "source_data_path": "outputs/paper_figures/ssq/qualitative_cases/qualitative_case_selection.csv",
     "methods": [
       "SSQ-FMT"
     ],
     "samples": [
-      "sample_0022"
+      "sample_0712",
+      "sample_2505",
+      "sample_1516"
     ],
     "checkpoint": "existing SSQ-FMT prediction",
-    "config": "SSQ-FMT source hypothesis config",
+    "config": "existing SSQ-FMT config",
     "evaluation_protocol": {
       "test_set": "fixed 300-sample test.txt",
       "voxel_threshold": 0.5,
@@ -284,41 +181,19 @@
       "minimum_region_size": 10
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986",
-    "caption_note": "Hypotheses are over-complete candidates, not final detections; GT source centers are not used during inference."
+    "git_commit": "f142b0f",
+    "suitability": "supplementary"
   },
   {
-    "figure_id": "fig_source_hypotheses_sample_0038",
-    "figure_path": "outputs/paper_figures/ssq/source_hypotheses/fig_source_hypotheses_sample_0038.pdf",
-    "source_data_path": "outputs/paper_figures/ssq/source_hypotheses/source_hypotheses_sample_0038.npz",
+    "figure_id": "source_hypotheses_data_only",
+    "figure_path": "",
+    "source_data_path": "outputs/paper_figures/ssq/source_hypotheses/source_hypotheses_summary.csv",
     "methods": [
       "SSQ-FMT"
     ],
     "samples": [
-      "sample_0038"
-    ],
-    "checkpoint": "existing SSQ-FMT prediction",
-    "config": "SSQ-FMT source hypothesis config",
-    "evaluation_protocol": {
-      "test_set": "fixed 300-sample test.txt",
-      "voxel_threshold": 0.5,
-      "component_iou_threshold": 0.01,
-      "component_centroid_threshold_vox": 3.0,
-      "component_connectivity": 26,
-      "minimum_region_size": 10
-    },
-    "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986",
-    "caption_note": "Hypotheses are over-complete candidates, not final detections; GT source centers are not used during inference."
-  },
-  {
-    "figure_id": "fig_source_hypotheses_sample_0079",
-    "figure_path": "outputs/paper_figures/ssq/source_hypotheses/fig_source_hypotheses_sample_0079.pdf",
-    "source_data_path": "outputs/paper_figures/ssq/source_hypotheses/source_hypotheses_sample_0079.npz",
-    "methods": [
-      "SSQ-FMT"
-    ],
-    "samples": [
+      "sample_0022",
+      "sample_0038",
       "sample_0079"
     ],
     "checkpoint": "existing SSQ-FMT prediction",
@@ -332,8 +207,8 @@
       "minimum_region_size": 10
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986",
-    "caption_note": "Hypotheses are over-complete candidates, not final detections; GT source centers are not used during inference."
+    "git_commit": "f142b0f",
+    "status": "actual source-relative cue export unavailable"
   },
   {
     "figure_id": "query_canonical_reliability",
@@ -354,7 +229,7 @@
       "minimum_region_size": 10
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986",
+    "git_commit": "f142b0f",
     "status": "missing_analysis_export"
   },
   {
@@ -376,7 +251,7 @@
       "minimum_region_size": 10
     },
     "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
-    "git_commit": "12b0986",
+    "git_commit": "f142b0f",
     "status": "missing_analysis_export"
   }
 ]
