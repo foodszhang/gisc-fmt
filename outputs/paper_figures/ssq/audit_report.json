@@ -1,12 +1,17 @@
 {
-  "generated_figures": 6,
-  "missing_entries": 7,
+  "generated_figures": 4,
+  "main_text_candidates": [
+    "fig_source_separation_profiles"
+  ],
+  "missing_entries": 3,
   "methods": [
     "SSQ-FMT",
     "w/o transport-aware footprint",
     "w/o query-canonical reliability",
     "w/o source-relative query cue"
   ],
+  "generator_git_commit": "9262081",
+  "generator_sha256": "cdd4095730b2fbb5ba131dc263131cfe010805fca650a179922daa8cb3b62c14",
   "evaluation_protocol": {
     "test_set": "fixed 300-sample test.txt",
     "voxel_threshold": 0.5,
@@ -14,6 +19,5 @@
     "component_centroid_threshold_vox": 3.0,
     "component_connectivity": 26,
     "minimum_region_size": 10
-  },
-  "git_commit": "f142b0f"
+  }
 }

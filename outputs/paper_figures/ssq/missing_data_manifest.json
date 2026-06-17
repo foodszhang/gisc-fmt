@@ -1,49 +1,14 @@
 [
   {
-    "task": "footprint_design",
-    "method": "Point sampling",
-    "reason": "Checkpoint exists, but no existing unified 300-sample prediction/evaluator output was found. Not using historical logs to avoid incomparable numbers.",
-    "required_action": "Run eval_full_volume_fmt_simgen.py and eval_components_fmt_simgen.py with the fixed protocol.",
-    "config": "internal asset map",
-    "checkpoint": "available checkpoint; internal path intentionally omitted from paper manifest"
+    "task": "analysis_mode_internal_exports",
+    "reason": "Actual PTFA, query-canonical reliability, and source-relative cue internal exports are unavailable; no mechanism figure is generated."
   },
   {
-    "task": "footprint_design",
-    "method": "Fixed footprint",
-    "reason": "Checkpoint exists, but no existing unified 300-sample prediction/evaluator output was found. Not using historical logs to avoid incomparable numbers.",
-    "required_action": "Run eval_full_volume_fmt_simgen.py and eval_components_fmt_simgen.py with the fixed protocol.",
-    "config": "internal asset map",
-    "checkpoint": "available checkpoint; internal path intentionally omitted from paper manifest"
+    "task": "actual_source_relative_cue_export",
+    "reason": "Only measurement-derived proposal peaks are exported. Hypothesis confidence, query-relative distances, soft ownership, ownership entropy/margin, and actual cue vectors before feature refinement are unavailable."
   },
   {
-    "task": "footprint_design",
-    "method": "Depth-conditioned footprint",
-    "reason": "Checkpoint exists, but no existing unified 300-sample prediction/evaluator output was found. Not using historical logs to avoid incomparable numbers.",
-    "required_action": "Run eval_full_volume_fmt_simgen.py and eval_components_fmt_simgen.py with the fixed protocol.",
-    "config": "internal asset map",
-    "checkpoint": "available checkpoint; internal path intentionally omitted from paper manifest"
-  },
-  {
-    "task": "footprint_design",
-    "method": "Adaptive constrained footprint",
-    "reason": "Checkpoint exists, but no existing unified 300-sample prediction/evaluator output was found. Not using historical logs to avoid incomparable numbers.",
-    "required_action": "Run eval_full_volume_fmt_simgen.py and eval_components_fmt_simgen.py with the fixed protocol.",
-    "config": "internal asset map",
-    "checkpoint": "available checkpoint; internal path intentionally omitted from paper manifest"
-  },
-  {
-    "task": "source_hypotheses_visualization",
-    "reason": "actual source-relative cue export unavailable; proposal peaks are saved, but model hypothesis confidence, query-relative distances, soft ownership, ownership entropy/margin, and cue embedding are not exported.",
-    "required_action": "Enable model analysis-mode export before drawing source cue figures."
-  },
-  {
-    "task": "query_canonical_reliability",
-    "reason": "No analysis-mode export with projected detector coordinate, local footprint weights, view reliability, and aggregated feature norm was found in existing artifacts.",
-    "required_action": "Run an analysis-mode export pass; do not infer these quantities from final predictions."
-  },
-  {
-    "task": "footprint_scale",
-    "reason": "No per-query-view export of exit depth, effective footprint radius, and reliability was found in existing artifacts.",
-    "required_action": "Run an analysis-mode export pass; do not infer these quantities from final predictions."
+    "task": "controlled_perturbation_inference",
+    "reason": "No detector/view perturbation inference outputs exist; no robustness figure is generated."
   }
 ]

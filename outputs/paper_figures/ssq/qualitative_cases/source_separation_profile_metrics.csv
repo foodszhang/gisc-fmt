@@ -1,0 +1,9 @@
+case,sample_id,method,inter_source_valley_ratio,bridge_area_px,weak_focus_retention,component_outcome
+Adjacent sources,sample_0712,w/o transport-aware footprint,0.8559247343899913,379,0.9650782608695655,"pred=1, match=1, miss=1, merge=1, split=0"
+Adjacent sources,sample_0712,w/o query-canonical reliability,0.8698805068027862,347,1.0,"pred=1, match=1, miss=1, merge=1, split=0"
+Adjacent sources,sample_0712,w/o source-relative query cue,0.6871930387808768,303,0.8839189091696128,"pred=1, match=1, miss=1, merge=1, split=0"
+Adjacent sources,sample_0712,SSQ-FMT,0.30400316303045355,135,0.83245849609375,"pred=2, match=2, miss=0, merge=0, split=0"
+Three sources with a weak focus,sample_0300,w/o transport-aware footprint,0.13915485637701505,434,1.0,"pred=3, match=3, miss=0, merge=0, split=0"
+Three sources with a weak focus,sample_0300,w/o query-canonical reliability,0.3830978957635263,432,0.9169660678642715,"pred=3, match=3, miss=0, merge=0, split=0"
+Three sources with a weak focus,sample_0300,w/o source-relative query cue,0.7793727534137824,725,0.9985297206469229,"pred=2, match=2, miss=1, merge=1, split=0"
+Three sources with a weak focus,sample_0300,SSQ-FMT,0.0,517,1.0,"pred=3, match=3, miss=0, merge=0, split=0"

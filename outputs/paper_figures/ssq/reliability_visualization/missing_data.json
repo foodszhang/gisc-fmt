@@ -1,4 +1,0 @@
-{
-  "task": "query_canonical_reliability",
-  "reason": "No analysis-mode export with projected detector coordinate, local footprint weights, view reliability, and aggregated feature norm was found in existing artifacts."
-}
