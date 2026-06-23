@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 name: fmt_simgen_v2_ssq_main
-description: Source-separable query representation mainline with measurement-derived source cue and canonical reliability, without center/distance target injection
+description: Multi-source GISC-FMT mainline with measurement-derived all-candidate conditioning and canonical reliability
 
 data:
   center_distance_targets: false
@@ -13,6 +13,7 @@ data:
 
   source_hypothesis:
     enabled: true
+    # Over-complete candidate budget. This is not the predicted source count.
     top_m: 5
     blur_sigma: 1.0
     min_distance_cells: 3
@@ -30,6 +31,11 @@ model:
     enabled: true
     dim: 10
     tau_s_mm: 5.0
+    aggregation: all_candidates_null
+    null_logit: 0.0
+    score_weight: 2.0
+    min_scale_mm: 1.0
+    max_scale_mm: 20.0
 
   source_instance_decoder:
     enabled: false
