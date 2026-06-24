@@ -28,9 +28,7 @@ class ModelFactory:
         return VoxDMRN(config=config)
 
     @staticmethod
-    def create_voxel_baseline_model(
-        model_type: str, config: Optional[Any] = None, **kwargs
-    ):
+    def create_voxel_baseline_model(model_type: str, config: Optional[Any] = None, **kwargs):
         if config is None:
             raise ValueError("Voxel baseline 模型需要配置对象")
         from .models.voxel_baselines import (
@@ -66,18 +64,16 @@ class ModelFactory:
         return cls(config)
 
     @staticmethod
-    def create_fem_baseline_model(
-        model_type: str, config: Optional[Any] = None, **kwargs
-    ):
+    def create_fem_baseline_model(model_type: str, config: Optional[Any] = None, **kwargs):
         if config is None:
             raise ValueError("FEM baseline 模型需要配置对象")
         from .models.fem_baselines import (
+            FISTAFEM,
+            L1FEM,
             ElasticNetFEM,
             FEMCoarseBaseline,
             FEMToVoxelBaseline,
-            FISTAFEM,
             GAICNLikeFEM,
-            L1FEM,
             StOMPFEM,
             TikhonovFEM,
         )
@@ -106,11 +102,22 @@ class ModelFactory:
         return GISCFMT(config=config)
 
     @staticmethod
+    def create_ssq_fmt_model(config: Optional[Any] = None, **kwargs):
+        """Create the final-method SSQ-FMT point model."""
+        from .models.ssq_fmt import SSQFMT
+
+        if config is None:
+            raise ValueError("SSQ-FMT 模型需要配置对象")
+        return SSQFMT(config=config)
+
+    @staticmethod
     def create_model(model_type: str, config: Optional[Any] = None, **kwargs):
         if config is None:
             raise ValueError("模型创建需要配置对象")
 
         model_type = model_type.lower()
+        if model_type == "ssq_fmt":
+            return ModelFactory.create_ssq_fmt_model(config, **kwargs)
         if model_type in {
             "gisc_fmt",
             "minr_fmt",

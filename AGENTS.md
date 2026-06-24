@@ -43,6 +43,17 @@ Use `/home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k` for the v2 full compa
 
 The active comparison set excludes the CQR ablation series by user request and focuses on GISC-FMT plus paper baselines: `fem2vox_unet`, `uhr_deepfmt`, `vox_dmrn`, `two_stage_deepfmt`, `fmt_reconnet`, `pgdpnn`, `map_pgan`, `d2_recst`, and `dspgn`. Keep all comparison models on the shared Hydra/Lightning entrypoint and common v2 exp config.
 
+The default formal point-model path is now SSQ-FMT (`model=ssq_fmt`) rather than
+legacy `gisc_fmt`. The SSQ wrapper keeps the mature query-density backbone as the
+main density path and adds SSQ-specific model-side surface normalization,
+measurement-derived candidate diagnostics/routing, and probability-domain output
+`{"density": [B,Nq,1], "aux_outputs": ...}`. The query-density backbone must use
+per-view max-normalized measurements for compatibility with the E15/GISC training
+distribution; SSQ auxiliary/candidate modules may still use sample-level P99.9
+normalization internally. Do not route the formal SSQ path through legacy
+source-slot/source-instance confidence mechanisms or PTFA/canonical-reliability
+ablation settings.
+
 The historical `gisc_fmt` baseline selected `epoch=44-val_dice=0.6930.ckpt` by
 candidate Dice. Its test300 Dice is about 0.662, IoU about 0.512, ASSD about 0.579,
 and HD95 about 2.123 at threshold 0.5. Keep this checkpoint only when a table
@@ -60,6 +71,34 @@ checkpoint:
 `outputs/fmt_simgen_v2_e15_center_distance_precomputed/checkpoints/epoch=52-val_dice=0.7414.ckpt`.
 Its test300 Dice is about 0.725. Keep E13-MSQ-fixed recorded as the stronger archived
 test result, but do not mix E13 predictions into E15 paper figures.
+
+For the current SSQ-FMT mainline, the strongest validated path is the SSQ wrapper
+with the E15 query-density backbone strictly mapped into
+`query_density_backbone.*`:
+`outputs/ssq_fmt/e15_backbone_init_perview/checkpoints/ssq_fmt_e15_backbone_init.ckpt`.
+On the 300-sample validation split this gives sampled-query Dice about 0.746, and
+on the 300-sample test split sampled-query Dice about 0.736 at threshold 0.5. This
+checkpoint is an SSQ-format Lightning checkpoint and can be loaded directly with
+`model=ssq_fmt`; it does not require runtime `model.finetune.init_from_ckpt`.
+
+The from-scratch SSQ backbone training path is not yet the preferred result. The
+best current staged full-data run reached about 0.720 validation Dice and about
+0.707 test Dice:
+`outputs/ssq_fmt/full_v2_main_backbone_finetune_lr5e5/checkpoints/epoch=02-val_dice=0.7204.ckpt`.
+It used the same 32768 train/eval queries per sample as E15, not a reduced query
+count. Treat this as a development checkpoint, not the active paper result.
+Experiments with `loss.backbone_logit_loss_weight=1.0` degraded validation Dice
+after resume and should not be used as the default SSQ route. Candidate Gaussian
+prior density was also too weak/noisy when directly unioned into final density;
+keep `model.ssq_fmt.candidates.prior_density_weight=0.0` unless a later validation
+sweep proves otherwise.
+
+When using the v2 dataset, do not blindly trust detector masks from one source.
+The observed v2 projection/depth samples had finite-depth regions aligned with
+nonzero projection regions, but SSQ should combine geometry-valid projection,
+finite depth, and measurement validity defensively. If early short-gate validation
+Dice stays near zero, stop and inspect prediction distributions before launching
+full training.
 
 FEM-domain methods must be mapped to the common `[190, 200, 104]` voxel grid before
 metrics or figures. Do not report mesh-only Dice as a paper comparison. The verified
@@ -122,11 +161,17 @@ Use E15 for multi-source separation work. The goal is to improve three-focus and
 
 ## Current Comparison And Training Entry Points
 
+- SSQ-FMT is the default model in `configs/config.yaml`; the main formal SSQ config is
+  `configs/exp/fmt_simgen_v2_ssq_main.yaml`.
+- Use the shared entrypoint for SSQ formal runs:
+  `uv run python train.py fit model=ssq_fmt exp=fmt_simgen_v2_ssq_main data.dataset_type=fmt_simgen`.
+- Evaluate the current SSQ mainline checkpoint with:
+  `uv run python train.py test model=ssq_fmt exp=fmt_simgen_v2_ssq_main data.dataset_type=fmt_simgen ckpt_path=outputs/ssq_fmt/e15_backbone_init_perview/checkpoints/ssq_fmt_e15_backbone_init.ckpt`.
 - E15 training configs: `configs/exp/fmt_simgen_v2_e15_center.yaml` and `configs/exp/fmt_simgen_v2_e15_center_distance.yaml`.
 - E15 uses the E13 MPB chain as its base and keeps the main query-density head intact.
 - The auxiliary heads are only supervision helpers; they do not alter non-GT sampling or inference inputs.
 - The completed E15 center-distance checkpoint `epoch=52-val_dice=0.7414.ckpt`
   reaches about 0.725 test300 Dice. Use it for the active paper summary and figures.
-- Use the shared entrypoint for formal runs: `uv run python train.py fit model=gisc_fmt exp=fmt_simgen_v2_e15_center_distance data.dataset_type=fmt_simgen`.
+- Use the shared entrypoint for archived E15/GISC runs: `uv run python train.py fit model=gisc_fmt exp=fmt_simgen_v2_e15_center_distance data.dataset_type=fmt_simgen`.
 - For comparison work, keep the paper baselines on the shared v2 protocol and record the selected checkpoint plus grouped metrics.
 - The most relevant comparison slices remain full-volume test300, grouped by `num_foci`, shape class, and depth tier, with component recall / missed / merge reporting.

@@ -1,4 +1,4 @@
-"""Training entrypoint for GISC-FMT (Hydra + PyTorch Lightning).
+"""Training entrypoint for SSQ-FMT/GISC-FMT (Hydra + PyTorch Lightning).
 
 Common usage (with uv):
   uv run python train.py fit
@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Optional
 
 import hydra
-from omegaconf import DictConfig, OmegaConf
 import pytorch_lightning as pl
 import torch
+from omegaconf import DictConfig, OmegaConf
 
 from minr_fmt.datamodule import TrainingDataModule
 from minr_fmt.module import TrainingLightningModule
@@ -135,7 +135,8 @@ def run(cfg: DictConfig) -> Optional[float]:
             rank_zero_log(
                 logger,
                 "warning",
-                "ckpt_path not set and last.ckpt not found; running with random weights (metrics may be near zero)",
+                "ckpt_path not set and last.ckpt not found; running with random weights "
+                "(metrics may be near zero)",
             )
 
     if task == "fit":
@@ -157,7 +158,7 @@ def run(cfg: DictConfig) -> Optional[float]:
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def hydra_main(cfg: DictConfig) -> Optional[float]:
     warnings.filterwarnings("ignore", category=UserWarning)
-    setup_logger("gisc_fmt", level=logging.INFO)
+    setup_logger("ssq_fmt", level=logging.INFO)
     return run(cfg)
 
 

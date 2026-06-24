@@ -336,6 +336,106 @@ class VoxelReconstructionLoss(nn.Module):
         }
 
 
+class MorphologyAwareDensityLoss(nn.Module):
+    """Probability-domain SSQ-FMT density loss with optional sampled SDF supervision."""
+
+    def __init__(
+        self,
+        lambda_sdf: float = 0.0,
+        tau_s: float = 3.0,
+        boundary_weight: float = 1.0,
+        pos_weight: float = 1.0,
+        dice_weight: float = 0.0,
+        sparse_weight: float = 0.0,
+    ):
+        super().__init__()
+        self.lambda_sdf = float(lambda_sdf)
+        self.tau_s = float(tau_s)
+        self.boundary_weight = float(boundary_weight)
+        self.pos_weight = float(pos_weight)
+        self.dice_weight = float(dice_weight)
+        self.sparse_weight = float(sparse_weight)
+
+    @staticmethod
+    def _sample_gt(gt_voxels: torch.Tensor, points_ijk: torch.Tensor) -> torch.Tensor:
+        idx = points_ijk.round().long()
+        x = idx[..., 0].clamp(0, gt_voxels.shape[1] - 1)
+        y = idx[..., 1].clamp(0, gt_voxels.shape[2] - 1)
+        z = idx[..., 2].clamp(0, gt_voxels.shape[3] - 1)
+        batch = torch.arange(gt_voxels.shape[0], device=gt_voxels.device)[:, None]
+        return gt_voxels[batch, x, y, z].unsqueeze(-1)
+
+    def _sdf_targets(
+        self, gt_voxels: torch.Tensor, points_ijk: torch.Tensor, device: torch.device
+    ) -> torch.Tensor:
+        from scipy import ndimage
+
+        gt_np = gt_voxels.detach().to(dtype=torch.float32).cpu().numpy()
+        pts_np = points_ijk.detach().cpu().numpy()
+        targets = []
+        for b in range(gt_np.shape[0]):
+            mask = gt_np[b] > 0.0
+            if mask.any():
+                inside = ndimage.distance_transform_edt(mask)
+                outside = ndimage.distance_transform_edt(~mask)
+                sdf = inside - outside
+            else:
+                sdf = -np.full(gt_np[b].shape, self.tau_s, dtype=np.float32)
+            idx = np.rint(pts_np[b]).astype(np.int64)
+            idx[:, 0] = np.clip(idx[:, 0], 0, gt_np.shape[1] - 1)
+            idx[:, 1] = np.clip(idx[:, 1], 0, gt_np.shape[2] - 1)
+            idx[:, 2] = np.clip(idx[:, 2], 0, gt_np.shape[3] - 1)
+            vals = sdf[idx[:, 0], idx[:, 1], idx[:, 2]]
+            vals = np.clip(vals / max(self.tau_s, 1e-6), -1.0, 1.0).astype(np.float32)
+            targets.append(torch.tensor(vals, dtype=torch.float32, device=device).unsqueeze(-1))
+        return torch.stack(targets, dim=0)
+
+    def forward(
+        self,
+        pred_density: torch.Tensor,
+        target_density: torch.Tensor,
+        aux_outputs: dict | None = None,
+        *,
+        gt_voxels: torch.Tensor | None = None,
+        points_ijk: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        target_density = target_density.to(device=pred_density.device, dtype=pred_density.dtype)
+        pred = pred_density.clamp(0.0, 1.0)
+        density_err = F.smooth_l1_loss(pred, target_density, reduction="none")
+        density_weight = 1.0 + target_density.clamp(0.0, 1.0) * (self.pos_weight - 1.0)
+        density_loss = (density_err * density_weight).sum() / density_weight.sum().clamp_min(1e-8)
+        eps = 1e-6
+        pred_flat = pred.squeeze(-1)
+        target_flat = target_density.squeeze(-1).clamp(0.0, 1.0)
+        intersection = (pred_flat * target_flat).sum(dim=1)
+        dice = (2.0 * intersection + eps) / (pred_flat.sum(dim=1) + target_flat.sum(dim=1) + eps)
+        dice_loss = 1.0 - dice.mean()
+        sparse_loss = (pred * (1.0 - target_density.clamp(0.0, 1.0))).mean()
+        total = density_loss + self.dice_weight * dice_loss + self.sparse_weight * sparse_loss
+        sdf_loss = torch.zeros((), dtype=pred.dtype, device=pred.device)
+        if (
+            self.lambda_sdf > 0.0
+            and aux_outputs is not None
+            and "sdf" in aux_outputs
+            and gt_voxels is not None
+            and points_ijk is not None
+        ):
+            sdf_target = self._sdf_targets(
+                gt_voxels.to(device=pred.device), points_ijk.to(device=pred.device), pred.device
+            ).to(dtype=pred.dtype)
+            sdf_pred = aux_outputs["sdf"].to(dtype=pred.dtype)
+            weight = 1.0 + self.boundary_weight * (sdf_target.abs() < 0.25).to(dtype=pred.dtype)
+            sdf_loss = F.smooth_l1_loss(sdf_pred * weight, sdf_target * weight)
+            total = total + self.lambda_sdf * sdf_loss
+        return {
+            "total_loss": total,
+            "density_loss": density_loss,
+            "dice_loss": dice_loss,
+            "sparse_loss": sparse_loss,
+            "sdf_loss": sdf_loss,
+        }
+
+
 def dice_coefficient(pred, target, threshold=0.5, eps=1e-8):
     """
     计算三维体素二分类的Dice系数

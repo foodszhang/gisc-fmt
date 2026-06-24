@@ -1,52 +1,42 @@
 # @package _global_
 
 defaults:
-  - fmt_simgen_v2_e15_center_distance
+  - fmt_simgen_v2_3k_20k_common
+  - override /model: ssq_fmt
   - _self_
 
 name: fmt_simgen_v2_ssq_main
-description: Multi-source GISC-FMT mainline with measurement-derived all-candidate conditioning and canonical reliability
+description: SSQ-FMT final-method mainline with measurement-derived candidates
 
 data:
+  projection_norm: raw
   center_distance_targets: false
   center_distance_require_precomputed: false
-
   source_hypothesis:
+    enabled: false
+  ssq_candidates:
     enabled: true
-    # Over-complete candidate budget. This is not the predicted source count.
     top_m: 5
     blur_sigma: 1.0
     min_distance_cells: 3
     min_value_ratio: 0.1
 
-model:
-  ptfa:
-    enabled: true
-
-  feature_refinement:
-    enabled: true
-    ptfa_view_aggregation: canonical_reliability
-
-  source_instance_cue:
-    enabled: true
-    dim: 10
-    tau_s_mm: 5.0
-    aggregation: all_candidates_null
-    null_logit: 0.0
-    score_weight: 2.0
-    min_scale_mm: 1.0
-    max_scale_mm: 20.0
-
-  source_instance_decoder:
-    enabled: false
-
-  aux_heads:
-    hidden_dim: 64
-    center:
-      enabled: false
-    distance:
-      enabled: false
-
 loss:
-  center_weight: 0.0
-  distance_weight: 0.0
+  light_weight: 1.0
+  pos_weight: 50.0
+  sparse_weight: 0.2
+  dice_weight: 0.5
+  backbone_logit_loss_weight: 0.0
+  lambda_sdf: 0.0
+  tau_s: 3.0
+  sdf_boundary_weight: 1.0
+
+optim:
+  lr: 0.0005
+  scheduler:
+    warmup_epochs: 5
+    warmup_start_factor: 0.2
+
+trainer:
+  max_epochs: 80
+  gradient_clip_val: 1.0

@@ -3,7 +3,7 @@ defaults:
   - data: default
   - loss: default
   - optim: cosine
-  - model: gisc_fmt
+  - model: ssq_fmt
   - trainer: default
   - logger: tensorboard
   - callbacks: default

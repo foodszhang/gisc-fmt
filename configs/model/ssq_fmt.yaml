@@ -1,0 +1,124 @@
+name: ssq_fmt
+num_views: 7
+in_channels: 1
+feature_dim: 64
+pos_enc_dim: 60
+output_type: point_probability
+
+geometry:
+  camera_distance: 200.0
+  fov_mm: 80.0
+  detector_resolution: [256, 256]
+  global_voxel_shape: [190, 200, 104]
+  volume_center_world: [19.0, 20.0, 10.4]
+
+ssq_fmt:
+  hidden_dim: 64
+
+  query_density_backbone:
+    enabled: true
+    normalization: per_view_max
+
+  normalization:
+    percentile: 99.9
+    eps: 1.0e-6
+
+  encoder:
+    channels: 32
+    feature_dim: 48
+
+  fourier:
+    num_frequencies: 8
+
+  geometry:
+    camera_distance_mm: 200.0
+    fov_mm: 80.0
+    detector_resolution: [256, 256]
+    volume_center_world: [19.0, 20.0, 10.4]
+    jacobian_fd_step_mm: 0.2
+
+  local_sampling:
+    k: 5
+    offsets_px:
+      - [0.0, 0.0]
+      - [-1.0, 0.0]
+      - [1.0, 0.0]
+      - [0.0, -1.0]
+      - [0.0, 1.0]
+
+  footprint:
+    scale_min_mm: 0.6
+    scale_max_mm: 4.0
+    boundary_margin_radius_px: 2.0
+
+  candidates:
+    grid_spacing_mm: 1.0
+    blur_sigma: 1.0
+    threshold: 0.05
+    nms_radius_cells: 3
+    mmax: 5
+    scale_min_mm: 1.0
+    scale_max_mm: 12.0
+    prior_density_weight: 0.0
+    trunk_size_mm: [38.0, 40.0, 20.8]
+
+  routing:
+    temperature: 1.0
+    assignment_temperature: 1.0
+    residual_min: 0.0
+    residual_max: 1.0
+    k_min: 1.0e-6
+    p_min: 1.0e-6
+    tau_cand: 0.1
+
+  sdf:
+    tau_s: 3.0
+    lambda_sdf: 0.0
+    boundary_weight: 1.0
+
+gisc_fmt:
+  use_adapter: true
+  adapter_strategy: bottleneck_decoder
+  adapter_mode: per_view
+  adapter_cond_dim: 4
+  adapter_r_ratio: 8
+  norm_type: group
+  implicit_field_hidden_dim: 128
+  implicit_field_d_x: 60
+  implicit_field_d_f: 64
+  view_weight_embed_dim: 16
+  view_weight_hidden_dim: 32
+  multiscale:
+    view_embed_dim: 16
+    depth_dim: 16
+    cross_view_hidden_dim: 64
+    scale_hidden_dim: 64
+    tau: 1.0
+    depth_max: 200.0
+  background:
+    enable_background: false
+    head:
+      hidden_dim: 64
+      d_x: 60
+      d_f: 64
+    guidance:
+      enable: false
+      dim: 16
+      mode: film
+      hidden_dim: 64
+      scale: 1.0
+      gate_init_bias: 4.0
+
+gisc:
+  footprint_mode: adaptive_constrained
+  use_footprint: true
+  use_adaptive_footprint: true
+  use_physical_constraint: true
+  fixed_sigma: 1.0
+  sigma_min: 0.6
+  sigma_max: 1.5
+  use_depth_cue: true
+  use_center_distance_cue: true
+  view_subset: null
+  log_footprint_stats: true
+  save_debug_predictions: true

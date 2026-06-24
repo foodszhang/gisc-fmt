@@ -12,7 +12,13 @@ from omegaconf import DictConfig
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from .loss import AuxProjectionLightLoss, VoxelReconstructionLoss, compute_dice, dice_coefficient
+from .loss import (
+    AuxProjectionLightLoss,
+    MorphologyAwareDensityLoss,
+    VoxelReconstructionLoss,
+    compute_dice,
+    dice_coefficient,
+)
 from .model_factory import ModelFactory
 from .utils.utils import get_psnr_3d, get_ssim_3d
 
@@ -49,6 +55,7 @@ class TrainingLightningModule(LightningModule):
         self._center_distance_center_weight: float = 0.2
         self._center_distance_weight: float = 0.1
         self._empty_slot_weight: float = 0.0
+        self._backbone_logit_loss_weight: float = 0.0
 
         # Create model and loss
         self._setup_model()
@@ -131,6 +138,49 @@ class TrainingLightningModule(LightningModule):
 
         init_from = str(getattr(finetune_cfg, "init_from_ckpt", "") or "")
         if init_from:
+            if self._is_ssq_model():
+                ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
+                state = ckpt.get("state_dict", ckpt)
+                net_state = {
+                    key[len("net.") :]: value
+                    for key, value in state.items()
+                    if key.startswith("net.")
+                }
+                if not net_state:
+                    net_state = state
+                current_state = self.net.state_dict()
+                if all(
+                    key in current_state and current_state[key].shape == value.shape
+                    for key, value in net_state.items()
+                ):
+                    self.net.load_state_dict(net_state, strict=True)
+                    print(f"[finetune] strictly initialized SSQ-FMT net from {init_from}")
+                else:
+                    mapped_state = dict(current_state)
+                    mapped = {}
+                    for key, value in net_state.items():
+                        mapped_key = f"query_density_backbone.{key}"
+                        if (
+                            mapped_key in current_state
+                            and current_state[mapped_key].shape == value.shape
+                        ):
+                            mapped[mapped_key] = value
+                    backbone_keys = [
+                        key for key in current_state if key.startswith("query_density_backbone.")
+                    ]
+                    missing_backbone = [key for key in backbone_keys if key not in mapped]
+                    if missing_backbone:
+                        raise RuntimeError(
+                            "SSQ-FMT strict backbone init failed; missing mapped keys: "
+                            f"{missing_backbone[:20]}"
+                        )
+                    mapped_state.update(mapped)
+                    self.net.load_state_dict(mapped_state, strict=True)
+                    print(
+                        f"[finetune] strictly initialized SSQ-FMT query backbone from "
+                        f"{init_from}; mapped_backbone_keys={len(mapped)}"
+                    )
+                return
             ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
             state = ckpt.get("state_dict", ckpt)
             net_state = {}
@@ -199,6 +249,7 @@ class TrainingLightningModule(LightningModule):
         self._center_distance_center_weight = float(loss_cfg.get("center_weight", 0.2))
         self._center_distance_weight = float(loss_cfg.get("distance_weight", 0.1))
         self._empty_slot_weight = float(loss_cfg.get("empty_slot_weight", 0.0))
+        self._backbone_logit_loss_weight = float(loss_cfg.get("backbone_logit_loss_weight", 0.0))
         self.loss_func = AuxProjectionLightLoss(
             init_scatter_weight=loss_cfg.get(
                 "aux_projection_weight", loss_cfg.get("scatter_weight", 1.0)
@@ -228,6 +279,27 @@ class TrainingLightningModule(LightningModule):
             tversky_gamma=loss_cfg.get("tversky_gamma", 1.33),
             tversky_weight=loss_cfg.get("tversky_weight", None),
         )
+        self.ssq_loss_func = MorphologyAwareDensityLoss(
+            lambda_sdf=loss_cfg.get("lambda_sdf", 0.0),
+            tau_s=loss_cfg.get("tau_s", 3.0),
+            boundary_weight=loss_cfg.get("sdf_boundary_weight", 1.0),
+            pos_weight=loss_cfg.get("pos_weight", 1.0),
+            dice_weight=loss_cfg.get("dice_weight", 0.0),
+            sparse_weight=loss_cfg.get("sparse_weight", 0.0),
+        )
+
+    def _is_ssq_model(self) -> bool:
+        return str(getattr(self.cfg.model, "name", "")).lower() == "ssq_fmt"
+
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        if self._is_ssq_model() and not strict:
+            missing = sorted(set(self.state_dict().keys()) - set(state_dict.keys()))
+            unexpected = sorted(set(state_dict.keys()) - set(self.state_dict().keys()))
+            raise RuntimeError(
+                "SSQ-FMT checkpoint loading requires strict=True; "
+                f"missing_keys={missing[:20]} unexpected_keys={unexpected[:20]}"
+            )
+        return super().load_state_dict(state_dict, strict=strict, assign=assign)
 
     def forward(
         self,
@@ -270,6 +342,29 @@ class TrainingLightningModule(LightningModule):
         if isinstance(out, tuple) and len(out) >= 2:
             return out[0], out[1]
         raise RuntimeError(f"Unexpected model output: {type(out)}")
+
+    def _call_ssq_model(self, batch, return_diagnostics: bool = False):
+        if hasattr(self.net, "set_training_epoch"):
+            self.net.set_training_epoch(int(self.current_epoch))
+        surface = batch.get("surface_measurements_packed", batch.get("projections_packed"))
+        if surface is None:
+            raise KeyError(
+                "SSQ-FMT requires batch.surface_measurements_packed or projections_packed"
+            )
+        query_mm = batch.get("query_coordinates_mm", batch.get("points_mm"))
+        if query_mm is None:
+            raise KeyError("SSQ-FMT requires batch.query_coordinates_mm or points_mm")
+        out = self.net(
+            surface,
+            query_mm,
+            detector_valid_mask=batch.get("detector_valid_mask"),
+            depth_maps=batch.get("depth_maps"),
+            batch=batch,
+            return_diagnostics=return_diagnostics,
+        )
+        if not isinstance(out, dict) or "density" not in out:
+            raise RuntimeError(f"Unexpected SSQ-FMT model output: {type(out)}")
+        return out
 
     @staticmethod
     def _source_hypotheses_from_batch(batch):
@@ -383,6 +478,8 @@ class TrainingLightningModule(LightningModule):
             B, V = p.shape[0], p.shape[1]
             # GISC-FMT expects view-major flattening: [V*B,1,H,W]
             return projections, p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+        if self._is_ssq_model() and "surface_measurements_packed" in batch:
+            return batch["surface_measurements"], batch["surface_measurements_packed"]
         return projections, projections
 
     def _shape_tuple_from_batch(self, voxel_shape, batch_size: int) -> tuple[int, int, int, int]:
@@ -645,6 +742,74 @@ class TrainingLightningModule(LightningModule):
             self.loss_func.update_epoch(self.current_epoch)
             return total_loss
 
+        if self._is_ssq_model():
+            points_mm = batch.get("query_coordinates_mm", batch.get("points_mm"))
+            density = batch["point_densities"].unsqueeze(-1)
+            self._log_query_sampling_stats("train", batch, batch["point_densities"])
+            out = self._call_ssq_model(batch, return_diagnostics=False)
+            density_pred = out["density"]
+            aux_outputs = out.get("aux_outputs", {})
+            loss_dict = self.ssq_loss_func(
+                density_pred,
+                density,
+                aux_outputs,
+                gt_voxels=batch.get("gt_voxels"),
+                points_ijk=batch.get("points_ijk"),
+            )
+            density_logits = (
+                aux_outputs.get("density_logits") if isinstance(aux_outputs, dict) else None
+            )
+            if torch.is_tensor(density_logits) and self._backbone_logit_loss_weight > 0.0:
+                backbone_logit_loss = self.loss_func.sparse_light_loss(density_logits, density)
+                loss_dict["backbone_logit_loss"] = backbone_logit_loss
+                loss_dict["total_loss"] = (
+                    loss_dict["total_loss"] + self._backbone_logit_loss_weight * backbone_logit_loss
+                )
+            total_loss = loss_dict["total_loss"]
+            if not torch.isfinite(total_loss.detach()):
+                self.log(
+                    "train_nonfinite_loss_skip",
+                    torch.ones((), dtype=total_loss.dtype, device=total_loss.device),
+                    prog_bar=False,
+                    on_step=True,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+                total_loss = (
+                    torch.nan_to_num(density_pred, nan=0.0, posinf=0.0, neginf=0.0).sum() * 0.0
+                )
+                loss_dict["total_loss"] = total_loss
+            else:
+                self.log(
+                    "train_nonfinite_loss_skip",
+                    torch.zeros((), dtype=total_loss.dtype, device=total_loss.device),
+                    prog_bar=False,
+                    on_step=True,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+            self.log(
+                "train_loss",
+                total_loss,
+                prog_bar=True,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            for key, value in loss_dict.items():
+                if key != "total_loss" and isinstance(value, torch.Tensor):
+                    self.log(f"train_{key}", value, on_step=False, on_epoch=True, sync_dist=True)
+            if points_mm is not None:
+                self.log(
+                    "train_query_mm_abs_mean",
+                    points_mm.detach().abs().mean(),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+            return total_loss
+
         aux_only = float(self.cfg.loss.get("light_weight", 1.0)) == 0.0
         points = batch["points"]
         points_mm = batch.get("points_mm")
@@ -786,6 +951,63 @@ class TrainingLightningModule(LightningModule):
                 "val_dice",
                 dice,
                 prog_bar=True,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            return {"dice": dice}
+
+        if self._is_ssq_model():
+            point_densities = batch["point_densities"]
+            voxel_shape = batch["feasible_voxel_shape"]
+            self._log_query_sampling_stats("val", batch, point_densities)
+            B = point_densities.shape[0]
+            voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
+            out = self._call_ssq_model(batch, return_diagnostics=False)
+            pred_prob = out["density"].clamp(0.0, 1.0)
+            full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+            if full_grid:
+                density_gt = point_densities.reshape(voxel_shape_tuple)
+                density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+                density_pred = pred_prob.reshape(voxel_shape_tuple)
+                dice = dice_coefficient(
+                    density_pred,
+                    density_gt_bin,
+                    threshold=self._validation_pred_threshold,
+                )
+                metric_name = "val_full_dice"
+            else:
+                pred_bin = (pred_prob.squeeze(-1) >= self._validation_pred_threshold).float()
+                gt_bin = (point_densities > 0.0).float()
+                intersection = (pred_bin * gt_bin).sum(dim=1)
+                dice = (
+                    (2.0 * intersection + 1e-8) / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+                ).mean()
+                metric_name = "val_query_dice"
+            self.log(
+                metric_name,
+                dice,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                "val_dice",
+                dice,
+                prog_bar=True,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                "val_pred_threshold",
+                torch.tensor(
+                    self._validation_pred_threshold,
+                    dtype=dice.dtype,
+                    device=dice.device,
+                ),
+                prog_bar=False,
                 on_step=False,
                 on_epoch=True,
                 sync_dist=True,
@@ -1353,6 +1575,23 @@ class TrainingLightningModule(LightningModule):
             dice = dice_coefficient(
                 density_pred, density_gt_bin, threshold=self._test_pred_threshold
             )
+        elif self._is_ssq_model():
+            out = self._call_ssq_model(batch, return_diagnostics=False)
+            pred_density = out["density"].clamp(0.0, 1.0)
+            _aux_projections = out.get("aux_outputs", {})
+            voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
+            full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+            if full_grid:
+                density_gt = point_densities.reshape(voxel_shape_tuple)
+                density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+                density_pred = pred_density.reshape(voxel_shape_tuple)
+                dice = dice_coefficient(
+                    density_pred, density_gt_bin, threshold=self._test_pred_threshold
+                )
+            else:
+                density_gt = None
+                density_gt_bin = None
+                density_pred = pred_density
         else:
             pred_density, _aux_projections = self._call_model(
                 proj_in,

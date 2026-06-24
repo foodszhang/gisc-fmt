@@ -108,7 +108,8 @@ def load_net(cfg, ckpt_path: Path | None, device: torch.device):
     }
     if not net_state:
         net_state = state
-    missing, unexpected = net.load_state_dict(net_state, strict=False)
+    strict = str(cfg.model.name).lower() == "ssq_fmt"
+    missing, unexpected = net.load_state_dict(net_state, strict=strict)
     if unexpected:
         raise RuntimeError(f"Unexpected checkpoint keys: {unexpected[:10]}")
     if missing:
@@ -118,9 +119,10 @@ def load_net(cfg, ckpt_path: Path | None, device: torch.device):
 
 
 def is_voxel_model(cfg, net) -> bool:
-    return str(getattr(cfg.model, "output_type", "")).lower() == "voxel" or str(
-        getattr(net, "output_type", "")
-    ).lower() == "voxel"
+    return (
+        str(getattr(cfg.model, "output_type", "")).lower() == "voxel"
+        or str(getattr(net, "output_type", "")).lower() == "voxel"
+    )
 
 
 def sample_dirs_for_split(
@@ -194,9 +196,7 @@ def sample_metadata(sample_dir: Path, stats: dict[str, dict[str, str]]) -> dict[
 
 def pack_query_projection(projections_packed: torch.Tensor) -> torch.Tensor:
     p = projections_packed.unsqueeze(0) if projections_packed.dim() == 4 else projections_packed
-    return p.permute(1, 0, 2, 3, 4).reshape(
-        p.shape[0] * p.shape[1], 1, p.shape[-2], p.shape[-1]
-    )
+    return p.permute(1, 0, 2, 3, 4).reshape(p.shape[0] * p.shape[1], 1, p.shape[-2], p.shape[-1])
 
 
 def projection_batch(projections: dict[str, torch.Tensor], device: torch.device):
@@ -274,6 +274,7 @@ def source_hypotheses_batch(loader, cfg, sample_dir: Path, device: torch.device)
 
 def predict_query_volume(
     net,
+    cfg,
     projections_packed: torch.Tensor,
     depth_maps_tensor: torch.Tensor,
     shape: tuple[int, int, int],
@@ -285,7 +286,10 @@ def predict_query_volume(
     total = int(np.prod(shape))
     pred = np.empty(total, dtype=np.float32)
     proj_in = pack_query_projection(projections_packed).to(device)
+    surface = projections_packed.unsqueeze(0).to(device)
     depth_maps = depth_maps_tensor.unsqueeze(0).to(device)
+    detector_valid_mask = torch.isfinite(depth_maps_tensor).unsqueeze(0).to(device)
+    is_ssq = str(getattr(cfg.model, "name", "")).lower() == "ssq_fmt"
     with torch.no_grad():
         for start in range(0, total, chunk_size):
             end = min(start + chunk_size, total)
@@ -293,14 +297,29 @@ def predict_query_volume(
             points = points_to_norm(ijk, shape).to(device)
             points_mm = torch.from_numpy((ijk.astype(np.float32) + 0.5) * voxel_size_mm)
             points_mm = points_mm.unsqueeze(0).to(device)
-            logits, _aux = net(
-                proj_in,
-                points,
-                points_mm=points_mm,
-                depth_maps=depth_maps,
-                source_hypotheses=source_hypotheses,
-            )
-            values = torch.sigmoid(logits.squeeze(0).squeeze(-1))
+            if is_ssq:
+                out = net(
+                    surface,
+                    points_mm,
+                    detector_valid_mask=detector_valid_mask,
+                    depth_maps=depth_maps,
+                    batch={
+                        "surface_measurements_packed": surface,
+                        "query_coordinates_mm": points_mm,
+                        "detector_valid_mask": detector_valid_mask,
+                        "depth_maps": depth_maps,
+                    },
+                )
+                values = out["density"].squeeze(0).squeeze(-1)
+            else:
+                logits, _aux = net(
+                    proj_in,
+                    points,
+                    points_mm=points_mm,
+                    depth_maps=depth_maps,
+                    source_hypotheses=source_hypotheses,
+                )
+                values = torch.sigmoid(logits.squeeze(0).squeeze(-1))
             if not torch.isfinite(values).all():
                 raise RuntimeError("Query model prediction contains NaN/Inf")
             pred[start:end] = values.detach().cpu().numpy().astype(np.float32)
@@ -639,6 +658,7 @@ def main() -> None:
             source_hypotheses = source_hypotheses_batch(loader, cfg, sample_dir, device)
             pred = predict_query_volume(
                 net,
+                cfg,
                 projections_packed,
                 depth_maps_tensor,
                 gt_shape,

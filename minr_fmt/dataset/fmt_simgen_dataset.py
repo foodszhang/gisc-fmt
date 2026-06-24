@@ -49,6 +49,8 @@ class FmtSimGenProjDataset(Dataset):
         self.voxel_size_mm = float(self.config.get("voxel_size_mm", 0.2) or 0.2)
         self.use_nongt_sampler = bool(self.config.get("use_nongt_sampler", False))
         self.projection_norm = str(self.config.get("projection_norm", "per_view_max"))
+        if str(self.config.get("model_name", "")).lower() == "ssq_fmt":
+            self.projection_norm = str(self.config.get("projection_norm", "raw"))
         self.projection_eps = float(self.config.get("projection_eps", 1e-8) or 1e-8)
         target_files = self.config.get(
             "descatter_target_files", self.config.get("descatter_target_file")
@@ -92,9 +94,7 @@ class FmtSimGenProjDataset(Dataset):
             self.config.get("center_distance_require_precomputed", False)
         )
         self.center_distance_filenames = {
-            "center_target": str(
-                self.config.get("center_target_filename", "center_target.npy")
-            ),
+            "center_target": str(self.config.get("center_target_filename", "center_target.npy")),
             "distance_target": str(
                 self.config.get("distance_target_filename", "distance_target.npy")
             ),
@@ -107,6 +107,23 @@ class FmtSimGenProjDataset(Dataset):
         self.source_hypothesis_blur_sigma = float(source_hyp_cfg.get("blur_sigma", 1.0))
         self.source_hypothesis_min_distance_cells = int(source_hyp_cfg.get("min_distance_cells", 3))
         self.source_hypothesis_min_value_ratio = float(source_hyp_cfg.get("min_value_ratio", 0.1))
+        ssq_candidate_cfg = self.config.get("ssq_candidates", {}) or {}
+        self.ssq_candidates_enabled = bool(ssq_candidate_cfg.get("enabled", False))
+        if self.ssq_candidates_enabled:
+            self.source_hypothesis_top_m = int(
+                ssq_candidate_cfg.get("top_m", self.source_hypothesis_top_m)
+            )
+            self.source_hypothesis_blur_sigma = float(
+                ssq_candidate_cfg.get("blur_sigma", self.source_hypothesis_blur_sigma)
+            )
+            self.source_hypothesis_min_distance_cells = int(
+                ssq_candidate_cfg.get(
+                    "min_distance_cells", self.source_hypothesis_min_distance_cells
+                )
+            )
+            self.source_hypothesis_min_value_ratio = float(
+                ssq_candidate_cfg.get("min_value_ratio", self.source_hypothesis_min_value_ratio)
+            )
         self.proposal_subdir = str(self.config.get("proposal_subdir", "proposal"))
         self.proposal_filename = str(
             self.config.get("proposal_filename", "meas_backproj_heatmap.npy")
@@ -523,8 +540,7 @@ class FmtSimGenProjDataset(Dataset):
     ) -> dict[str, np.ndarray] | None:
         target_dir = sample_dir / self.center_distance_subdir
         paths = {
-            key: target_dir / filename
-            for key, filename in self.center_distance_filenames.items()
+            key: target_dir / filename for key, filename in self.center_distance_filenames.items()
         }
         if not all(path.exists() for path in paths.values()):
             return None
@@ -603,6 +619,9 @@ class FmtSimGenProjDataset(Dataset):
             "sample_id": sample_dir.name,
             "projections": projections,
             "projections_packed": projections_packed,
+            "surface_measurements": projections,
+            "surface_measurements_packed": projections_packed,
+            "detector_valid_mask": torch.isfinite(depth_maps),
             "depth_maps": depth_maps,
             "gt_voxels": torch.tensor(gt, dtype=torch.float32, device=self.device),
             "points": torch.tensor(points_norm, dtype=torch.float32, device=self.device),
@@ -611,6 +630,9 @@ class FmtSimGenProjDataset(Dataset):
             ),
             "points_ijk": torch.tensor(points_ijk, dtype=torch.float32, device=self.device),
             "points_mm": torch.tensor(points_mm, dtype=torch.float32, device=self.device),
+            "query_coordinates_mm": torch.tensor(
+                points_mm, dtype=torch.float32, device=self.device
+            ),
             "query_src_tag": torch.tensor(query_src_tag, dtype=torch.long, device=self.device),
             "global_voxel_shape": tuple(int(v) for v in gt.shape),
             "feasible_voxel_shape": tuple(int(v) for v in gt.shape),
@@ -655,6 +677,21 @@ class FmtSimGenProjDataset(Dataset):
             )
         if gt_nodes is not None:
             item["gt_nodes"] = torch.tensor(gt_nodes, dtype=torch.float32, device=self.device)
+        if self.source_hypothesis_enabled or self.ssq_candidates_enabled:
+            source_hyp = self._load_source_hypotheses(sample_dir)
+            if self.ssq_candidates_enabled:
+                item["candidate_centers_mm"] = torch.tensor(
+                    source_hyp["centers"], dtype=torch.float32, device=self.device
+                )
+                item["candidate_scores"] = torch.tensor(
+                    source_hyp["peak_scores"], dtype=torch.float32, device=self.device
+                )
+                item["candidate_scales_mm"] = torch.tensor(
+                    source_hyp["scales"], dtype=torch.float32, device=self.device
+                )
+                item["candidate_valid_mask"] = torch.tensor(
+                    source_hyp["valid"] > 0.0, dtype=torch.bool, device=self.device
+                )
         if self.source_hypothesis_enabled:
             source_hyp = self._load_source_hypotheses(sample_dir)
             item["source_hypothesis_centers"] = torch.tensor(

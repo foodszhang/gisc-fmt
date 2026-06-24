@@ -122,7 +122,8 @@ def load_net(cfg, ckpt_path: Path, device: torch.device):
         for key, value in ckpt["state_dict"].items()
         if key.startswith("net.")
     }
-    missing, unexpected = net.load_state_dict(state, strict=False)
+    strict = str(cfg.model.name).lower() == "ssq_fmt"
+    missing, unexpected = net.load_state_dict(state, strict=strict)
     if unexpected:
         raise RuntimeError(f"Unexpected checkpoint keys: {unexpected[:10]}")
     if missing:
@@ -133,9 +134,7 @@ def load_net(cfg, ckpt_path: Path, device: torch.device):
 
 def pack_projection_input(projections_packed: torch.Tensor) -> torch.Tensor:
     p = projections_packed.unsqueeze(0) if projections_packed.dim() == 4 else projections_packed
-    return p.permute(1, 0, 2, 3, 4).reshape(
-        p.shape[0] * p.shape[1], 1, p.shape[-2], p.shape[-1]
-    )
+    return p.permute(1, 0, 2, 3, 4).reshape(p.shape[0] * p.shape[1], 1, p.shape[-2], p.shape[-1])
 
 
 def load_gt(sample_dir: Path) -> np.ndarray:
@@ -203,8 +202,7 @@ def candidate_cells(
         k = max(1, int(math.ceil(flat.size * float(ratio))))
         if float(flat.max()) <= 0:
             print(
-                f"[WARN] Empty proposal heatmap for {sample_dir.name}; "
-                "using arbitrary top-k cells."
+                f"[WARN] Empty proposal heatmap for {sample_dir.name}; using arbitrary top-k cells."
             )
         kth = np.partition(flat, flat.size - k)[flat.size - k]
         mask = flat >= kth
@@ -328,6 +326,7 @@ def points_to_norm(ijk: np.ndarray, gt_shape: tuple[int, int, int]) -> torch.Ten
 
 def forward_points(
     net,
+    cfg,
     proj_in: torch.Tensor,
     depth_maps: torch.Tensor,
     source_hypotheses: dict[str, torch.Tensor] | None,
@@ -338,19 +337,44 @@ def forward_points(
     device: torch.device,
 ) -> np.ndarray:
     preds = []
+    is_ssq = str(getattr(cfg.model, "name", "")).lower() == "ssq_fmt"
+    surface = None
+    detector_valid_mask = None
+    if is_ssq:
+        # ``proj_in`` is legacy view-major input for GISC-FMT. For SSQ-FMT callers pass
+        # packed [B,V,C,H,W] surface measurements through this argument.
+        surface = proj_in
+        detector_valid_mask = torch.isfinite(
+            depth_maps.squeeze(1) if depth_maps.dim() == 5 else depth_maps
+        )
     with torch.no_grad():
         for start in range(0, len(ijk), chunk_size):
             end = min(start + chunk_size, len(ijk))
             points = points_to_norm(ijk[start:end], gt_shape).to(device)
             mm = torch.tensor(points_mm[start:end], dtype=torch.float32).unsqueeze(0).to(device)
-            pred, _aux = net(
-                proj_in,
-                points,
-                points_mm=mm,
-                depth_maps=depth_maps,
-                source_hypotheses=source_hypotheses,
-            )
-            value = torch.sigmoid(pred.squeeze(0).squeeze(-1))
+            if is_ssq:
+                out = net(
+                    surface,
+                    mm,
+                    detector_valid_mask=detector_valid_mask,
+                    depth_maps=depth_maps,
+                    batch={
+                        "surface_measurements_packed": surface,
+                        "query_coordinates_mm": mm,
+                        "detector_valid_mask": detector_valid_mask,
+                        "depth_maps": depth_maps,
+                    },
+                )
+                value = out["density"].squeeze(0).squeeze(-1)
+            else:
+                pred, _aux = net(
+                    proj_in,
+                    points,
+                    points_mm=mm,
+                    depth_maps=depth_maps,
+                    source_hypotheses=source_hypotheses,
+                )
+                value = torch.sigmoid(pred.squeeze(0).squeeze(-1))
             if not torch.isfinite(value).all():
                 raise RuntimeError("Model prediction contains NaN/Inf")
             preds.append(value.detach().cpu().numpy())
@@ -372,9 +396,9 @@ def source_hypotheses_for_sample(
         "peak_scores": torch.tensor(
             source_hyp["peak_scores"], dtype=torch.float32, device=device
         ).unsqueeze(0),
-        "scales": torch.tensor(
-            source_hyp["scales"], dtype=torch.float32, device=device
-        ).unsqueeze(0),
+        "scales": torch.tensor(source_hyp["scales"], dtype=torch.float32, device=device).unsqueeze(
+            0
+        ),
         "valid": torch.tensor(source_hyp["valid"], dtype=torch.float32, device=device).unsqueeze(0),
     }
 
@@ -430,6 +454,11 @@ def evaluate_sample(
         loader._load_projection(sample_dir)
     )
     proj_in = pack_projection_input(projections_packed).to(device)
+    query_input = (
+        projections_packed.unsqueeze(0).to(device)
+        if str(cfg.model.name).lower() == "ssq_fmt"
+        else proj_in
+    )
     depth_maps = depth_maps_tensor.unsqueeze(0).to(device)
     source_hypotheses = source_hypotheses_for_sample(loader, sample_dir, device)
 
@@ -447,7 +476,8 @@ def evaluate_sample(
     )
     candidate_pred = forward_points(
         net,
-        proj_in,
+        cfg,
+        query_input,
         depth_maps,
         source_hypotheses,
         cand_ijk,
@@ -472,7 +502,8 @@ def evaluate_sample(
     )
     outside_pred = forward_points(
         net,
-        proj_in,
+        cfg,
+        query_input,
         depth_maps,
         source_hypotheses,
         out_ijk,
@@ -573,7 +604,9 @@ def grouped_summaries(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, An
             if value in {"", None}:
                 value = "unknown"
             buckets.setdefault(str(value), []).append(row)
-        groups[key] = [summarize_group(key, value, bucket) for value, bucket in sorted(buckets.items())]
+        groups[key] = [
+            summarize_group(key, value, bucket) for value, bucket in sorted(buckets.items())
+        ]
     return groups
 
 
