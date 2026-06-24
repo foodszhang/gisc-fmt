@@ -451,3 +451,8 @@ needed.
 ## Interpretation for Paper Positioning
 
 The results support positioning SSQ as source-separable query representation rather than a source-slot soft-union decoder. The formal mainline should be the no-center SSQ variant: measurement-derived source hypotheses/cues, PTFA evidence, query-canonical reliability aggregation, and distance/geometry auxiliary training regularization. The original E15 center auxiliary path should be presented as a center-auxiliary ablation: it modestly reduces merge count but does not improve overall Dice, so center supervision is not the central source-separation mechanism.
+# Historical / deprecated method version
+
+This document contains older SSQ ablation notes and must not be interpreted as results
+for the current final SSQ-FMT candidate-composition implementation. Prefer
+`docs/ssq_final_ablation_protocol.md` for the current protocol.

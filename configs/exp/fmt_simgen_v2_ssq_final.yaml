@@ -5,8 +5,8 @@ defaults:
   - override /model: ssq_fmt
   - _self_
 
-name: fmt_simgen_v2_ssq_main
-description: Deprecated alias of final SSQ-FMT candidate scalar composition mainline
+name: fmt_simgen_v2_ssq_final
+description: Final SSQ-FMT candidate scalar composition with measurement-derived candidates
 
 data:
   projection_norm: raw
@@ -20,6 +20,20 @@ data:
     blur_sigma: 1.0
     min_distance_cells: 3
     min_value_ratio: 0.1
+
+model:
+  ssq_fmt:
+    density_output_mode: candidate_scalar_composition
+    query_density_backbone:
+      enabled: false
+    routing:
+      mode: pre_aggregation
+    fusion:
+      mode: candidate_specific
+    reliability:
+      mode: evidence
+    footprint:
+      mode: query_dependent
 
 loss:
   light_weight: 1.0
@@ -40,9 +54,3 @@ optim:
 trainer:
   max_epochs: 80
   gradient_clip_val: 1.0
-
-model:
-  ssq_fmt:
-    density_output_mode: candidate_scalar_composition
-    query_density_backbone:
-      enabled: false

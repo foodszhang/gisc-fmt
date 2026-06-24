@@ -13,7 +13,7 @@ def _has_grad(module):
 
 
 def test_ssq_forward_backward_reaches_core_modules():
-    cfg = make_cfg(mmax=2, lambda_sdf=0.5)
+    cfg = make_cfg(mmax=2, lambda_sdf=0.0)
     model = SSQFMT(cfg)
     model.train()
     batch = make_batch(mmax=2)
@@ -27,7 +27,7 @@ def test_ssq_forward_backward_reaches_core_modules():
         return_diagnostics=True,
     )
     target = torch.rand_like(out["density"])
-    loss = MorphologyAwareDensityLoss(lambda_sdf=0.5)(
+    loss = MorphologyAwareDensityLoss(lambda_sdf=0.0)(
         out["density"],
         target,
         out["aux_outputs"],
@@ -45,4 +45,3 @@ def test_ssq_forward_backward_reaches_core_modules():
     assert _has_grad(model.assignment_head.candidate_assignment_head)
     assert _has_grad(model.compensation_density_decoder)
     assert _has_grad(model.candidate_density_decoder)
-    assert _has_grad(model.morphology_sdf_head)

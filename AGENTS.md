@@ -72,18 +72,17 @@ checkpoint:
 Its test300 Dice is about 0.725. Keep E13-MSQ-fixed recorded as the stronger archived
 test result, but do not mix E13 predictions into E15 paper figures.
 
-For the current SSQ-FMT mainline, the strongest validated path is the SSQ wrapper
-with the E15 query-density backbone strictly mapped into
-`query_density_backbone.*`:
+The checkpoint below is an E15 query-density backbone wrapped by the SSQ interface,
+not the final candidate-composition SSQ-FMT method:
 `outputs/ssq_fmt/e15_backbone_init_perview/checkpoints/ssq_fmt_e15_backbone_init.ckpt`.
 On the 300-sample validation split this gives sampled-query Dice about 0.746, and
-on the 300-sample test split sampled-query Dice about 0.736 at threshold 0.5. This
-checkpoint is an SSQ-format Lightning checkpoint and can be loaded directly with
-`model=ssq_fmt`; it does not require runtime `model.finetune.init_from_ckpt`.
+on the 300-sample test split sampled-query Dice about 0.736 at threshold 0.5. Report
+it only as `E15 query-density backbone wrapped by SSQ interface`; do not report it as
+Full SSQ-FMT.
 
-The from-scratch SSQ backbone training path is not yet the preferred result. The
-best current staged full-data run reached about 0.720 validation Dice and about
-0.707 test Dice:
+The from-scratch SSQ backbone training path that still used the query-density backbone
+is also not Full SSQ-FMT. Its best staged full-data run reached about 0.720 validation
+Dice and about 0.707 test Dice:
 `outputs/ssq_fmt/full_v2_main_backbone_finetune_lr5e5/checkpoints/epoch=02-val_dice=0.7204.ckpt`.
 It used the same 32768 train/eval queries per sample as E15, not a reduced query
 count. Treat this as a development checkpoint, not the active paper result.
@@ -92,6 +91,24 @@ after resume and should not be used as the default SSQ route. Candidate Gaussian
 prior density was also too weak/noisy when directly unioned into final density;
 keep `model.ssq_fmt.candidates.prior_density_weight=0.0` unless a later validation
 sweep proves otherwise.
+
+The current Full SSQ-FMT implementation is `model=ssq_fmt` with
+`model.ssq_fmt.density_output_mode=candidate_scalar_composition`. In this mode final
+density is always `sum_m pi_m d_m`; `query_density_backbone.enabled` is ignored unless
+`density_output_mode=e15_backbone_baseline` is explicitly selected. The formal modules
+live in `minr_fmt/models/ssq_fmt.py`: `SurfaceMeasurementNormalizer`,
+`SharedSurfaceEncoder`, `GeometryQueryMapper`, `QueryDependentSurfaceSampler`,
+`MeasurementDerivedCandidateBuilder`, `CandidateSurfaceRouter`, `CandidateViewEncoder`,
+`CandidateSpecificViewFusion`, `CandidateAssignmentHead`, `CompensationDensityDecoder`,
+and `CandidateDensityDecoder`.
+
+The final-method repair gate on 2026-06-25 did not yet pass quality thresholds. The
+best short gate so far is
+`outputs/ssq_fmt_final/full_gate_fourier4_bs1/checkpoints/epoch=04-val_dice=0.1037.ckpt`
+from 200 train / 50 val / 5 epochs with 32768 queries, batch size 1 and accumulation 4.
+It confirms the corrected candidate-composition path trains without NaNs and uses
+candidate branches, but validation Dice is far below the >0.4 gate threshold. Do not
+launch formal full-data runs or ablation result tables from this checkpoint.
 
 When using the v2 dataset, do not blindly trust detector masks from one source.
 The observed v2 projection/depth samples had finite-depth regions aligned with
@@ -162,11 +179,12 @@ Use E15 for multi-source separation work. The goal is to improve three-focus and
 ## Current Comparison And Training Entry Points
 
 - SSQ-FMT is the default model in `configs/config.yaml`; the main formal SSQ config is
-  `configs/exp/fmt_simgen_v2_ssq_main.yaml`.
+  `configs/exp/fmt_simgen_v2_ssq_final.yaml`. `fmt_simgen_v2_ssq_main.yaml` is kept as
+  a deprecated alias for the same candidate-composition route.
 - Use the shared entrypoint for SSQ formal runs:
-  `uv run python train.py fit model=ssq_fmt exp=fmt_simgen_v2_ssq_main data.dataset_type=fmt_simgen`.
-- Evaluate the current SSQ mainline checkpoint with:
-  `uv run python train.py test model=ssq_fmt exp=fmt_simgen_v2_ssq_main data.dataset_type=fmt_simgen ckpt_path=outputs/ssq_fmt/e15_backbone_init_perview/checkpoints/ssq_fmt_e15_backbone_init.ckpt`.
+  `uv run python train.py fit model=ssq_fmt exp=fmt_simgen_v2_ssq_final data.dataset_type=fmt_simgen`.
+- Run the current gate pipeline serially with:
+  `uv run python scripts/run_ssq_final_ablation_pipeline.py --stage gate --variants full post_aggregation shared_fusion assignment_only fixed_footprint`.
 - E15 training configs: `configs/exp/fmt_simgen_v2_e15_center.yaml` and `configs/exp/fmt_simgen_v2_e15_center_distance.yaml`.
 - E15 uses the E13 MPB chain as its base and keeps the main query-density head intact.
 - The auxiliary heads are only supervision helpers; they do not alter non-GT sampling or inference inputs.

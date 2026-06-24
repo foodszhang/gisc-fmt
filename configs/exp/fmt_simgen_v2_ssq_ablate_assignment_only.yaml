@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_final
+  - _self_
+
+name: fmt_simgen_v2_ssq_ablate_assignment_only
+description: SSQ-FMT ablation using assignment mass without conditional evidence in reliability
+
+model:
+  ssq_fmt:
+    reliability:
+      mode: assignment_only

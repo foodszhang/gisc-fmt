@@ -749,6 +749,31 @@ class TrainingLightningModule(LightningModule):
             out = self._call_ssq_model(batch, return_diagnostics=False)
             density_pred = out["density"]
             aux_outputs = out.get("aux_outputs", {})
+            if isinstance(aux_outputs, dict):
+                pi = aux_outputs.get("pi")
+                if torch.is_tensor(pi) and pi.numel() > 0:
+                    self.log(
+                        "train_ssq_pi0_mean",
+                        pi[..., 0].mean(),
+                        on_step=False,
+                        on_epoch=True,
+                        sync_dist=True,
+                    )
+                    if pi.shape[-1] > 1:
+                        self.log(
+                            "train_ssq_candidate_pi_mean",
+                            pi[..., 1:].sum(dim=-1).mean(),
+                            on_step=False,
+                            on_epoch=True,
+                            sync_dist=True,
+                        )
+                self.log(
+                    "train_ssq_density_mean",
+                    density_pred.detach().mean(),
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
             loss_dict = self.ssq_loss_func(
                 density_pred,
                 density,

@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_final
+  - _self_
+
+name: fmt_simgen_v2_ssq_ablate_shared_fusion
+description: SSQ-FMT ablation with shared cross-view fusion representation
+
+model:
+  ssq_fmt:
+    fusion:
+      mode: shared

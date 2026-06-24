@@ -13,10 +13,11 @@ geometry:
   volume_center_world: [19.0, 20.0, 10.4]
 
 ssq_fmt:
-  hidden_dim: 64
+  hidden_dim: 96
+  density_output_mode: candidate_scalar_composition
 
   query_density_backbone:
-    enabled: true
+    enabled: false
     normalization: per_view_max
 
   normalization:
@@ -24,11 +25,11 @@ ssq_fmt:
     eps: 1.0e-6
 
   encoder:
-    channels: 32
-    feature_dim: 48
+    channels: 48
+    feature_dim: 64
 
   fourier:
-    num_frequencies: 8
+    num_frequencies: 4
 
   geometry:
     camera_distance_mm: 200.0
@@ -47,8 +48,14 @@ ssq_fmt:
       - [0.0, 1.0]
 
   footprint:
-    scale_min_mm: 0.6
-    scale_max_mm: 4.0
+    mode: query_dependent
+    scale_min_px: 0.6
+    scale_max_px: 4.0
+    alpha_xi: 0.25
+    alpha_beta: 0.25
+    alpha_kappa: 0.25
+    delta_h_max: 0.25
+    fixed_sigma: 2.0
     boundary_margin_radius_px: 2.0
 
   candidates:
@@ -57,12 +64,15 @@ ssq_fmt:
     threshold: 0.05
     nms_radius_cells: 3
     mmax: 5
-    scale_min_mm: 1.0
-    scale_max_mm: 12.0
+    scale_min_mm: 4.0
+    scale_max_mm: 16.0
+    detector_scale_min_px: 0.5
+    detector_scale_max_px: 20.0
     prior_density_weight: 0.0
     trunk_size_mm: [38.0, 40.0, 20.8]
 
   routing:
+    mode: pre_aggregation
     temperature: 1.0
     assignment_temperature: 1.0
     residual_min: 0.0
@@ -70,6 +80,14 @@ ssq_fmt:
     k_min: 1.0e-6
     p_min: 1.0e-6
     tau_cand: 0.1
+    tau0: 0.25
+    tau_p: 1.0
+
+  fusion:
+    mode: candidate_specific
+
+  reliability:
+    mode: evidence
 
   sdf:
     tau_s: 3.0

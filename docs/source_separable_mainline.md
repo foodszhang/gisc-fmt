@@ -92,3 +92,8 @@ Source-slot decoder experiments are retained only as ablations:
 
 The source-slot soft-union decoder did not outperform the SSQ density path as a
 final-output method on test300, so it is not the formal mainline.
+# Historical / deprecated method version
+
+This document describes an older source-separable route and may conflict with the
+current final SSQ-FMT candidate-composition implementation. Prefer
+`docs/ssq_final_method_implementation.md` for current work.

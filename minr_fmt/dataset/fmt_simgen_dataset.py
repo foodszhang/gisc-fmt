@@ -458,12 +458,33 @@ class FmtSimGenProjDataset(Dataset):
         cell_size_mm = np.asarray(meta.get("cell_size_mm"), dtype=np.float32)
         if cell_size_mm.shape != (3,):
             cell_size_mm = trunk_size_mm / np.asarray(grid_size, dtype=np.float32)
-        scale_mm = float(np.linalg.norm(cell_size_mm) * max(1, min_distance))
+        radius_cells = max(1, min_distance)
 
         for i, (coord, value) in enumerate(zip(selected, selected_values)):
-            centers[i] = (np.asarray(coord, dtype=np.float32) + 0.5) * cell_size_mm
+            coord_arr = np.asarray(coord, dtype=np.int64)
+            centers[i] = (coord_arr.astype(np.float32) + 0.5) * cell_size_mm
             peak_scores[i] = float(value / max_value)
-            scales[i] = scale_mm
+            lo = np.maximum(coord_arr - radius_cells, 0)
+            hi = np.minimum(coord_arr + radius_cells + 1, np.asarray(grid_size, dtype=np.int64))
+            patch = smooth[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]]
+            patch_sum = float(np.sum(patch))
+            if patch_sum > 0.0 and np.isfinite(patch_sum):
+                gx, gy, gz = np.meshgrid(
+                    np.arange(lo[0], hi[0], dtype=np.float32),
+                    np.arange(lo[1], hi[1], dtype=np.float32),
+                    np.arange(lo[2], hi[2], dtype=np.float32),
+                    indexing="ij",
+                )
+                coords_mm = np.stack([gx + 0.5, gy + 0.5, gz + 0.5], axis=-1) * cell_size_mm
+                center_mm = centers[i][None, None, None, :]
+                second_moment = float(
+                    np.sum(patch[..., None] * np.square(coords_mm - center_mm)) /
+                    (3.0 * patch_sum + 1e-8)
+                )
+                scale_mm = float(np.sqrt(max(second_moment, 0.0)))
+            else:
+                scale_mm = float(np.linalg.norm(cell_size_mm) * radius_cells)
+            scales[i] = float(np.clip(scale_mm, 1e-6, np.inf))
             valid[i] = 1.0
         return {
             "centers": centers,

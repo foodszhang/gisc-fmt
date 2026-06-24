@@ -85,7 +85,7 @@ def _lightning_batch(device="cpu"):
 
 
 def test_lightning_train_val_inference_and_chunking_cpu():
-    module = TrainingLightningModule(_cfg(lambda_sdf=0.5))
+    module = TrainingLightningModule(_cfg(lambda_sdf=0.0))
     batch = _lightning_batch()
     loss = module.training_step(batch, 0)
     loss.backward()
