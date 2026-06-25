@@ -2,8 +2,8 @@
 
 Controlled models reconstruct on a configurable native voxel grid and use a
 fixed, parameter-free trilinear mapping to the common reference grid. Adapted
-literature proxies keep their existing heads but move the expensive surface
-lifting operation to the configured internal grid.
+literature proxies keep their existing heads but move expensive volume operations
+to their declared internal grids.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .uhr_deepfmt import UHRDeepFMT3DUNet
 from .voxel_baselines import (
     ConvBlock3d,
     D2RecSTAdapted,
@@ -83,8 +84,6 @@ class _NativeGridMixin:
             "native_output_shape": self.native_shape,
             "reference_output_shape": self.reference_shape,
             "fixed_output_resampling": bool(self.return_reference_grid),
-            # Training uses the native prediction and a continuously resampled
-            # native target. The full-grid tensor is reserved for common metrics.
             "train_on_native_grid": True,
             "native_pred_voxel": native_logits,
         }
@@ -166,14 +165,63 @@ class NativeGridTransUNet3DBaseline(_NativeGridMixin, nn.Module):
         return {"pred_voxel": pred, "aux_outputs": aux}
 
 
-class _NativeSurfaceProxyMixin:
-    """Move projection-to-volume lifting to the proxy's internal grid.
+class NativeGridUHRDeepFMTProxy(UHRDeepFMT3DUNet):
+    """Memory-safe UHR-inspired proxy with native-grid training supervision.
 
-    The legacy proxy first created a full-resolution one-channel shell, expanded
-    it to the latent channel count, and only then downsampled. Replacing the
-    builder preserves that heuristic shell embedding at the declared internal
-    resolution while avoiding the full-grid latent tensor.
+    This wrapper does not claim paper-faithful dual sampling. It only prevents the
+    existing 3-D SE-UNet proxy from upsampling its one-channel output during
+    training and exposes the native logits to ``VoxelReconstructionLoss``.
     """
+
+    output_type = "voxel"
+
+    def forward(self, projections_dict, points=None, target_proj_hw=None, **kwargs):
+        should_map_to_reference = bool(self.upsample_to_full)
+        self.upsample_to_full = False
+        try:
+            out = super().forward(
+                projections_dict,
+                points=points,
+                target_proj_hw=target_proj_hw,
+                **kwargs,
+            )
+        finally:
+            self.upsample_to_full = should_map_to_reference
+
+        if not isinstance(out, dict) or "pred_voxel" not in out:
+            return out
+
+        native_logits = out["pred_voxel"]
+        pred_voxel = native_logits
+        if should_map_to_reference and not self.training:
+            pred_voxel = F.interpolate(
+                native_logits,
+                size=self.full_output_shape,
+                mode="trilinear",
+                align_corners=False,
+            )
+
+        aux = dict(out.get("aux_outputs", {}))
+        aux.update(
+            {
+                "method_fidelity": "architecture_proxy",
+                "output_space": (
+                    "common_reference_grid"
+                    if should_map_to_reference and not self.training
+                    else "native_grid"
+                ),
+                "native_output_shape": tuple(int(v) for v in native_logits.shape[2:]),
+                "reference_output_shape": tuple(int(v) for v in self.full_output_shape),
+                "fixed_output_resampling": bool(should_map_to_reference and not self.training),
+                "train_on_native_grid": True,
+                "native_pred_voxel": native_logits,
+            }
+        )
+        return {"pred_voxel": pred_voxel, "aux_outputs": aux}
+
+
+class _NativeSurfaceProxyMixin:
+    """Move projection-to-volume lifting to the proxy's internal grid."""
 
     def _use_internal_surface_grid(self, config) -> None:
         internal_shape = tuple(int(v) for v in self.internal_shape)
