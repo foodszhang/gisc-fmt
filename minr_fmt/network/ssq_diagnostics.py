@@ -23,7 +23,8 @@ def initialize_probability_head(module: nn.Module, positive_ratio: float = 0.03)
     bias = math.log(positive_ratio / (1.0 - positive_ratio))
     for child in reversed(list(module.modules())):
         if isinstance(child, nn.Linear):
-            nn.init.zeros_(child.weight)
+            nn.init.xavier_uniform_(child.weight)
+            child.weight.data.mul_(1.0e-2)
             nn.init.constant_(child.bias, bias)
             return
 

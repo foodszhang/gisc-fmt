@@ -55,12 +55,7 @@ class _ImplicitDecoder(nn.Module):
     def forward(self, z: torch.Tensor, encoded: torch.Tensor) -> torch.Tensor:
         coord = self.coord(encoded)
         feat = self.feat(z)
-        # The final probability layer is prior-initialized, but this tiny feature-dependent
-        # path keeps early gradient audits informative without changing the sparse prior.
         logits = self.fusion(torch.cat([coord, feat], dim=-1))
-        logits = logits + 1.0e-3 * (
-            coord.mean(dim=-1, keepdim=True) + feat.mean(dim=-1, keepdim=True)
-        )
         return torch.sigmoid(logits)
 
 
@@ -106,13 +101,3 @@ class CompensationMorphologyDecoder(_MorphologyDecoder):
 class CandidateMorphologyDecoder(_MorphologyDecoder):
     pass
 
-
-class MorphologySDFHead(nn.Module):
-    """Deprecated mixed-z SDF head placeholder kept for old checkpoint error reporting."""
-
-    def __init__(self, feature_dim: int, hidden_dim: int):
-        super().__init__()
-        self.net = nn.Linear(feature_dim + 3, hidden_dim)
-
-    def forward(self, z: torch.Tensor, points_mm: torch.Tensor) -> torch.Tensor:
-        raise RuntimeError("Mixed-z morphology SDF head is deprecated for SSQ-FMT.")

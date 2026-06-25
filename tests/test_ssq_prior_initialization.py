@@ -13,11 +13,16 @@ def _last_linear(module):
 
 def test_correction_heads_zero_initialized_and_evidence_half():
     model = SSQFMT(make_cfg(mmax=2))
-    assert torch.all(_last_linear(model.surface_sampler.footprint_context_net).weight == 0)
+    footprint_head = _last_linear(model.surface_sampler.footprint_context_net)
+    assert torch.isfinite(footprint_head.weight).all()
+    assert footprint_head.weight.abs().sum() > 0
     assert torch.all(_last_linear(model.candidate_router.routing_net).weight == 0)
     assert torch.all(_last_linear(model.view_fusion.cross_view_fusion).weight == 0)
     assert torch.all(_last_linear(model.assignment_head.compensation_assignment_head).weight == 0)
     assert torch.all(_last_linear(model.assignment_head.candidate_assignment_head).weight == 0)
+    density_head = _last_linear(model.candidate_density_decoder.fusion)
+    assert density_head.weight.abs().sum() > 0
+    assert density_head.weight.abs().max() < 1.0e-1
     batch = make_batch(mmax=2)
     out = model(
         batch["surface_measurements_packed"],
