@@ -96,10 +96,11 @@ def test_development_allows_proxy_but_keeps_fidelity_label():
     assert spec.main_table_allowed is False
 
 
-def test_uhr_is_explicitly_labeled_adapted():
+def test_uhr_is_explicitly_labeled_as_unverified_proxy():
     spec = get_baseline_spec("uhr_deepfmt")
-    assert "adapted" in spec.display_name.lower()
-    assert spec.fidelity == "mechanism_preserving_adaptation"
+    assert "inspired" in spec.display_name.lower()
+    assert spec.fidelity == "architecture_proxy"
+    assert spec.main_table_allowed is False
 
 
 def test_native_grid_requires_explicit_physical_extent():
