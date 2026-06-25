@@ -144,7 +144,13 @@ def _slice_mapped(mapped: dict[str, torch.Tensor], start: int, end: int) -> dict
 
 
 class CandidateSpecificViewFusion(nn.Module):
-    def __init__(self, feature_dim: int, hidden_dim: int = 128, mode: str = "candidate_specific"):
+    def __init__(
+        self,
+        feature_dim: int,
+        hidden_dim: int = 128,
+        mode: str = "candidate_specific",
+        query_chunk_size: int = 4096,
+    ):
         super().__init__()
         self.transform = make_residual_mlp(
             feature_dim, hidden_dim, feature_dim, blocks=2, final_activation=True
@@ -152,8 +158,40 @@ class CandidateSpecificViewFusion(nn.Module):
         self.cross_view_fusion = make_residual_mlp(feature_dim * 4, hidden_dim, 1, blocks=1)
         zero_init_last_linear(self.cross_view_fusion)
         self.mode = str(mode)
+        self.query_chunk_size = int(query_chunk_size)
 
     def forward(
+        self,
+        per_view: torch.Tensor,
+        view_support: torch.Tensor,
+        view_valid: torch.Tensor,
+        branch_valid: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        n = per_view.shape[1]
+        chunk = self.query_chunk_size
+        if chunk > 0 and n > chunk:
+            z_parts = []
+            weight_parts = []
+            lam_parts = []
+            for start in range(0, n, chunk):
+                end = min(start + chunk, n)
+                z_i, w_i, lam_i = self._forward_impl(
+                    per_view[:, start:end],
+                    view_support[:, :, start:end],
+                    view_valid[:, :, start:end],
+                    branch_valid,
+                )
+                z_parts.append(z_i)
+                weight_parts.append(w_i)
+                lam_parts.append(lam_i)
+            return (
+                torch.cat(z_parts, dim=1),
+                torch.cat(weight_parts, dim=1),
+                torch.cat(lam_parts, dim=1),
+            )
+        return self._forward_impl(per_view, view_support, view_valid, branch_valid)
+
+    def _forward_impl(
         self,
         per_view: torch.Tensor,
         view_support: torch.Tensor,
@@ -176,9 +214,11 @@ class CandidateSpecificViewFusion(nn.Module):
             (sum_support - support_valid)[..., None] > 0.0, loo, torch.zeros_like(loo)
         )
         correction_in = torch.cat([h, loo, h - loo, h * loo], dim=-1)
-        logits = torch.log(support.clamp_min(1e-8)) + torch.tanh(
-            self.cross_view_fusion(correction_in).squeeze(-1)
-        )
+        if self.training and correction_in.requires_grad:
+            correction = checkpoint(self.cross_view_fusion, correction_in, use_reentrant=False)
+        else:
+            correction = self.cross_view_fusion(correction_in)
+        logits = torch.log(support.clamp_min(1e-8)) + torch.tanh(correction.squeeze(-1))
         weights = masked_softmax(logits, valid, dim=2)
         z = (weights[..., None] * h).sum(dim=2)
         no_views = ~valid.any(dim=2)

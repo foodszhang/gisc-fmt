@@ -20,6 +20,8 @@ def base_cmd(
     epochs: int,
     overrides: list[str],
     output_root: Path,
+    num_queries: int,
+    query_chunk_size: int,
 ) -> list[str]:
     out_dir = output_root / name
     return [
@@ -38,17 +40,23 @@ def base_cmd(
         f"data.val_max_samples={val_n}",
         "data.batch_size=1",
         "data.eval_batch_size=1",
-        "data.num_queries=32768",
-        "data.eval_sample_num=32768",
+        f"data.num_queries={num_queries}",
+        f"data.eval_sample_num={num_queries}",
         f"trainer.max_epochs={epochs}",
         "trainer.accumulate_grad_batches=4",
-        "model.ssq_fmt.routing.query_chunk_size=512",
-        "model.ssq_fmt.representation.query_chunk_size=512",
+        f"model.ssq_fmt.routing.query_chunk_size={query_chunk_size}",
+        f"model.ssq_fmt.representation.query_chunk_size={query_chunk_size}",
         *overrides,
     ]
 
 
-def stage_plan(stage: str, output_root: Path, inherited: list[str]) -> list[dict[str, Any]]:
+def stage_plan(
+    stage: str,
+    output_root: Path,
+    inherited: list[str],
+    num_queries: int,
+    query_chunk_size: int,
+) -> list[dict[str, Any]]:
     if stage == "A":
         variants = {
             "E0_shallow_two_conv": ["model.ssq_fmt.encoder.type=shallow_encoder_ablation"],
@@ -61,7 +69,16 @@ def stage_plan(stage: str, output_root: Path, inherited: list[str]) -> list[dict
             {
                 "variant": key,
                 "overrides": inherited + value,
-                "cmd": base_cmd(f"ssq_tune_{key}", 400, 100, 15, inherited + value, output_root),
+                "cmd": base_cmd(
+                    f"ssq_tune_{key}",
+                    400,
+                    100,
+                    15,
+                    inherited + value,
+                    output_root,
+                    num_queries,
+                    query_chunk_size,
+                ),
             }
             for key, value in variants.items()
         ]
@@ -87,7 +104,16 @@ def stage_plan(stage: str, output_root: Path, inherited: list[str]) -> list[dict
             {
                 "variant": key,
                 "overrides": inherited + value,
-                "cmd": base_cmd(f"ssq_tune_{key}", 400, 100, 15, inherited + value, output_root),
+                "cmd": base_cmd(
+                    f"ssq_tune_{key}",
+                    400,
+                    100,
+                    15,
+                    inherited + value,
+                    output_root,
+                    num_queries,
+                    query_chunk_size,
+                ),
             }
             for key, value in variants.items()
         ]
@@ -103,6 +129,8 @@ def stage_plan(stage: str, output_root: Path, inherited: list[str]) -> list[dict
                     15,
                     inherited + [f"loss.lambda_sdf={value}", "loss.sdf_boundary_weight=1"],
                     output_root,
+                    num_queries,
+                    query_chunk_size,
                 ),
             }
             for value in (0.0, 0.02, 0.05, 0.10)
@@ -119,6 +147,8 @@ def stage_plan(stage: str, output_root: Path, inherited: list[str]) -> list[dict
                     15,
                     inherited + [f"loss.sdf_boundary_weight={value}"],
                     output_root,
+                    num_queries,
+                    query_chunk_size,
                 ),
             }
             for value in (1, 2, 4)
@@ -237,6 +267,8 @@ def main() -> None:
     parser.add_argument("--summarize", action="store_true")
     parser.add_argument("--out_dir", default="outputs/ssq_fmt_rebuild/tuning")
     parser.add_argument("--inherit_overrides_json")
+    parser.add_argument("--num-queries", type=int, default=32768)
+    parser.add_argument("--query-chunk-size", type=int, default=512)
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -247,7 +279,13 @@ def main() -> None:
     elif (out_dir / "winner_overrides.json").exists() and args.stage != "A":
         inherited = json.loads((out_dir / "winner_overrides.json").read_text())
 
-    plan = stage_plan(args.stage, out_dir, inherited)
+    plan = stage_plan(
+        args.stage,
+        out_dir,
+        inherited,
+        args.num_queries,
+        args.query_chunk_size,
+    )
     plan_path = out_dir / f"stage_{args.stage}_plan.json"
     plan_path.write_text(json.dumps(plan, indent=2))
     print(f"wrote {plan_path}")

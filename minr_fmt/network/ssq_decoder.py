@@ -6,6 +6,7 @@ import math
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from minr_fmt.network.ssq_diagnostics import ResidualMLPBlock, initialize_probability_head
 
@@ -26,7 +27,12 @@ class FourierPositionEncoding(nn.Module):
 
 class _ImplicitDecoder(nn.Module):
     def __init__(
-        self, feature_dim: int, pos_dim: int, hidden_dim: int = 128, positive_ratio: float = 0.03
+        self,
+        feature_dim: int,
+        pos_dim: int,
+        hidden_dim: int = 128,
+        positive_ratio: float = 0.03,
+        query_chunk_size: int = 4096,
     ):
         super().__init__()
         self.coord = nn.Sequential(
@@ -51,11 +57,30 @@ class _ImplicitDecoder(nn.Module):
             nn.Linear(192, 1),
         )
         initialize_probability_head(self.fusion, positive_ratio)
+        self.query_chunk_size = int(query_chunk_size)
 
     def forward(self, z: torch.Tensor, encoded: torch.Tensor) -> torch.Tensor:
-        coord = self.coord(encoded)
-        feat = self.feat(z)
-        logits = self.fusion(torch.cat([coord, feat], dim=-1))
+        n = z.shape[1]
+        chunk = self.query_chunk_size
+        if chunk > 0 and n > chunk:
+            parts = []
+            for start in range(0, n, chunk):
+                end = min(start + chunk, n)
+                parts.append(self._forward_impl(z[:, start:end], encoded[:, start:end]))
+            return torch.cat(parts, dim=1)
+        return self._forward_impl(z, encoded)
+
+    def _forward_impl(self, z: torch.Tensor, encoded: torch.Tensor) -> torch.Tensor:
+        if self.training and (z.requires_grad or encoded.requires_grad):
+            coord = checkpoint(self.coord, encoded, use_reentrant=False)
+            feat = checkpoint(self.feat, z, use_reentrant=False)
+            logits = checkpoint(
+                self.fusion, torch.cat([coord, feat], dim=-1), use_reentrant=False
+            )
+        else:
+            coord = self.coord(encoded)
+            feat = self.feat(z)
+            logits = self.fusion(torch.cat([coord, feat], dim=-1))
         return torch.sigmoid(logits)
 
 
@@ -100,4 +125,3 @@ class CompensationMorphologyDecoder(_MorphologyDecoder):
 
 class CandidateMorphologyDecoder(_MorphologyDecoder):
     pass
-

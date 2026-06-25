@@ -81,7 +81,7 @@ def sample_finite_scalar_map(
     )
     valid = weight > float(valid_weight_min)
     sampled = value / weight.clamp_min(float(valid_weight_min))
-    sampled = torch.where(valid, sampled, torch.full_like(sampled, float("nan")))
+    sampled = torch.where(valid, sampled, torch.zeros_like(sampled))
     return sampled, valid
 
 
@@ -179,8 +179,9 @@ class GeometryQueryMapper(nn.Module):
                 path = surf_depth - query_depth
             else:
                 path = query_depth - surf_depth
-            path = path.clamp_min(0.0)
+            path = torch.where(finite_surface, path, torch.zeros_like(path)).clamp_min(0.0)
             xi = (path / max(self.path_max_mm, 1e-6)).clamp(0.0, 1.0)
+            surf_depth = torch.where(finite_surface, surf_depth, torch.zeros_like(surf_depth))
             valid_all = valid_all & finite_surface
         else:
             surf_depth = torch.full_like(depth_all[..., 0], float("nan"))
@@ -198,6 +199,7 @@ class GeometryQueryMapper(nn.Module):
             ).clamp_min(0.0)
         else:
             margin = (1.0 - grid_all.abs()).amin(dim=-1).clamp(0.0, 1.0) * (min(h, w) - 1) * 0.5
+        margin = torch.nan_to_num(margin, nan=0.0, posinf=0.0, neginf=0.0)
 
         return {
             "grid": grid_all,

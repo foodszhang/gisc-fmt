@@ -226,7 +226,16 @@ class SSQFMT(nn.Module):
             query_chunk_size=int(rep_cfg.get("query_chunk_size", 4096)),
         )
         self.view_fusion = CandidateSpecificViewFusion(
-            hidden_dim, hidden_dim, mode=str(_cfg_get(ssq, "fusion.mode", "candidate_specific"))
+            hidden_dim,
+            hidden_dim,
+            mode=str(_cfg_get(ssq, "fusion.mode", "candidate_specific")),
+            query_chunk_size=int(
+                _cfg_get(
+                    ssq,
+                    "fusion.query_chunk_size",
+                    _cfg_get(ssq, "representation.query_chunk_size", 4096),
+                )
+            ),
         )
         self.assignment_head = CandidateAssignmentHead(
             hidden_dim,
@@ -239,11 +248,26 @@ class SSQFMT(nn.Module):
             tau_p=float(_cfg_get(ssq, "routing.tau_p", 1.0)),
         )
         positive_ratio = float(_cfg_get(ssq, "decoder.positive_ratio_init", 0.03))
+        decoder_chunk_size = int(
+            _cfg_get(
+                ssq,
+                "decoder.query_chunk_size",
+                _cfg_get(ssq, "representation.query_chunk_size", 4096),
+            )
+        )
         self.compensation_density_decoder = CompensationDensityDecoder(
-            hidden_dim, self.position_encoding.out_dim, hidden_dim, positive_ratio
+            hidden_dim,
+            self.position_encoding.out_dim,
+            hidden_dim,
+            positive_ratio,
+            query_chunk_size=decoder_chunk_size,
         )
         self.candidate_density_decoder = CandidateDensityDecoder(
-            hidden_dim, self.position_encoding.out_dim, hidden_dim, positive_ratio
+            hidden_dim,
+            self.position_encoding.out_dim,
+            hidden_dim,
+            positive_ratio,
+            query_chunk_size=decoder_chunk_size,
         )
         self.compensation_morphology_decoder = CompensationMorphologyDecoder(
             hidden_dim, self.position_encoding.out_dim, hidden_dim

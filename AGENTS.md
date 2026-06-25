@@ -110,6 +110,34 @@ It confirms the corrected candidate-composition path trains without NaNs and use
 candidate branches, but validation Dice is far below the >0.4 gate threshold. Do not
 launch formal full-data runs or ablation result tables from this checkpoint.
 
+The 2026-06-25 SSQ final-method refactor found and fixed two separate stability
+issues after the initial commits. First, invalid finite-depth interpolation points
+were returning `NaN` values from `sample_finite_scalar_map`; these NaNs entered
+`detector_side_path_mm`, `detector_side_path_proxy`, routing evidence, `pi`, and final
+density. The fix is to keep validity in `valid_mask`/`finite_depth_mask` while replacing
+invalid sampled scalar values with finite zeros before they enter model MLPs. A 4-train /
+2-val smoke after the fix had `train_nonfinite_loss_skip_epoch=0` and finite density,
+assignment, and loss tensors.
+
+Second, the Residual U-Net pyramid E2 encoder exposed hidden all-query memory retention
+in the SSQ candidate path. `CandidateSpecificViewFusion` and the density decoders now
+support query chunking and activation checkpointing, using the representation chunk size
+by default. Direct E2 single-batch probes with 16384 queries now complete with finite loss
+and about 28.6 GiB reserved on the local RTX 5090, but Lightning training still sits near
+30.5 GiB and is very slow on 32 GB GPUs. Treat 16384-query E2 as a resource-heavy probe,
+not a practical short gate, unless running on a larger GPU or after implementing true
+query microbatch backward.
+
+The same repair attempt showed that E0 shallow two-conv with 16384 queries trains without
+nonfinite skips but plateaus at low validation Dice on 400 train / 100 val: roughly
+0.135, 0.118, 0.132, 0.128, 0.130, 0.129, 0.125 through the first seven validations.
+This is not comparable to the archived E14/E15 query-density results: Full SSQ-FMT uses
+candidate scalar composition `sum_m pi_m d_m` and depends on candidate anchors, routing,
+assignment, and branch decoders. If E2/E1 do not quickly exceed the E0 range, diagnose
+the candidate-composition path against the E15 query-density backbone on the same batch:
+candidate coverage/anchors, assignment mass `pi`, branch density calibration, and
+measurement-supported mask behavior are the likely failure points.
+
 When using the v2 dataset, do not blindly trust detector masks from one source.
 The observed v2 projection/depth samples had finite-depth regions aligned with
 nonzero projection regions, but SSQ should combine geometry-valid projection,
