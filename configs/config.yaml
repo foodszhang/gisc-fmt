@@ -11,13 +11,22 @@ defaults:
   - exp: default
   - _self_
 
-# optional: used for validate/test
+# Optional: used for validate/test. Publication evaluation fails if no checkpoint
+# is available; set allow_untrained_eval=true only for an explicit smoke test.
 ckpt_path: null
+allow_untrained_eval: false
 
 seed: 42
 deterministic: true
 benchmark: false
 verbose: false
+
+# Baseline reporting guard. Use table_tier=main only after the implementation
+# fidelity registry approves the selected method.
+benchmark_protocol:
+  table_tier: development
+  strict_fidelity: false
+  allow_unsafe_fully_connected_head: false
 
 data:
   dataset_type: {}
