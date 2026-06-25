@@ -4,11 +4,15 @@ num_views: 7
 in_channels: 1
 feature_dim: 64
 pos_enc_dim: 60
-global_voxel_shape: [190, 200, 104]
 geometry:
   camera_distance: 200.0
   detector_size: [256, 256]
   global_voxel_shape: [190, 200, 104]
+benchmark:
+  display_name: Template-STN reconstruction control
+  fidelity: architecture_proxy
+  reference_output_shape: [190, 200, 104]
+  table_tier: appendix
 pgdpnn:
   base_channels: 12
   alpha: 1.0
@@ -20,3 +24,5 @@ pgdpnn:
   uses_prior: true
   prior_source: nearest_surface_source_template_stn
   residual_prior: true
+  # The current class is identical to the FMT-ReconNet proxy. It must not be
+  # reported as an independent literature method without a verified definition.
