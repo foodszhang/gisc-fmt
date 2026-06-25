@@ -95,12 +95,14 @@ ssq_fmt:
     support_logit_weight: 1.0
     tau0: 0.25
     tau_p: 1.0
+    query_chunk_size: 4096
 
   representation:
     hidden_dim: 128
     blocks: 3
     expansion: 2
     dropout: 0.0
+    query_chunk_size: 4096
 
   decoder:
     positive_ratio_init: 0.03

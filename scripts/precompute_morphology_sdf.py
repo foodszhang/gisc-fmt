@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -71,19 +72,31 @@ def main() -> None:
     parser.add_argument("--truncation_distance_mm", type=float, default=3.0)
     parser.add_argument("--voxel_spacing", nargs=3, type=float, default=[0.2, 0.2, 0.2])
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--num_workers", type=int, default=1)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     samples = find_samples(Path(args.data_dir), args.limit)
-    for idx, sample_dir in enumerate(samples, 1):
-        result = process_sample(
-            sample_dir,
-            args.occupancy_threshold,
-            args.truncation_distance_mm,
-            tuple(args.voxel_spacing),
-            args.overwrite,
-        )
-        if idx == 1 or idx % 25 == 0 or idx == len(samples):
-            print(f"[{idx}/{len(samples)}] {result}")
+    common = (
+        args.occupancy_threshold,
+        args.truncation_distance_mm,
+        tuple(args.voxel_spacing),
+        args.overwrite,
+    )
+    if args.num_workers <= 1:
+        for idx, sample_dir in enumerate(samples, 1):
+            result = process_sample(sample_dir, *common)
+            if idx == 1 or idx % 25 == 0 or idx == len(samples):
+                print(f"[{idx}/{len(samples)}] {result}")
+    else:
+        with ProcessPoolExecutor(max_workers=args.num_workers) as ex:
+            futures = {
+                ex.submit(process_sample, sample_dir, *common): sample_dir
+                for sample_dir in samples
+            }
+            for idx, fut in enumerate(as_completed(futures), 1):
+                result = fut.result()
+                if idx == 1 or idx % 25 == 0 or idx == len(samples):
+                    print(f"[{idx}/{len(samples)}] {result}")
 
 
 if __name__ == "__main__":

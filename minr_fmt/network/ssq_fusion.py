@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from minr_fmt.network.ssq_diagnostics import (
     make_residual_mlp,
@@ -14,7 +15,12 @@ from minr_fmt.network.ssq_diagnostics import (
 
 class CandidateViewEncoder(nn.Module):
     def __init__(
-        self, feature_dim: int, hidden_dim: int = 128, blocks: int = 3, dropout: float = 0.0
+        self,
+        feature_dim: int,
+        hidden_dim: int = 128,
+        blocks: int = 3,
+        dropout: float = 0.0,
+        query_chunk_size: int = 4096,
     ):
         super().__init__()
         self.representation_net = make_residual_mlp(
@@ -24,8 +30,31 @@ class CandidateViewEncoder(nn.Module):
             blocks=blocks,
             dropout=dropout,
         )
+        self.query_chunk_size = int(query_chunk_size)
 
     def forward(
+        self,
+        samples: dict[str, torch.Tensor],
+        router: dict[str, torch.Tensor],
+        mapped: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        n = samples["sample_features"].shape[2]
+        chunk = self.query_chunk_size
+        if chunk > 0 and n > chunk:
+            parts = []
+            for start in range(0, n, chunk):
+                end = min(start + chunk, n)
+                parts.append(
+                    self._forward_impl(
+                        _slice_samples(samples, start, end),
+                        _slice_router(router, start, end),
+                        _slice_mapped(mapped, start, end),
+                    )
+                )
+            return torch.cat(parts, dim=1)
+        return self._forward_impl(samples, router, mapped)
+
+    def _forward_impl(
         self,
         samples: dict[str, torch.Tensor],
         router: dict[str, torch.Tensor],
@@ -56,8 +85,62 @@ class CandidateViewEncoder(nn.Module):
         )[:, :, :, None].expand(b, v, n, mb, 2)
         stats = torch.stack([router["a"], router["nu"]], dim=-1)
         rel = router["relative_query"][:, None].expand(b, v, n, mb, 3)
-        rep = self.representation_net(torch.cat([pooled, stats, rel, geom], dim=-1))
+        rep_in = torch.cat([pooled, stats, rel, geom], dim=-1)
+        if self.training and rep_in.requires_grad:
+            rep = checkpoint(self.representation_net, rep_in, use_reentrant=False)
+        else:
+            rep = self.representation_net(rep_in)
         return rep.permute(0, 2, 1, 3, 4).contiguous()
+
+
+def _slice_samples(
+    samples: dict[str, torch.Tensor], start: int, end: int
+) -> dict[str, torch.Tensor]:
+    out: dict[str, torch.Tensor] = {}
+    for key, value in samples.items():
+        if torch.is_tensor(value) and value.dim() >= 3 and value.shape[2] >= end:
+            out[key] = value[:, :, start:end]
+        else:
+            out[key] = value
+    return out
+
+
+def _slice_router(router: dict[str, torch.Tensor], start: int, end: int) -> dict[str, torch.Tensor]:
+    out: dict[str, torch.Tensor] = {}
+    query_dim_by_key = {
+        "zeta": 2,
+        "a": 2,
+        "e": 2,
+        "e_sample": 2,
+        "nu": 2,
+        "r": 2,
+        "p_all": 1,
+        "K_all": 2,
+        "relative_query": 1,
+    }
+    for key, value in router.items():
+        dim = query_dim_by_key.get(key)
+        if torch.is_tensor(value) and dim is not None and value.shape[dim] >= end:
+            slices = [slice(None)] * value.dim()
+            slices[dim] = slice(start, end)
+            out[key] = value[tuple(slices)]
+        else:
+            out[key] = value
+    return out
+
+
+def _slice_mapped(mapped: dict[str, torch.Tensor], start: int, end: int) -> dict[str, torch.Tensor]:
+    out: dict[str, torch.Tensor] = {}
+    for key, value in mapped.items():
+        if not torch.is_tensor(value):
+            out[key] = value
+        elif value.dim() >= 3 and value.shape[2] >= end:
+            out[key] = value[:, :, start:end]
+        elif value.dim() >= 2 and value.shape[1] >= end:
+            out[key] = value[:, start:end]
+        else:
+            out[key] = value
+    return out
 
 
 class CandidateSpecificViewFusion(nn.Module):
@@ -78,7 +161,10 @@ class CandidateSpecificViewFusion(nn.Module):
         branch_valid: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         b, n, v, mb, c = per_view.shape
-        h = self.transform(per_view)
+        if self.training and per_view.requires_grad:
+            h = checkpoint(self.transform, per_view, use_reentrant=False)
+        else:
+            h = self.transform(per_view)
         support = view_support.permute(0, 2, 1, 3).contiguous()
         valid = view_valid.permute(0, 2, 1)[:, :, :, None] & branch_valid[:, None, None]
         support_valid = torch.where(valid, support, torch.zeros_like(support))

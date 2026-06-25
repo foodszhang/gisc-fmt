@@ -215,6 +215,7 @@ class SSQFMT(nn.Module):
             k_min=float(_cfg_get(ssq, "routing.k_min", 1e-6)),
             mode=str(_cfg_get(ssq, "routing.mode", "pre_aggregation")),
             reliability_mode=str(_cfg_get(ssq, "reliability.mode", "evidence")),
+            query_chunk_size=int(_cfg_get(ssq, "routing.query_chunk_size", 4096)),
         )
         rep_cfg = ssq.get("representation", {})
         self.view_encoder = CandidateViewEncoder(
@@ -222,6 +223,7 @@ class SSQFMT(nn.Module):
             hidden_dim,
             blocks=int(rep_cfg.get("blocks", 3)),
             dropout=float(rep_cfg.get("dropout", 0.0)),
+            query_chunk_size=int(rep_cfg.get("query_chunk_size", 4096)),
         )
         self.view_fusion = CandidateSpecificViewFusion(
             hidden_dim, hidden_dim, mode=str(_cfg_get(ssq, "fusion.mode", "candidate_specific"))
