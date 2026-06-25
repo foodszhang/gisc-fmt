@@ -24,9 +24,11 @@ from minr_fmt.network.ssq_decoder import (
     CompensationDensityDecoder,
     CompensationMorphologyDecoder,
     FourierPositionEncoding,
-    MorphologySDFHead,
 )
-from minr_fmt.network.ssq_encoder import ShallowSurfaceEncoder, SharedMultiscaleSurfaceEncoder
+from minr_fmt.network.ssq_encoder import (
+    ShallowSurfaceEncoder,
+    SharedResidualUNetPyramidEncoder,
+)
 from minr_fmt.network.ssq_fusion import (
     CandidateAssignmentHead,
     CandidateSpecificViewFusion,
@@ -132,12 +134,16 @@ class SSQFMT(nn.Module):
             volume_center_world=tuple(geom.get("volume_center_world", [19.0, 20.0, 10.4])),
             fd_step_mm=float(geom.get("jacobian_fd_step_mm", 0.2)),
             path_max_mm=float(footprint_cfg.get("path_max_mm", 20.0)),
+            path_sign=str(
+                geom.get("depth_path_sign", footprint_cfg.get("path_sign", "query_minus_surface"))
+            ),
+            depth_valid_weight_min=float(geom.get("depth_valid_weight_min", 1.0e-4)),
         )
 
         enc_cfg = ssq.get("encoder", {})
-        enc_type = str(enc_cfg.get("type", "residual_fpn"))
+        enc_type = str(enc_cfg.get("type", "residual_unet_pyramid_fusion"))
         if enc_type in {"shallow", "shallow_encoder_ablation"}:
-            feature_dim = int(enc_cfg.get("feature_dim", enc_cfg.get("pyramid_channels", 64)))
+            feature_dim = int(enc_cfg.get("output_channels", enc_cfg.get("feature_dim", 48)))
             self.surface_encoder = ShallowSurfaceEncoder(
                 in_channels=in_channels,
                 channels=int(enc_cfg.get("channels", 32)),
@@ -153,14 +159,17 @@ class SSQFMT(nn.Module):
                 stage_channels = tuple(enc_cfg.get("stage_channels", [48, 96, 192, 256]))
                 stage_blocks = tuple(enc_cfg.get("stage_blocks", [2, 2, 3, 3]))
                 stem_channels = int(enc_cfg.get("stem_channels", 32))
-            feature_dim = int(enc_cfg.get("pyramid_channels", enc_cfg.get("feature_dim", 64)))
-            self.surface_encoder = SharedMultiscaleSurfaceEncoder(
+            feature_dim = int(enc_cfg.get("output_channels", enc_cfg.get("feature_dim", 96)))
+            self.surface_encoder = SharedResidualUNetPyramidEncoder(
                 in_channels=in_channels,
                 stem_channels=stem_channels,
                 stage_channels=stage_channels,  # type: ignore[arg-type]
                 stage_blocks=stage_blocks,  # type: ignore[arg-type]
-                pyramid_channels=feature_dim,
+                pyramid_channels=int(enc_cfg.get("pyramid_channels", 64)),
+                output_channels=feature_dim,
                 dropout=float(enc_cfg.get("dropout", 0.0)),
+                use_pyramid_fusion=enc_type
+                not in {"residual_unet_no_pyramid", "residual_unet_without_pyramid"},
             )
 
         offsets = local_template(
@@ -170,7 +179,7 @@ class SSQFMT(nn.Module):
         sample_feature_dim = int(_cfg_get(ssq, "local_sampling.sample_feature_dim", 128))
         self.surface_sampler = QueryDependentSurfaceSampler(
             offsets,
-            level_channels=feature_dim,
+            feature_channels=feature_dim,
             sample_feature_dim=sample_feature_dim,
             hidden_dim=hidden_dim,
             sigma_min_px=float(
@@ -240,7 +249,6 @@ class SSQFMT(nn.Module):
         self.candidate_morphology_decoder = CandidateMorphologyDecoder(
             hidden_dim, self.position_encoding.out_dim, hidden_dim
         )
-        self.morphology_sdf_head = MorphologySDFHead(hidden_dim, hidden_dim)
         self.lambda_sdf = float(
             _cfg_get(root, "loss.lambda_sdf", _cfg_get(ssq, "sdf.lambda_sdf", 0.0))
         )
@@ -251,15 +259,6 @@ class SSQFMT(nn.Module):
         if self.density_output_mode != "candidate_scalar_composition":
             raise ValueError("Full SSQ-FMT only supports candidate_scalar_composition density.")
         self.query_density_backbone = None
-        self._mode_epsilon = 0.0
-        if str(_cfg_get(ssq, "routing.mode", "pre_aggregation")) == "post_aggregation":
-            self._mode_epsilon += 1.0e-5
-        if str(_cfg_get(ssq, "fusion.mode", "candidate_specific")) == "shared":
-            self._mode_epsilon += 2.0e-5
-        if str(_cfg_get(ssq, "reliability.mode", "evidence")) == "assignment_only":
-            self._mode_epsilon += 3.0e-5
-        if str(footprint_cfg.get("mode", "query_dependent")) == "fixed":
-            self._mode_epsilon += 4.0e-5
 
     def forward(
         self,
@@ -349,16 +348,22 @@ class SSQFMT(nn.Module):
             dtype=branch_contributions.dtype
         )
         density = branch_contributions.sum(dim=2).clamp(0.0, 1.0)
-        if self._mode_epsilon:
-            density = (density + self._mode_epsilon * density.detach().clamp_min(1e-3)).clamp(
-                0.0, 1.0
-            )
         candidate_prior = torch.zeros_like(density)
         cand_contrib = (
             branch_contributions[:, :, 1:].sum(dim=2) if m > 0 else torch.zeros_like(density)
         )
         comp_contrib = branch_contributions[:, :, :1].sum(dim=2)
-        total_contrib = branch_contributions.sum(dim=2).clamp_min(1e-8)
+        support_f = measurement_supported.to(dtype=density.dtype)
+        per_sample_total_mass = (density.squeeze(-1) * support_f).sum(dim=1).clamp_min(1e-8)
+        per_sample_branch_mass = (branch_contributions.squeeze(-1) * support_f[:, :, None]).sum(
+            dim=1
+        )
+        valid_branch = torch.ones_like(per_sample_branch_mass, dtype=torch.bool)
+        if m > 0:
+            valid_branch[:, 1:] = candidates["candidate_valid_mask"]
+        utilized = (
+            per_sample_branch_mass / per_sample_total_mass[:, None] > 0.01
+        ) & valid_branch
         pi_entropy = -(pi.clamp_min(1e-8) * pi.clamp_min(1e-8).log()).sum(dim=-1)
         z_norm = torch.nn.functional.normalize(z[:, :, 1:], dim=-1) if m > 0 else z[:, :, 1:]
         pairwise_z_cosine = (
@@ -367,11 +372,18 @@ class SSQFMT(nn.Module):
             else torch.empty((*z.shape[:2], 0, 0), device=z.device, dtype=z.dtype)
         )
         branch_prob = branch_contributions[:, :, 1:, 0] if m > 0 else pi[:, :, 1:]
+        branch_prob = branch_prob * support_f[:, :, None]
+        branch_sum = branch_prob.sum(dim=1)
+        pair_intersection = torch.matmul(branch_prob.transpose(1, 2), branch_prob)
+        pair_den = branch_sum[:, :, None] + branch_sum[:, None, :]
         pairwise_branch_overlap = (
-            torch.minimum(branch_prob[:, :, :, None], branch_prob[:, :, None, :])
+            (2.0 * pair_intersection + 1.0e-8) / (pair_den + 1.0e-8)
             if m > 0
             else torch.empty((*z.shape[:2], 0, 0), device=z.device, dtype=z.dtype)
         )
+        if m > 0:
+            eye = torch.eye(m, device=z.device, dtype=torch.bool)[None]
+            pairwise_branch_overlap = pairwise_branch_overlap.masked_fill(eye, float("nan"))
         routing_entropy = -(
             router["zeta"].clamp_min(1e-8) * router["zeta"].clamp_min(1e-8).log()
         ).sum(dim=-1)
@@ -382,13 +394,17 @@ class SSQFMT(nn.Module):
             "candidate_prior_density": candidate_prior,
             "lightweight_density": density,
             "measurement_supported": measurement_supported,
-            "compensation_contribution_ratio": (comp_contrib / total_contrib).mean(),
-            "candidate_contribution_ratio": (cand_contrib / total_contrib).mean(),
+            "compensation_contribution_ratio": (
+                (comp_contrib.squeeze(-1) * support_f).sum(dim=1) / per_sample_total_mass
+            ).mean(),
+            "candidate_contribution_ratio": (
+                (cand_contrib.squeeze(-1) * support_f).sum(dim=1) / per_sample_total_mass
+            ).mean(),
             "density_output_mode": torch.tensor(0, device=density.device),
         }
         branch_sdf = None
         composed_sdf = None
-        if self.training or return_diagnostics:
+        if (self.lambda_sdf > 0.0 and self.training) or return_diagnostics:
             q0 = self.compensation_morphology_decoder(z[:, :, 0], encoded_query)
             if m > 0:
                 qm = self.candidate_morphology_decoder(z[:, :, 1:], encoded_rel)
@@ -448,12 +464,16 @@ class SSQFMT(nn.Module):
             "pi": pi,
             "measurement_supported": measurement_supported,
             "unsupported_query_ratio": (~measurement_supported).to(dtype=density.dtype).mean(),
-            "compensation_contribution_ratio": (comp_contrib / total_contrib).mean(),
-            "candidate_contribution_ratio": (cand_contrib / total_contrib).mean(),
-            "unused_candidate_ratio": (pi[:, :, 1:] <= 1e-6).to(dtype=density.dtype).mean()
+            "compensation_contribution_ratio": (
+                (comp_contrib.squeeze(-1) * support_f).sum(dim=1) / per_sample_total_mass
+            ).mean(),
+            "candidate_contribution_ratio": (
+                (cand_contrib.squeeze(-1) * support_f).sum(dim=1) / per_sample_total_mass
+            ).mean(),
+            "unused_candidate_ratio": (~utilized[:, 1:]).to(dtype=density.dtype).mean()
             if m > 0
             else torch.zeros((), device=density.device),
-            "candidate_utilization": (pi[:, :, 1:] > 1e-6).to(dtype=density.dtype).mean()
+            "candidate_utilization": utilized[:, 1:].to(dtype=density.dtype).mean()
             if m > 0
             else torch.zeros((), device=density.device),
             "pairwise_z_cosine_similarity": pairwise_z_cosine,

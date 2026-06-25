@@ -25,15 +25,15 @@ ssq_fmt:
     eps: 1.0e-6
 
   encoder:
-    type: residual_fpn
-    profile: base
+    type: residual_unet_pyramid_fusion
     stem_channels: 32
     stage_channels: [48, 96, 192, 256]
     stage_blocks: [2, 2, 3, 3]
     pyramid_channels: 64
-    output_levels: [full, half, quarter]
+    output_channels: 96
     norm: group
     activation: silu
+    skip_fusion: concat
     dropout: 0.0
 
   fourier:
@@ -45,6 +45,8 @@ ssq_fmt:
     detector_resolution: [256, 256]
     volume_center_world: [19.0, 20.0, 10.4]
     jacobian_fd_step_mm: 0.2
+    depth_path_sign: query_minus_surface
+    depth_valid_weight_min: 1.0e-4
 
   local_sampling:
     template: grid3x3
@@ -64,9 +66,11 @@ ssq_fmt:
 
   candidates:
     grid_spacing_mm: 1.0
-    blur_sigma: 1.0
+    smoothing_sigma_cells: 1.0
+    smoothing_sigma_mm: null
     threshold: 0.05
-    nms_radius_cells: 3
+    nms_radius_mm: 3.0
+    support_moment_radius_mm: 4.0
     mmax: 5
     scale_min_mm: 1.0
     scale_max_mm: 12.0
@@ -113,7 +117,7 @@ ssq_fmt:
     boundary_weight: 1.0
     target_subdir: morphology
     target_filename: sdf_target.npy
-    target_version: ssq_candidate_conditioned_sdf_v1
+    target_version: ssq_candidate_conditioned_sdf_v2
 
 gisc_fmt:
   use_adapter: true

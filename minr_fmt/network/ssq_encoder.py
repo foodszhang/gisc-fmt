@@ -43,8 +43,24 @@ class ResidualBlock2d(nn.Module):
         return F.silu(x + y)
 
 
-class SharedMultiscaleSurfaceEncoder(nn.Module):
-    """Residual-FPN encoder applied independently to each detector view."""
+class _DecoderRefine(nn.Module):
+    def __init__(self, in_ch: int, out_ch: int, blocks: int = 2, dropout: float = 0.0):
+        super().__init__()
+        layers: list[nn.Module] = [ConvNormAct(in_ch, out_ch)]
+        layers.extend(ResidualBlock2d(out_ch, dropout) for _ in range(int(blocks)))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class SharedResidualUNetPyramidEncoder(nn.Module):
+    """Residual U-Net with internal pyramid context fusion.
+
+    The public contract is a single full-resolution detector feature map
+    ``[B,V,output_channels,H,W]``. Full/half/quarter decoder states stay internal
+    and are fused before returning.
+    """
 
     def __init__(
         self,
@@ -53,11 +69,14 @@ class SharedMultiscaleSurfaceEncoder(nn.Module):
         stage_channels: tuple[int, int, int, int] = (48, 96, 192, 256),
         stage_blocks: tuple[int, int, int, int] = (2, 2, 3, 3),
         pyramid_channels: int = 64,
+        output_channels: int = 96,
         dropout: float = 0.0,
+        use_pyramid_fusion: bool = True,
     ):
         super().__init__()
         c1, c2, c3, c4 = [int(v) for v in stage_channels]
         b1, b2, b3, b4 = [int(v) for v in stage_blocks]
+        self.use_pyramid_fusion = bool(use_pyramid_fusion)
         self.stem = ConvNormAct(in_channels, int(stem_channels))
         self.stage1_in = ConvNormAct(int(stem_channels), c1)
         self.stage1 = nn.Sequential(*(ResidualBlock2d(c1, dropout) for _ in range(b1)))
@@ -69,50 +88,60 @@ class SharedMultiscaleSurfaceEncoder(nn.Module):
         self.stage4 = nn.Sequential(*(ResidualBlock2d(c4, dropout) for _ in range(b4)))
 
         p = int(pyramid_channels)
-        self.lat1 = nn.Conv2d(c1, p, 1)
-        self.lat2 = nn.Conv2d(c2, p, 1)
-        self.lat3 = nn.Conv2d(c3, p, 1)
-        self.lat4 = nn.Conv2d(c4, p, 1)
-        self.refine1 = ConvNormAct(p, p)
-        self.refine2 = ConvNormAct(p, p)
-        self.refine3 = ConvNormAct(p, p)
-        self.out_channels = p
+        out = int(output_channels)
+        self.up43 = ConvNormAct(c4, c3)
+        self.dec3 = _DecoderRefine(c3 + c3, c3, blocks=2, dropout=dropout)
+        self.up32 = ConvNormAct(c3, c2)
+        self.dec2 = _DecoderRefine(c2 + c2, c2, blocks=2, dropout=dropout)
+        self.up21 = ConvNormAct(c2, c1)
+        self.dec1 = _DecoderRefine(c1 + c1, c1, blocks=2, dropout=dropout)
 
-    def _encode_flat(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        if self.use_pyramid_fusion:
+            self.proj1 = ConvNormAct(c1, p)
+            self.proj2 = ConvNormAct(c2, p)
+            self.proj3 = ConvNormAct(c3, p)
+            self.fuse = nn.Sequential(ConvNormAct(p * 3, out), ConvNormAct(out, out))
+        else:
+            self.fuse = nn.Sequential(ConvNormAct(c1, out), ConvNormAct(out, out))
+        self.out_channels = out
+
+    def _encode_flat(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem(x)
         s1 = self.stage1(self.stage1_in(x))
         s2 = self.stage2(self.down2(s1))
         s3 = self.stage3(self.down3(s2))
         s4 = self.stage4(self.down4(s3))
-        p4 = self.lat4(s4)
-        p3 = self.lat3(s3) + F.interpolate(
-            p4, size=s3.shape[-2:], mode="bilinear", align_corners=False
+        up4 = F.interpolate(s4, size=s3.shape[-2:], mode="bilinear", align_corners=False)
+        h3 = self.dec3(torch.cat([self.up43(up4), s3], dim=1))
+        up3 = F.interpolate(h3, size=s2.shape[-2:], mode="bilinear", align_corners=False)
+        h2 = self.dec2(torch.cat([self.up32(up3), s2], dim=1))
+        up2 = F.interpolate(h2, size=s1.shape[-2:], mode="bilinear", align_corners=False)
+        h1 = self.dec1(torch.cat([self.up21(up2), s1], dim=1))
+        if not self.use_pyramid_fusion:
+            return self.fuse(h1)
+        p1 = self.proj1(h1)
+        p2 = self.proj2(h2)
+        p3 = self.proj3(h3)
+        fused = torch.cat(
+            [
+                p1,
+                F.interpolate(p2, size=p1.shape[-2:], mode="bilinear", align_corners=False),
+                F.interpolate(p3, size=p1.shape[-2:], mode="bilinear", align_corners=False),
+            ],
+            dim=1,
         )
-        p2 = self.lat2(s2) + F.interpolate(
-            p3, size=s2.shape[-2:], mode="bilinear", align_corners=False
-        )
-        p1 = self.lat1(s1) + F.interpolate(
-            p2, size=s1.shape[-2:], mode="bilinear", align_corners=False
-        )
-        return {
-            "full": self.refine1(p1),
-            "half": self.refine2(p2),
-            "quarter": self.refine3(p3),
-            "global_context": F.adaptive_avg_pool2d(p4, 1).flatten(1),
-        }
+        return self.fuse(fused)
 
-    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() != 5:
             raise ValueError(f"expected [B,V,C,H,W], got {tuple(x.shape)}")
         b, v, c, h, w = x.shape
         out = self._encode_flat(x.reshape(b * v, c, h, w))
-        result: dict[str, torch.Tensor] = {}
-        for key, value in out.items():
-            if key == "global_context":
-                result[key] = value.reshape(b, v, -1)
-            else:
-                result[key] = value.reshape(b, v, value.shape[1], value.shape[2], value.shape[3])
-        return result
+        return out.reshape(b, v, out.shape[1], out.shape[2], out.shape[3])
+
+
+class SharedMultiscaleSurfaceEncoder(SharedResidualUNetPyramidEncoder):
+    """Backward-compatible alias for the production residual U-Net pyramid encoder."""
 
 
 class ShallowSurfaceEncoder(nn.Module):
@@ -130,17 +159,7 @@ class ShallowSurfaceEncoder(nn.Module):
         )
         self.out_channels = int(out_channels)
 
-    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, v, c, h, w = x.shape
         y = self.net(x.reshape(b * v, c, h, w))
-        full = y.reshape(b, v, y.shape[1], y.shape[2], y.shape[3])
-        return {
-            "full": full,
-            "half": F.avg_pool2d(full.reshape(b * v, y.shape[1], h, w), 2).reshape(
-                b, v, y.shape[1], h // 2, w // 2
-            ),
-            "quarter": F.avg_pool2d(full.reshape(b * v, y.shape[1], h, w), 4).reshape(
-                b, v, y.shape[1], h // 4, w // 4
-            ),
-            "global_context": full.mean(dim=(-2, -1)),
-        }
+        return y.reshape(b, v, y.shape[1], y.shape[2], y.shape[3])

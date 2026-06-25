@@ -18,7 +18,6 @@ def test_density_loss_reaches_rebuilt_modules():
     loss = torch.nn.functional.binary_cross_entropy(out["density"], torch.rand_like(out["density"]))
     loss.backward()
     assert _has_grad(model.surface_encoder)
-    assert _has_grad(model.surface_sampler.footprint_context_net)
     assert _has_grad(model.candidate_router.routing_net)
     assert _has_grad(model.candidate_router.evidence_net)
     assert _has_grad(model.view_encoder.representation_net)

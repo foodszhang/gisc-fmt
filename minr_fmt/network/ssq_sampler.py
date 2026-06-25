@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from minr_fmt.network.ssq_diagnostics import make_residual_mlp, zero_init_last_linear
-from minr_fmt.network.ssq_geometry import sample_scalar_map
+from minr_fmt.network.ssq_diagnostics import make_residual_mlp
+from minr_fmt.network.ssq_geometry import sample_finite_scalar_map, sample_scalar_map
 
 
 def local_template(name: str, fallback: list[list[float]] | None = None) -> list[list[float]]:
@@ -50,7 +50,7 @@ class QueryDependentSurfaceSampler(nn.Module):
     def __init__(
         self,
         offsets_px: list[list[float]],
-        level_channels: int,
+        feature_channels: int | None = None,
         sample_feature_dim: int = 128,
         hidden_dim: int = 128,
         sigma_min_px: float = 1.0,
@@ -68,11 +68,11 @@ class QueryDependentSurfaceSampler(nn.Module):
         if offsets.dim() != 2 or offsets.shape[-1] != 2:
             raise ValueError("offsets_px must be a list of [du,dv] pairs")
         self.register_buffer("offsets_px", offsets, persistent=False)
-        self.context_net = make_residual_mlp(level_channels * 3 + 3, hidden_dim, 1, blocks=1)
-        zero_init_last_linear(self.context_net)
+        channels = int(feature_channels if feature_channels is not None else sample_feature_dim)
+        self.context_net = make_residual_mlp(channels + 3, hidden_dim, 1, blocks=1)
         self.footprint_context_net = self.context_net
         self.sample_projection = make_residual_mlp(
-            level_channels * 3 + 1, hidden_dim, sample_feature_dim, blocks=1
+            channels + 1, hidden_dim, sample_feature_dim, blocks=1
         )
         self.sample_feature_dim = int(sample_feature_dim)
         self.sigma_min_px = float(sigma_min_px)
@@ -99,23 +99,22 @@ class QueryDependentSurfaceSampler(nn.Module):
 
     def forward(
         self,
-        features: dict[str, torch.Tensor],
+        features: torch.Tensor,
         measurements: torch.Tensor,
         mapped: dict[str, torch.Tensor],
         *,
         detector_valid_mask: torch.Tensor | None = None,
         depth_maps: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        full = features["full"]
-        b, v, c, h, w = full.shape
+        if isinstance(features, dict):
+            raise TypeError("QueryDependentSurfaceSampler expects a single [B,V,C,H,W] feature map")
+        full = features
+        b, v, _c, h, w = full.shape
         n = mapped["grid"].shape[2]
         offsets = self.offsets_px.to(device=full.device, dtype=full.dtype)
         k = offsets.shape[0]
 
         center_grid = mapped["grid"][:, :, :, None, :]
-        center_feats = []
-        sample_levels = []
-        sample_grids_by_level = {}
         sigma_context = torch.stack(
             [
                 mapped["detector_side_path_proxy"],
@@ -125,15 +124,12 @@ class QueryDependentSurfaceSampler(nn.Module):
             ],
             dim=-1,
         )
-        for name in ("full", "half", "quarter"):
-            feat = features[name]
-            _, _, _, hl, wl = feat.shape
-            center_feats.append(self._sample_feature_level(feat, center_grid).squeeze(3))
+        center_feat = self._sample_feature_level(full, center_grid).squeeze(3)
 
         meas_center = sample_scalar_map(
             measurements, mapped["grid"], align_corners=self.align_corners
         )[..., None]
-        ctx = torch.cat([*center_feats, meas_center, sigma_context], dim=-1)
+        ctx = torch.cat([center_feat, meas_center, sigma_context], dim=-1)
         alpha = torch.tensor(
             [self.alpha_xi, self.alpha_beta],
             device=full.device,
@@ -152,25 +148,17 @@ class QueryDependentSurfaceSampler(nn.Module):
             sigma_f = self.sigma_min_px + (self.sigma_max_px - self.sigma_min_px) * h_sched
 
         base_grid = mapped["grid"][:, :, :, None, :]
-        for name in ("full", "half", "quarter"):
-            feat = features[name]
-            _, _, _, hl, wl = feat.shape
-            sx = sigma_f * (wl - 1) / max(w - 1, 1)
-            sy = sigma_f * (hl - 1) / max(h - 1, 1)
-            dx = 2.0 / max(wl - 1, 1)
-            dy = 2.0 / max(hl - 1, 1)
-            off_grid = torch.stack(
-                [
-                    offsets[None, None, None, :, 0] * sx[..., None] * dx,
-                    offsets[None, None, None, :, 1] * sy[..., None] * dy,
-                ],
-                dim=-1,
-            )
-            grid_l = base_grid + off_grid
-            sample_grids_by_level[name] = grid_l
-            sample_levels.append(self._sample_feature_level(feat, grid_l))
-
-        grid = sample_grids_by_level["full"]
+        dx = 2.0 / max(w - 1, 1)
+        dy = 2.0 / max(h - 1, 1)
+        off_grid = torch.stack(
+            [
+                offsets[None, None, None, :, 0] * sigma_f[..., None] * dx,
+                offsets[None, None, None, :, 1] * sigma_f[..., None] * dy,
+            ],
+            dim=-1,
+        )
+        grid = base_grid + off_grid
+        sample_features_raw = self._sample_feature_level(full, grid)
         in_bounds = (grid.abs() <= 1.0).all(dim=-1)
         sample_valid = mapped["valid_mask"][:, :, :, None] & in_bounds
         if detector_valid_mask is not None:
@@ -186,19 +174,18 @@ class QueryDependentSurfaceSampler(nn.Module):
                 > 0.5
             )
         if depth_maps is not None:
-            sampled_depth = sample_scalar_map(
-                depth_maps, grid, mode="bilinear", align_corners=self.align_corners
+            sampled_depth, finite_depth = sample_finite_scalar_map(
+                depth_maps, grid, align_corners=self.align_corners
             )
-            sample_valid = sample_valid & torch.isfinite(sampled_depth)
+            sample_valid = sample_valid & finite_depth
         else:
             sampled_depth = torch.zeros((b, v, n, k), device=full.device, dtype=full.dtype)
 
         sampled_meas = sample_scalar_map(measurements, grid, align_corners=self.align_corners)[
             ..., None
         ]
-        concatenated = torch.cat([*sample_levels, sampled_meas], dim=-1)
+        concatenated = torch.cat([sample_features_raw, sampled_meas], dim=-1)
         sampled = self.sample_projection(concatenated)
-        sampled = sampled + 1.0e-3 * h_sched[:, :, :, None, None]
         sampled = torch.where(sample_valid[..., None], sampled, torch.zeros_like(sampled))
         sampled_meas = torch.where(
             sample_valid[..., None], sampled_meas, torch.zeros_like(sampled_meas)

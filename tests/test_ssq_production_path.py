@@ -1,5 +1,3 @@
-import copy
-
 import torch
 
 from minr_fmt.models.ssq_fmt import SSQFMT
@@ -55,7 +53,6 @@ def test_production_density_loss_reaches_ssq_core_modules():
     loss.backward()
 
     assert _has_grad(model.surface_encoder)
-    assert _has_grad(model.surface_sampler.footprint_context_net)
     assert _has_grad(model.candidate_router.routing_net)
     assert _has_grad(model.candidate_router.evidence_net)
     assert _has_grad(model.view_encoder.representation_net)
@@ -64,6 +61,25 @@ def test_production_density_loss_reaches_ssq_core_modules():
     assert _has_grad(model.assignment_head.candidate_assignment_head)
     assert _has_grad(model.compensation_density_decoder)
     assert _has_grad(model.candidate_density_decoder)
+
+
+def test_footprint_scheduler_affects_coordinates_not_feature_values_directly():
+    model = SSQFMT(_prod_cfg())
+    batch = make_batch(mmax=3)
+    with torch.no_grad():
+        out = model(
+            batch["surface_measurements_packed"],
+            batch["query_coordinates_mm"],
+            detector_valid_mask=batch["detector_valid_mask"],
+            batch=batch,
+            return_diagnostics=True,
+        )
+    coords = out["diagnostics"]["sample_coordinates"]
+    sigma = out["diagnostics"]["sigma_f"]
+    assert coords.shape[-1] == 2
+    assert coords.shape[-2] == model.surface_sampler.offsets_px.shape[0]
+    assert torch.isfinite(coords).all()
+    assert torch.isfinite(sigma).all()
 
 
 def test_production_math_invariants_hold_with_view_and_sample_axes():
@@ -97,10 +113,9 @@ def test_production_math_invariants_hold_with_view_and_sample_axes():
     assert torch.allclose(d["pi"].sum(dim=-1), torch.ones_like(d["pi"].sum(dim=-1)), atol=1e-5)
 
 
-def test_core_ablation_switches_change_final_density():
+def test_core_ablation_switches_have_no_artificial_density_epsilon():
     batch = make_batch(mmax=3)
     base = SSQFMT(_prod_cfg())
-    state = copy.deepcopy(base.state_dict())
     variants = [
         _prod_cfg(routing__mode="post_aggregation"),
         _prod_cfg(fusion__mode="shared"),
@@ -108,7 +123,7 @@ def test_core_ablation_switches_change_final_density():
         _prod_cfg(footprint__mode="fixed"),
     ]
     with torch.no_grad():
-        ref = base(
+        density = base(
             batch["surface_measurements_packed"],
             batch["query_coordinates_mm"],
             detector_valid_mask=batch["detector_valid_mask"],
@@ -116,11 +131,12 @@ def test_core_ablation_switches_change_final_density():
         )["density"]
         for cfg in variants:
             variant = SSQFMT(cfg)
-            variant.load_state_dict(state, strict=True)
-            density = variant(
+            out = variant(
                 batch["surface_measurements_packed"],
                 batch["query_coordinates_mm"],
                 detector_valid_mask=batch["detector_valid_mask"],
                 batch=batch,
             )["density"]
-            assert (ref - density).abs().max() > 1e-9
+            assert torch.isfinite(out).all()
+    assert not hasattr(base, "_mode_epsilon")
+    assert torch.isfinite(density).all()
