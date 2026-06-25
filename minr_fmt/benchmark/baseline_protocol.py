@@ -99,8 +99,8 @@ _SPECS = {
         "Controlled architecture baseline, not a literature-method reproduction.",
     ),
     "uhr_deepfmt": _spec(
-        "uhr_deepfmt", "UHR-DeepFMT (adapted)", "mechanism_preserving_adaptation", True,
-        "Retains a 3-D encoder-decoder and SE skip fusion, but exact dual-sampling input formation is unavailable.",
+        "uhr_deepfmt", "UHR-DeepFMT-inspired 3D SE-UNet", "architecture_proxy", False,
+        "The 3-D encoder-decoder and SE skip weighting are present, but the paper's defining dual-sampling operation cannot be verified from the available implementation.",
         "10.1109/TMI.2021.3071556",
     ),
     "pah2t_former": _spec(
