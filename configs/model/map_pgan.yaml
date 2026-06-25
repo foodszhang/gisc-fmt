@@ -12,6 +12,7 @@ benchmark:
   display_name: MAP-PGAN-inspired adaptation
   fidelity: architecture_proxy
   reference_output_shape: [190, 200, 104]
+  physical_extent_mm: [38.0, 40.0, 20.8]
   table_tier: appendix
 map_pgan:
   base_channels: 16
