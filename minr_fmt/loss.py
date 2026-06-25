@@ -377,16 +377,28 @@ class MorphologyAwareDensityLoss(nn.Module):
     ) -> dict[str, torch.Tensor]:
         target_density = target_density.to(device=pred_density.device, dtype=pred_density.dtype)
         pred = pred_density.clamp(0.0, 1.0)
+        if aux_outputs is not None and torch.is_tensor(aux_outputs.get("measurement_supported")):
+            support = aux_outputs["measurement_supported"].to(
+                device=pred.device, dtype=pred.dtype
+            ).unsqueeze(-1)
+        else:
+            support = torch.ones_like(pred)
         density_err = F.smooth_l1_loss(pred, target_density, reduction="none")
         density_weight = 1.0 + target_density.clamp(0.0, 1.0) * (self.pos_weight - 1.0)
+        density_weight = density_weight * support
         density_loss = (density_err * density_weight).sum() / density_weight.sum().clamp_min(1e-8)
         eps = 1e-6
         pred_flat = pred.squeeze(-1)
         target_flat = target_density.squeeze(-1).clamp(0.0, 1.0)
-        intersection = (pred_flat * target_flat).sum(dim=1)
+        support_flat = support.squeeze(-1)
+        intersection = (pred_flat * target_flat * support_flat).sum(dim=1)
         dice = (2.0 * intersection + eps) / (pred_flat.sum(dim=1) + target_flat.sum(dim=1) + eps)
-        dice_loss = 1.0 - dice.mean()
-        sparse_loss = (pred * (1.0 - target_density.clamp(0.0, 1.0))).mean()
+        denom = (pred_flat * support_flat).sum(dim=1) + (target_flat * support_flat).sum(dim=1)
+        dice = (2.0 * intersection + eps) / (denom + eps)
+        valid_samples = support_flat.sum(dim=1) > 0
+        dice_loss = 1.0 - dice[valid_samples].mean() if valid_samples.any() else pred.sum() * 0.0
+        sparse_num = (pred * (1.0 - target_density.clamp(0.0, 1.0)) * support).sum()
+        sparse_loss = sparse_num / support.sum().clamp_min(1e-8)
         total = density_loss + self.dice_weight * dice_loss + self.sparse_weight * sparse_loss
         sdf_loss = torch.zeros((), dtype=pred.dtype, device=pred.device)
         if (
@@ -397,21 +409,23 @@ class MorphologyAwareDensityLoss(nn.Module):
         ):
             sdf_target = sdf_targets.to(device=pred.device, dtype=pred.dtype)
             sdf_pred = aux_outputs["sdf"].to(dtype=pred.dtype)
-            support = aux_outputs.get("measurement_supported")
-            if torch.is_tensor(support):
-                support = support.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
-            else:
-                support = torch.ones_like(sdf_target)
             weight = 1.0 + self.boundary_weight * (sdf_target.abs() < 0.25).to(dtype=pred.dtype)
             err = F.smooth_l1_loss(sdf_pred, sdf_target, reduction="none") * weight * support
-            sdf_loss = err.sum() / support.sum().clamp_min(1e-8)
+            sdf_loss = err.sum() / (weight * support).sum().clamp_min(1e-8)
             total = total + self.lambda_sdf * sdf_loss
+        unsupported_query_ratio = 1.0 - support.mean()
+        unsupported_positive_gt_ratio = (
+            ((1.0 - support) * (target_density > 0).to(dtype=pred.dtype)).sum()
+            / (target_density > 0).to(dtype=pred.dtype).sum().clamp_min(1e-8)
+        )
         return {
             "total_loss": total,
             "density_loss": density_loss,
             "dice_loss": dice_loss,
             "sparse_loss": sparse_loss,
             "sdf_loss": sdf_loss,
+            "unsupported_query_ratio": unsupported_query_ratio,
+            "unsupported_positive_gt_ratio": unsupported_positive_gt_ratio,
         }
 
 

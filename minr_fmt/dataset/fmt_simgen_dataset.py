@@ -12,6 +12,8 @@ from omegaconf import DictConfig, OmegaConf
 from scipy import ndimage
 from torch.utils.data import Dataset
 
+from minr_fmt.utils.ssq_candidate_extraction import CANDIDATE_CACHE_VERSION, load_candidate_cache
+
 from .query_sampler import NonGTQuerySampler
 
 
@@ -130,6 +132,15 @@ class FmtSimGenProjDataset(Dataset):
         )
         self.proposal_meta_filename = str(
             self.config.get("proposal_meta_filename", "meas_backproj_meta.json")
+        )
+        morph_cfg = self.config.get("morphology", {}) or {}
+        self.morphology_enabled = bool(morph_cfg.get("enabled", False))
+        self.morphology_require_precomputed = bool(morph_cfg.get("require_precomputed", False))
+        self.morphology_subdir = str(morph_cfg.get("subdir", "morphology"))
+        self.morphology_target_filename = str(morph_cfg.get("target_filename", "sdf_target.npy"))
+        self.morphology_meta_filename = str(morph_cfg.get("meta_filename", "sdf_meta.json"))
+        self.morphology_target_version = str(
+            morph_cfg.get("target_version", "ssq_candidate_conditioned_sdf_v2")
         )
         self.resample_queries_each_epoch = bool(
             self.config.get("resample_queries_each_epoch", False)
@@ -384,108 +395,18 @@ class FmtSimGenProjDataset(Dataset):
         return b
 
     def _load_source_hypotheses(self, sample_dir: Path) -> dict[str, np.ndarray]:
-        """Extract measurement-derived source hypotheses from proposal heatmap only."""
+        """Load measurement-derived source hypotheses from the shared candidate cache."""
         top_m = max(1, int(self.source_hypothesis_top_m))
         centers = np.zeros((top_m, 3), dtype=np.float32)
         peak_scores = np.zeros((top_m,), dtype=np.float32)
         scales = np.zeros((top_m,), dtype=np.float32)
         valid = np.zeros((top_m,), dtype=np.float32)
-
-        proposal_dir = sample_dir / self.proposal_subdir
-        heatmap_path = proposal_dir / self.proposal_filename
-        meta_path = proposal_dir / self.proposal_meta_filename
-        if not heatmap_path.exists() or not meta_path.exists():
-            raise FileNotFoundError(
-                f"Source hypothesis proposal heatmap missing for {sample_dir}. "
-                "Run scripts/precompute_measurement_proposal.py first."
-            )
-
-        heatmap = np.load(heatmap_path).astype(np.float64)
-        meta = json.loads(meta_path.read_text())
-        grid_size = tuple(int(v) for v in meta.get("grid_size", heatmap.shape))
-        if heatmap.shape != grid_size:
-            raise ValueError(f"{heatmap_path} shape {heatmap.shape} != meta grid_size {grid_size}")
-
-        heatmap = np.clip(np.nan_to_num(heatmap, nan=0.0, posinf=0.0, neginf=0.0), 0.0, None)
-        if float(heatmap.max()) <= 0.0:
-            return {
-                "centers": centers,
-                "peak_scores": peak_scores,
-                "scales": scales,
-                "valid": valid,
-            }
-
-        smooth = ndimage.gaussian_filter(heatmap, sigma=self.source_hypothesis_blur_sigma)
-        max_value = float(np.max(smooth))
-        if max_value <= 0.0 or not np.isfinite(max_value):
-            return {
-                "centers": centers,
-                "peak_scores": peak_scores,
-                "scales": scales,
-                "valid": valid,
-            }
-
-        min_distance = max(1, int(self.source_hypothesis_min_distance_cells))
-        size = 2 * min_distance + 1
-        local_max = smooth == ndimage.maximum_filter(smooth, size=size, mode="nearest")
-        local_max &= smooth >= (self.source_hypothesis_min_value_ratio * max_value)
-        coords = np.argwhere(local_max)
-        if coords.size == 0:
-            return {
-                "centers": centers,
-                "peak_scores": peak_scores,
-                "scales": scales,
-                "valid": valid,
-            }
-
-        values = smooth[tuple(coords.T)]
-        order = np.argsort(-values)
-        selected: list[tuple[int, int, int]] = []
-        selected_values: list[float] = []
-        for idx in order:
-            cand = tuple(int(v) for v in coords[idx])
-            far_enough = all(
-                np.linalg.norm(np.asarray(cand) - np.asarray(prev)) >= float(min_distance)
-                for prev in selected
-            )
-            if far_enough:
-                selected.append(cand)
-                selected_values.append(float(values[idx]))
-            if len(selected) >= top_m:
-                break
-
-        trunk_size_mm = np.asarray(meta.get("trunk_size_mm", [38.0, 40.0, 20.8]), dtype=np.float32)
-        cell_size_mm = np.asarray(meta.get("cell_size_mm"), dtype=np.float32)
-        if cell_size_mm.shape != (3,):
-            cell_size_mm = trunk_size_mm / np.asarray(grid_size, dtype=np.float32)
-        radius_cells = max(1, min_distance)
-
-        for i, (coord, value) in enumerate(zip(selected, selected_values)):
-            coord_arr = np.asarray(coord, dtype=np.int64)
-            centers[i] = (coord_arr.astype(np.float32) + 0.5) * cell_size_mm
-            peak_scores[i] = float(value / max_value)
-            lo = np.maximum(coord_arr - radius_cells, 0)
-            hi = np.minimum(coord_arr + radius_cells + 1, np.asarray(grid_size, dtype=np.int64))
-            patch = smooth[lo[0] : hi[0], lo[1] : hi[1], lo[2] : hi[2]]
-            patch_sum = float(np.sum(patch))
-            if patch_sum > 0.0 and np.isfinite(patch_sum):
-                gx, gy, gz = np.meshgrid(
-                    np.arange(lo[0], hi[0], dtype=np.float32),
-                    np.arange(lo[1], hi[1], dtype=np.float32),
-                    np.arange(lo[2], hi[2], dtype=np.float32),
-                    indexing="ij",
-                )
-                coords_mm = np.stack([gx + 0.5, gy + 0.5, gz + 0.5], axis=-1) * cell_size_mm
-                center_mm = centers[i][None, None, None, :]
-                second_moment = float(
-                    np.sum(patch[..., None] * np.square(coords_mm - center_mm))
-                    / (3.0 * patch_sum + 1e-8)
-                )
-                scale_mm = float(np.sqrt(max(second_moment, 0.0)))
-            else:
-                scale_mm = float(np.linalg.norm(cell_size_mm) * radius_cells)
-            scales[i] = float(np.clip(scale_mm, 1e-6, np.inf))
-            valid[i] = 1.0
+        cache = load_candidate_cache(sample_dir, expected_version=CANDIDATE_CACHE_VERSION)
+        n = min(top_m, int(cache["centers_mm"].shape[0]))
+        centers[:n] = cache["centers_mm"][:n]
+        peak_scores[:n] = cache["scores"][:n]
+        scales[:n] = cache["raw_support_scales_mm"][:n]
+        valid[:n] = cache["valid"][:n].astype(np.float32)
         return {
             "centers": centers,
             "peak_scores": peak_scores,
@@ -628,9 +549,20 @@ class FmtSimGenProjDataset(Dataset):
         ]
         center_distance_targets = self._center_distance_targets(sample_dir, gt)
         sdf_targets = None
-        sdf_path = sample_dir / "morphology" / "sdf_target.npy"
-        if sdf_path.exists():
+        sdf_path = sample_dir / self.morphology_subdir / self.morphology_target_filename
+        sdf_meta_path = sample_dir / self.morphology_subdir / self.morphology_meta_filename
+        if self.morphology_enabled and sdf_path.exists():
+            if not sdf_meta_path.exists():
+                raise FileNotFoundError(f"SDF metadata missing for {sdf_path}")
+            sdf_meta = json.loads(sdf_meta_path.read_text())
+            if sdf_meta.get("version") != self.morphology_target_version:
+                raise ValueError(
+                    f"{sdf_meta_path} version {sdf_meta.get('version')!r} != "
+                    f"{self.morphology_target_version!r}"
+                )
             sdf_grid = np.load(sdf_path).astype(np.float32)
+            if tuple(sdf_meta.get("target_shape", sdf_grid.shape)) != tuple(sdf_grid.shape):
+                raise ValueError(f"{sdf_meta_path} target_shape does not match {sdf_path}")
             ix = points_ijk[:, 0].astype(np.int64)
             iy = points_ijk[:, 1].astype(np.int64)
             iz = points_ijk[:, 2].astype(np.int64)
@@ -638,6 +570,8 @@ class FmtSimGenProjDataset(Dataset):
             iy = np.clip(iy, 0, sdf_grid.shape[1] - 1)
             iz = np.clip(iz, 0, sdf_grid.shape[2] - 1)
             sdf_targets = sdf_grid[ix, iy, iz]
+        elif self.morphology_enabled and self.morphology_require_precomputed:
+            raise FileNotFoundError(f"Required SDF target missing for {sample_dir}: {sdf_path}")
 
         num_foci = -1
         tumor_path = sample_dir / "tumor_params.json"
