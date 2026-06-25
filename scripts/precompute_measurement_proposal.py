@@ -71,6 +71,36 @@ def normalize_projection(arr: np.ndarray, eps: float, clip_negative: bool) -> np
     return proj / scale
 
 
+def normalize_projection_joint_percentile(
+    projections: dict[int, np.ndarray],
+    depth_maps: dict[int, np.ndarray],
+    eps: float,
+    percentile: float = 99.9,
+) -> dict[int, np.ndarray]:
+    vals = []
+    for angle, proj in projections.items():
+        valid = np.isfinite(depth_maps[angle])
+        pos = np.clip(
+            np.nan_to_num(proj.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0), 0.0, None
+        )
+        vals.append(pos[valid])
+    merged = (
+        np.concatenate([v.reshape(-1) for v in vals if v.size], axis=0)
+        if vals
+        else np.array([], dtype=np.float32)
+    )
+    scale = max(float(np.percentile(merged, percentile)), eps) if merged.size else 1.0
+    return {
+        angle: np.clip(
+            np.nan_to_num(proj.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0),
+            0.0,
+            None,
+        )
+        / scale
+        for angle, proj in projections.items()
+    }
+
+
 def compute_heatmap(sample_dir: Path, params: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
     grid_size = tuple(int(v) for v in params["grid_size"])
     trunk_size_mm = tuple(float(v) for v in params["trunk_size_mm"])
@@ -82,11 +112,31 @@ def compute_heatmap(sample_dir: Path, params: dict[str, Any]) -> tuple[np.ndarra
     valid_count = torch.zeros(points_mm.shape[1], dtype=torch.float32)
 
     z = np.load(sample_dir / "proj.npz")
+    raw_proj: dict[int, np.ndarray] = {}
+    depth_maps: dict[int, np.ndarray] = {}
     for angle in views:
         key = str(angle)
         if key not in z.files:
             raise KeyError(f"{sample_dir / 'proj.npz'} missing key {key!r}")
-        proj = normalize_projection(z[key], params["eps"], params["clip_negative"])
+        raw_proj[angle] = z[key].astype(np.float32)
+        depth_key = f"depth_{angle}"
+        if depth_key in z.files:
+            depth_maps[angle] = z[depth_key].astype(np.float32)
+        else:
+            depth_maps[angle] = np.full_like(raw_proj[angle], np.inf, dtype=np.float32)
+
+    if params["normalization"] == "joint_sample_percentile_99.9":
+        normalized = normalize_projection_joint_percentile(
+            raw_proj, depth_maps, params["eps"], 99.9
+        )
+    else:
+        normalized = {
+            angle: normalize_projection(raw_proj[angle], params["eps"], params["clip_negative"])
+            for angle in views
+        }
+
+    for angle in views:
+        proj = normalized[angle]
         image = torch.from_numpy(proj).view(1, 1, proj.shape[0], proj.shape[1])
 
         grid, _depth, valid, _uv_px, _uv_phys = project_points_mm_to_detector(
@@ -105,11 +155,25 @@ def compute_heatmap(sample_dir: Path, params: dict[str, Any]) -> tuple[np.ndarra
             padding_mode="zeros",
             align_corners=True,
         ).view(-1)
+        depth_valid_image = torch.from_numpy(
+            np.isfinite(depth_maps[angle]).astype(np.float32)
+        ).view(1, 1, proj.shape[0], proj.shape[1])
+        sampled_depth_valid = F.grid_sample(
+            depth_valid_image,
+            grid.unsqueeze(1),
+            mode="nearest",
+            padding_mode="zeros",
+            align_corners=True,
+        ).view(-1)
         valid_f = valid.view(-1).to(torch.float32)
+        valid_f = valid_f * sampled_depth_valid
         heat_sum += sampled * valid_f
         valid_count += valid_f
 
-    heat = (heat_sum / torch.clamp(valid_count, min=1.0)).numpy()
+    c_prop = (valid_count / max(float(len(views)), 1.0)).clamp(0.0, 1.0)
+    heat = (
+        c_prop.pow(float(params["coverage_gamma"])) * heat_sum / torch.clamp(valid_count, min=1.0)
+    ).numpy()
     heat = np.clip(heat.reshape(grid_size).astype(np.float32), 0.0, None)
     gamma = float(params["gamma"])
     if gamma != 1.0:
@@ -130,7 +194,11 @@ def compute_heatmap(sample_dir: Path, params: dict[str, Any]) -> tuple[np.ndarra
         "voxel_size_mm": float(params["voxel_size_mm"]),
         "gamma": gamma,
         "blur_sigma": blur_sigma,
-        "per_view_norm": "max",
+        "proposal_version": "ssq_joint_percentile_v2"
+        if params["normalization"] == "joint_sample_percentile_99.9"
+        else "legacy_per_view_max",
+        "normalization": params["normalization"],
+        "percentile": 99.9 if params["normalization"] == "joint_sample_percentile_99.9" else None,
         "views": views,
         "camera_distance_mm": float(params["camera_distance_mm"]),
         "fov_mm": float(params["fov_mm"]),
@@ -253,6 +321,12 @@ def main() -> None:
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--gt_sanity", action="store_true")
+    parser.add_argument(
+        "--normalization",
+        choices=["joint_sample_percentile_99.9", "per_view_max"],
+        default="joint_sample_percentile_99.9",
+    )
+    parser.add_argument("--coverage_gamma", type=float, default=1.0)
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir).expanduser()
@@ -278,6 +352,8 @@ def main() -> None:
         "eps": 1.0e-6,
         "clip_negative": True,
         "overwrite": args.overwrite,
+        "normalization": args.normalization,
+        "coverage_gamma": args.coverage_gamma,
     }
 
     t0 = time.perf_counter()
