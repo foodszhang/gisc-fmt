@@ -76,13 +76,17 @@ class _NativeGridMixin:
             align_corners=False,
         )
 
-    def _aux_outputs(self) -> dict:
+    def _aux_outputs(self, native_logits: torch.Tensor) -> dict:
         return {
             "method_fidelity": "controlled",
             "output_space": "common_reference_grid" if self.return_reference_grid else "native_grid",
             "native_output_shape": self.native_shape,
             "reference_output_shape": self.reference_shape,
             "fixed_output_resampling": bool(self.return_reference_grid),
+            # Training uses the native prediction and a continuously resampled
+            # native target. The full-grid tensor is reserved for common metrics.
+            "train_on_native_grid": True,
+            "native_pred_voxel": native_logits,
         }
 
 
@@ -102,7 +106,7 @@ class NativeGridCNN3DBaseline(_NativeGridMixin, nn.Module):
     def forward(self, projections, *args, **kwargs):
         native_logits = self.net(self.builder(projections))
         pred = self._to_reference_grid(native_logits)
-        aux = self._aux_outputs()
+        aux = self._aux_outputs(native_logits)
         aux["native_prediction_shape"] = tuple(int(v) for v in native_logits.shape[2:])
         return {"pred_voxel": pred, "aux_outputs": aux}
 
@@ -157,7 +161,7 @@ class NativeGridTransUNet3DBaseline(_NativeGridMixin, nn.Module):
                 align_corners=False,
             )
         pred = self._to_reference_grid(native_logits)
-        aux = self._aux_outputs()
+        aux = self._aux_outputs(native_logits)
         aux["native_prediction_shape"] = tuple(int(v) for v in native_logits.shape[2:])
         return {"pred_voxel": pred, "aux_outputs": aux}
 
@@ -167,8 +171,8 @@ class _NativeSurfaceProxyMixin:
 
     The legacy proxy first created a full-resolution one-channel shell, expanded
     it to the latent channel count, and only then downsampled. Replacing the
-    builder is mathematically the same heuristic shell embedding at the proxy's
-    declared internal resolution, while avoiding the full-grid latent tensor.
+    builder preserves that heuristic shell embedding at the declared internal
+    resolution while avoiding the full-grid latent tensor.
     """
 
     def _use_internal_surface_grid(self, config) -> None:
