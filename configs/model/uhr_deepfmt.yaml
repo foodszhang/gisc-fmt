@@ -9,11 +9,12 @@ geometry:
   detector_size: [256, 256]
   global_voxel_shape: [190, 200, 104]
 benchmark:
-  display_name: UHR-DeepFMT (adapted)
-  fidelity: mechanism_preserving_adaptation
+  display_name: UHR-DeepFMT-inspired 3D SE-UNet
+  fidelity: architecture_proxy
   native_output_shape: [64, 64, 64]
   reference_output_shape: [190, 200, 104]
   physical_extent_mm: [38.0, 40.0, 20.8]
+  table_tier: appendix
 uhr_deepfmt:
   base_channels: 8
   num_levels: 3
