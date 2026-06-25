@@ -365,31 +365,6 @@ class MorphologyAwareDensityLoss(nn.Module):
         batch = torch.arange(gt_voxels.shape[0], device=gt_voxels.device)[:, None]
         return gt_voxels[batch, x, y, z].unsqueeze(-1)
 
-    def _sdf_targets(
-        self, gt_voxels: torch.Tensor, points_ijk: torch.Tensor, device: torch.device
-    ) -> torch.Tensor:
-        from scipy import ndimage
-
-        gt_np = gt_voxels.detach().to(dtype=torch.float32).cpu().numpy()
-        pts_np = points_ijk.detach().cpu().numpy()
-        targets = []
-        for b in range(gt_np.shape[0]):
-            mask = gt_np[b] > 0.0
-            if mask.any():
-                inside = ndimage.distance_transform_edt(mask)
-                outside = ndimage.distance_transform_edt(~mask)
-                sdf = inside - outside
-            else:
-                sdf = -np.full(gt_np[b].shape, self.tau_s, dtype=np.float32)
-            idx = np.rint(pts_np[b]).astype(np.int64)
-            idx[:, 0] = np.clip(idx[:, 0], 0, gt_np.shape[1] - 1)
-            idx[:, 1] = np.clip(idx[:, 1], 0, gt_np.shape[2] - 1)
-            idx[:, 2] = np.clip(idx[:, 2], 0, gt_np.shape[3] - 1)
-            vals = sdf[idx[:, 0], idx[:, 1], idx[:, 2]]
-            vals = np.clip(vals / max(self.tau_s, 1e-6), -1.0, 1.0).astype(np.float32)
-            targets.append(torch.tensor(vals, dtype=torch.float32, device=device).unsqueeze(-1))
-        return torch.stack(targets, dim=0)
-
     def forward(
         self,
         pred_density: torch.Tensor,
@@ -398,6 +373,7 @@ class MorphologyAwareDensityLoss(nn.Module):
         *,
         gt_voxels: torch.Tensor | None = None,
         points_ijk: torch.Tensor | None = None,
+        sdf_targets: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         target_density = target_density.to(device=pred_density.device, dtype=pred_density.dtype)
         pred = pred_density.clamp(0.0, 1.0)
@@ -417,15 +393,18 @@ class MorphologyAwareDensityLoss(nn.Module):
             self.lambda_sdf > 0.0
             and aux_outputs is not None
             and "sdf" in aux_outputs
-            and gt_voxels is not None
-            and points_ijk is not None
+            and sdf_targets is not None
         ):
-            sdf_target = self._sdf_targets(
-                gt_voxels.to(device=pred.device), points_ijk.to(device=pred.device), pred.device
-            ).to(dtype=pred.dtype)
+            sdf_target = sdf_targets.to(device=pred.device, dtype=pred.dtype)
             sdf_pred = aux_outputs["sdf"].to(dtype=pred.dtype)
+            support = aux_outputs.get("measurement_supported")
+            if torch.is_tensor(support):
+                support = support.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+            else:
+                support = torch.ones_like(sdf_target)
             weight = 1.0 + self.boundary_weight * (sdf_target.abs() < 0.25).to(dtype=pred.dtype)
-            sdf_loss = F.smooth_l1_loss(sdf_pred * weight, sdf_target * weight)
+            err = F.smooth_l1_loss(sdf_pred, sdf_target, reduction="none") * weight * support
+            sdf_loss = err.sum() / support.sum().clamp_min(1e-8)
             total = total + self.lambda_sdf * sdf_loss
         return {
             "total_loss": total,

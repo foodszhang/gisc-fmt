@@ -478,8 +478,8 @@ class FmtSimGenProjDataset(Dataset):
                 coords_mm = np.stack([gx + 0.5, gy + 0.5, gz + 0.5], axis=-1) * cell_size_mm
                 center_mm = centers[i][None, None, None, :]
                 second_moment = float(
-                    np.sum(patch[..., None] * np.square(coords_mm - center_mm)) /
-                    (3.0 * patch_sum + 1e-8)
+                    np.sum(patch[..., None] * np.square(coords_mm - center_mm))
+                    / (3.0 * patch_sum + 1e-8)
                 )
                 scale_mm = float(np.sqrt(max(second_moment, 0.0)))
             else:
@@ -627,6 +627,17 @@ class FmtSimGenProjDataset(Dataset):
             points_ijk[:, 2].astype(np.int64),
         ]
         center_distance_targets = self._center_distance_targets(sample_dir, gt)
+        sdf_targets = None
+        sdf_path = sample_dir / "morphology" / "sdf_target.npy"
+        if sdf_path.exists():
+            sdf_grid = np.load(sdf_path).astype(np.float32)
+            ix = points_ijk[:, 0].astype(np.int64)
+            iy = points_ijk[:, 1].astype(np.int64)
+            iz = points_ijk[:, 2].astype(np.int64)
+            ix = np.clip(ix, 0, sdf_grid.shape[0] - 1)
+            iy = np.clip(iy, 0, sdf_grid.shape[1] - 1)
+            iz = np.clip(iz, 0, sdf_grid.shape[2] - 1)
+            sdf_targets = sdf_grid[ix, iy, iz]
 
         num_foci = -1
         tumor_path = sample_dir / "tumor_params.json"
@@ -663,6 +674,10 @@ class FmtSimGenProjDataset(Dataset):
             "projection_scales": projection_scales,
             "num_foci": num_foci,
         }
+        if sdf_targets is not None:
+            item["sdf_targets"] = torch.tensor(
+                sdf_targets, dtype=torch.float32, device=self.device
+            ).unsqueeze(-1)
         if center_distance_targets:
             ix = points_ijk[:, 0].astype(np.int64)
             iy = points_ijk[:, 1].astype(np.int64)
@@ -707,9 +722,11 @@ class FmtSimGenProjDataset(Dataset):
                 item["candidate_scores"] = torch.tensor(
                     source_hyp["peak_scores"], dtype=torch.float32, device=self.device
                 )
-                item["candidate_scales_mm"] = torch.tensor(
+                support_scales = torch.tensor(
                     source_hyp["scales"], dtype=torch.float32, device=self.device
                 )
+                item["candidate_support_scales_mm"] = support_scales
+                item["candidate_scales_mm"] = support_scales
                 item["candidate_valid_mask"] = torch.tensor(
                     source_hyp["valid"] > 0.0, dtype=torch.bool, device=self.device
                 )

@@ -780,6 +780,7 @@ class TrainingLightningModule(LightningModule):
                 aux_outputs,
                 gt_voxels=batch.get("gt_voxels"),
                 points_ijk=batch.get("points_ijk"),
+                sdf_targets=batch.get("sdf_targets"),
             )
             density_logits = (
                 aux_outputs.get("density_logits") if isinstance(aux_outputs, dict) else None
