@@ -4,9 +4,15 @@ num_views: 7
 in_channels: 1
 geometry:
   global_voxel_shape: [190, 200, 104]
+benchmark:
+  display_name: PAH2T-Former (adapted)
+  fidelity: mechanism_preserving_adaptation
+  reference_output_shape: [190, 200, 104]
+  table_tier: appendix
 pah2t_former:
-  # FMT-SimGen sparse projections are resized to [V, 64, 64], matching the
-  # PAH2T paper's 24x64x64 surface-photon-density input scale with V adapted.
+  # The paper uses a projection/depth tensor and paired spatial-channel attention.
+  # Here seven views replace the paper-specific input depth, so this remains an
+  # adapted, appendix-only implementation rather than an exact reproduction.
   projection_size: [64, 64]
   base_channels: 8
   num_heads: 2
