@@ -17,12 +17,19 @@ def _prod_cfg(**overrides):
         "scale_min_px": 0.6,
         "scale_max_px": 6.0,
         "fixed_sigma": 1.5,
-        "alpha_xi": 0.25,
-        "alpha_beta": 0.25,
-        "alpha_kappa": 0.25,
+        "alpha_xi": 0.67,
+        "alpha_beta": 0.33,
         "delta_h_max": 0.25,
     }
-    ssq.routing = {"mode": "pre_aggregation", "k_min": 1e-6, "p_min": 1e-6, "tau_cand": 0.0}
+    ssq.routing = {
+        "mode": "pre_aggregation",
+        "k_min": 1e-6,
+        "p_min": 1e-6,
+        "support_mode": "continuous",
+        "support_center": 0.10,
+        "support_temperature": 0.10,
+        "support_logit_weight": 1.0,
+    }
     ssq.fusion = {"mode": "candidate_specific"}
     ssq.reliability = {"mode": "evidence"}
     for key, value in overrides.items():

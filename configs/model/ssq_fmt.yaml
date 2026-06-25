@@ -25,8 +25,16 @@ ssq_fmt:
     eps: 1.0e-6
 
   encoder:
-    channels: 48
-    feature_dim: 64
+    type: residual_fpn
+    profile: base
+    stem_channels: 32
+    stage_channels: [48, 96, 192, 256]
+    stage_blocks: [2, 2, 3, 3]
+    pyramid_channels: 64
+    output_levels: [full, half, quarter]
+    norm: group
+    activation: silu
+    dropout: 0.0
 
   fourier:
     num_frequencies: 4
@@ -39,24 +47,20 @@ ssq_fmt:
     jacobian_fd_step_mm: 0.2
 
   local_sampling:
-    k: 5
-    offsets_px:
-      - [0.0, 0.0]
-      - [-1.0, 0.0]
-      - [1.0, 0.0]
-      - [0.0, -1.0]
-      - [0.0, 1.0]
+    template: grid3x3
+    sample_feature_dim: 128
 
   footprint:
     mode: query_dependent
-    scale_min_px: 0.6
-    scale_max_px: 4.0
-    alpha_xi: 0.25
-    alpha_beta: 0.25
-    alpha_kappa: 0.25
+    path_normalization: fixed_max
+    path_max_mm: 20.0
+    sigma_min_px: 1.0
+    sigma_max_px: 8.0
+    alpha_xi: 0.67
+    alpha_beta: 0.33
     delta_h_max: 0.25
     fixed_sigma: 2.0
-    boundary_margin_radius_px: 2.0
+    boundary_margin_radius_px: 8.0
 
   candidates:
     grid_spacing_mm: 1.0
@@ -64,8 +68,8 @@ ssq_fmt:
     threshold: 0.05
     nms_radius_cells: 3
     mmax: 5
-    scale_min_mm: 4.0
-    scale_max_mm: 16.0
+    scale_min_mm: 1.0
+    scale_max_mm: 12.0
     detector_scale_min_px: 0.5
     detector_scale_max_px: 20.0
     prior_density_weight: 0.0
@@ -73,15 +77,29 @@ ssq_fmt:
 
   routing:
     mode: pre_aggregation
+    tau_K: 1.0
+    delta_q: 1.0
     temperature: 1.0
     assignment_temperature: 1.0
     residual_min: 0.0
     residual_max: 1.0
     k_min: 1.0e-6
-    p_min: 1.0e-6
-    tau_cand: 0.0
-    tau0: 0.0
+    p_min: 1.0e-4
+    support_mode: continuous
+    support_center: 0.10
+    support_temperature: 0.10
+    support_logit_weight: 1.0
+    tau0: 0.25
     tau_p: 1.0
+
+  representation:
+    hidden_dim: 128
+    blocks: 3
+    expansion: 2
+    dropout: 0.0
+
+  decoder:
+    positive_ratio_init: 0.03
 
   fusion:
     mode: candidate_specific
@@ -93,6 +111,9 @@ ssq_fmt:
     tau_s: 3.0
     lambda_sdf: 0.0
     boundary_weight: 1.0
+    target_subdir: morphology
+    target_filename: sdf_target.npy
+    target_version: ssq_candidate_conditioned_sdf_v1
 
 gisc_fmt:
   use_adapter: true

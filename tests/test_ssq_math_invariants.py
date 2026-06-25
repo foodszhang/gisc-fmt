@@ -47,8 +47,10 @@ def make_batch(mmax=3, candidate_valid=None):
         "surface_measurements_packed": y,
         "query_coordinates_mm": points,
         "detector_valid_mask": torch.ones(B, V, H, W, dtype=torch.bool),
+        "depth_maps": torch.zeros(B, V, H, W),
         "candidate_centers_mm": centers,
         "candidate_scores": torch.ones(B, mmax),
+        "candidate_support_scales_mm": torch.ones(B, mmax),
         "candidate_scales_mm": torch.ones(B, mmax),
         "candidate_valid_mask": candidate_valid,
     }

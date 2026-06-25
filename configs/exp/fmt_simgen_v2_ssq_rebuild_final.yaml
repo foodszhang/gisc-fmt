@@ -1,0 +1,94 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_3k_20k_common
+  - override /model: ssq_fmt
+  - _self_
+
+name: fmt_simgen_v2_ssq_rebuild_final
+description: Rebuilt Full SSQ-FMT candidate-conditioned scalar composition
+seed: 42
+
+data:
+  projection_norm: raw
+  center_distance_targets: false
+  center_distance_require_precomputed: false
+  source_hypothesis:
+    enabled: false
+  ssq_candidates:
+    enabled: true
+    top_m: 5
+    blur_sigma: 1.0
+    min_distance_cells: 3
+    min_value_ratio: 0.1
+  proposal_subdir: proposal
+  proposal_filename: meas_backproj_heatmap.npy
+  proposal_meta_filename: meas_backproj_meta.json
+  query_sampling:
+    trunk_uniform_ratio: 0.5
+    meas_proposal_ratio: 0.5
+    use_gt_foreground_oversampling: false
+
+model:
+  ssq_fmt:
+    density_output_mode: candidate_scalar_composition
+    query_density_backbone:
+      enabled: false
+    encoder:
+      type: residual_fpn
+      profile: base
+    local_sampling:
+      template: grid3x3
+      sample_feature_dim: 128
+    routing:
+      mode: pre_aggregation
+      tau_K: 1.0
+      delta_q: 1.0
+      tau0: 0.25
+      tau_p: 1.0
+      support_mode: continuous
+      support_center: 0.10
+      support_temperature: 0.10
+      support_logit_weight: 1.0
+      p_min: 1.0e-4
+    fusion:
+      mode: candidate_specific
+    reliability:
+      mode: evidence
+    footprint:
+      mode: query_dependent
+      path_normalization: fixed_max
+      path_max_mm: 20.0
+      sigma_min_px: 1.0
+      sigma_max_px: 8.0
+      boundary_margin_radius_px: 8.0
+      alpha_xi: 0.67
+      alpha_beta: 0.33
+      delta_h_max: 0.25
+    candidates:
+      scale_min_mm: 1.0
+      scale_max_mm: 12.0
+      prior_density_weight: 0.0
+
+loss:
+  light_weight: 1.0
+  pos_weight: 50.0
+  sparse_weight: 0.10
+  dice_weight: 0.50
+  backbone_logit_loss_weight: 0.0
+  lambda_sdf: 0.0
+
+optim:
+  optimizer: AdamW
+  lr: 0.0005
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  scheduler:
+    type: cosine
+    warmup_epochs: 5
+    min_lr_ratio: 0.05
+
+trainer:
+  max_epochs: 100
+  gradient_clip_val: 1.0
+  precision: bf16-mixed
