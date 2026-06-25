@@ -21,12 +21,15 @@ deterministic: true
 benchmark: false
 verbose: false
 
-# Baseline reporting guard. Use table_tier=main only after the implementation
-# fidelity registry approves the selected method.
+# Baseline reporting guard. Native-grid methods must share the same physical
+# reconstruction region and are mapped to the common evaluation grid only by a
+# fixed, parameter-free interpolation.
 benchmark_protocol:
+  mode: native_to_reference
   table_tier: development
   strict_fidelity: false
   allow_unsafe_fully_connected_head: false
+  allow_unsafe_template_full_grid: false
 
 data:
   dataset_type: {}
