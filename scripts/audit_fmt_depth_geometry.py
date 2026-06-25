@@ -10,12 +10,12 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from minr_fmt.network.ssq_geometry import sample_finite_scalar_map  # noqa: E402
 from minr_fmt.utils.fmt_simgen_projection import project_points_mm_to_detector  # noqa: E402
 
 
@@ -24,11 +24,10 @@ def find_samples(data_dir: Path, limit: int) -> list[Path]:
     return sorted(p for p in root.glob("sample_*") if (p / "proj.npz").exists())[:limit]
 
 
-def sample_depth(depth: np.ndarray, grid: torch.Tensor) -> torch.Tensor:
+def sample_depth(depth: np.ndarray, grid: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     image = torch.from_numpy(depth.astype(np.float32)).view(1, 1, *depth.shape)
-    return F.grid_sample(
-        image, grid.unsqueeze(1), mode="bilinear", padding_mode="zeros", align_corners=True
-    ).view(-1)
+    surf, valid = sample_finite_scalar_map(image, grid[:, None], align_corners=True)
+    return surf.view(-1), valid.view(-1)
 
 
 def main() -> None:
@@ -46,6 +45,8 @@ def main() -> None:
     args = parser.parse_args()
 
     rows = []
+    path_q_minus_s: list[float] = []
+    path_s_minus_q: list[float] = []
     center = torch.tensor([[[19.0, 20.0, 10.4], [19.0, 20.0, 16.0], [19.0, 20.0, 4.0]]])
     for sample_dir in find_samples(Path(args.data_dir), args.limit):
         z = np.load(sample_dir / "proj.npz")
@@ -64,8 +65,13 @@ def main() -> None:
                 volume_center_world=tuple(args.volume_center_world),
                 align_corners=True,
             )
-            surf = sample_depth(depth, grid)
+            surf, surf_valid = sample_depth(depth, grid)
             for idx, label in enumerate(["center", "deep_z16", "shallow_z4"]):
+                q_minus_s = float(q_depth.view(-1)[idx] - surf[idx])
+                s_minus_q = float(surf[idx] - q_depth.view(-1)[idx])
+                if bool(surf_valid[idx]):
+                    path_q_minus_s.append(max(q_minus_s, 0.0))
+                    path_s_minus_q.append(max(s_minus_q, 0.0))
                 rows.append(
                     {
                         "sample_id": sample_dir.name,
@@ -82,10 +88,10 @@ def main() -> None:
                         else np.nan,
                         "query_camera_depth": float(q_depth.view(-1)[idx]),
                         "sampled_surface_depth": float(surf[idx]),
-                        "query_minus_surface": float(q_depth.view(-1)[idx] - surf[idx]),
-                        "surface_minus_query": float(surf[idx] - q_depth.view(-1)[idx]),
+                        "query_minus_surface": q_minus_s,
+                        "surface_minus_query": s_minus_q,
                         "projection_valid": bool(valid.view(-1)[idx]),
-                        "surface_depth_finite": bool(torch.isfinite(surf[idx])),
+                        "surface_depth_finite": bool(surf_valid[idx]),
                     }
                 )
 
@@ -95,6 +101,19 @@ def main() -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else ["empty"])
         writer.writeheader()
         writer.writerows(rows)
+    for name, values in (
+        ("query_minus_surface", path_q_minus_s),
+        ("surface_minus_query", path_s_minus_q),
+    ):
+        arr = np.asarray(values, dtype=np.float32)
+        if arr.size:
+            print(
+                f"{name} clipped path mm: "
+                f"P50={np.percentile(arr, 50):.4f} "
+                f"P90={np.percentile(arr, 90):.4f} "
+                f"P95={np.percentile(arr, 95):.4f} "
+                f"P99={np.percentile(arr, 99):.4f}"
+            )
     print(f"wrote {out} rows={len(rows)}")
 
 

@@ -65,6 +65,26 @@ def sample_scalar_map(
     return sampled.squeeze(-1) if c == 1 else sampled
 
 
+def sample_finite_scalar_map(
+    image: torch.Tensor,
+    grid: torch.Tensor,
+    *,
+    valid_weight_min: float = 1.0e-4,
+    align_corners: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Bilinearly sample finite scalar maps without letting inf/nan contaminate interpolation."""
+    finite = torch.isfinite(image)
+    clean = torch.where(finite, image, torch.zeros_like(image))
+    value = sample_scalar_map(clean, grid, mode="bilinear", align_corners=align_corners)
+    weight = sample_scalar_map(
+        finite.to(dtype=image.dtype), grid, mode="bilinear", align_corners=align_corners
+    )
+    valid = weight > float(valid_weight_min)
+    sampled = value / weight.clamp_min(float(valid_weight_min))
+    sampled = torch.where(valid, sampled, torch.full_like(sampled, float("nan")))
+    return sampled, valid
+
+
 class GeometryQueryMapper(nn.Module):
     """Vectorized FMT-SimGen orthographic query-to-detector mapper."""
 
@@ -77,6 +97,8 @@ class GeometryQueryMapper(nn.Module):
         volume_center_world: tuple[float, float, float] = (19.0, 20.0, 10.4),
         fd_step_mm: float = 0.2,
         path_max_mm: float = 20.0,
+        path_sign: str = "query_minus_surface",
+        depth_valid_weight_min: float = 1.0e-4,
         align_corners: bool = True,
     ):
         super().__init__()
@@ -87,6 +109,10 @@ class GeometryQueryMapper(nn.Module):
         self.volume_center_world = tuple(float(x) for x in volume_center_world)
         self.fd_step_mm = float(fd_step_mm)
         self.path_max_mm = float(path_max_mm)
+        if path_sign not in {"query_minus_surface", "surface_minus_query"}:
+            raise ValueError("path_sign must be query_minus_surface or surface_minus_query")
+        self.path_sign = str(path_sign)
+        self.depth_valid_weight_min = float(depth_valid_weight_min)
         self.align_corners = bool(align_corners)
 
     def forward(
@@ -142,12 +168,18 @@ class GeometryQueryMapper(nn.Module):
             valid_all = valid_all & center_mask
 
         if depth_maps is not None:
-            surf_depth = sample_scalar_map(
-                depth_maps, grid_all, mode="bilinear", align_corners=self.align_corners
+            surf_depth, finite_surface = sample_finite_scalar_map(
+                depth_maps,
+                grid_all,
+                valid_weight_min=self.depth_valid_weight_min,
+                align_corners=self.align_corners,
             )
-            finite_surface = torch.isfinite(surf_depth)
             query_depth = depth_all[..., 0]
-            path = (query_depth - surf_depth).clamp_min(0.0)
+            if self.path_sign == "surface_minus_query":
+                path = surf_depth - query_depth
+            else:
+                path = query_depth - surf_depth
+            path = path.clamp_min(0.0)
             xi = (path / max(self.path_max_mm, 1e-6)).clamp(0.0, 1.0)
             valid_all = valid_all & finite_surface
         else:
