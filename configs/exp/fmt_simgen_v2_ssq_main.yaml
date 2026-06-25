@@ -23,18 +23,18 @@ data:
 
 loss:
   light_weight: 1.0
-  pos_weight: 50.0
-  sparse_weight: 0.2
-  dice_weight: 0.5
+  pos_weight: 200.0
+  sparse_weight: 0.1
+  dice_weight: 1.0
   backbone_logit_loss_weight: 0.0
   lambda_sdf: 0.0
   tau_s: 3.0
   sdf_boundary_weight: 1.0
 
 optim:
-  lr: 0.0005
+  lr: 0.001
   scheduler:
-    warmup_epochs: 5
+    warmup_epochs: 2
     warmup_start_factor: 0.2
 
 trainer:

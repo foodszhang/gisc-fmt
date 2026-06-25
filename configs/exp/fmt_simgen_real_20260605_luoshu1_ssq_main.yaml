@@ -13,9 +13,25 @@ data:
   train_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
   val_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
   test_dir: /home/foods/pro/FMT-SimGen/data/real_20260605_luoshu1_1k_20k
+  trunk_size_mm: [80.6, 32.0, 26.6]
+  voxel_ranges:
+    x: [0, 403]
+    y: [0, 160]
+    z: [0, 133]
+  query_sampling:
+    peak_min_distance_cells: 15
+    peak_blur_sigma: 5.0
+  source_hypothesis:
+    blur_sigma: 5.0
+    min_distance_cells: 15
+
+model:
+  geometry:
+    global_voxel_shape: [403, 160, 133]
+    volume_center_world: [40.3, 16.0, 13.3]
 
 validation:
-  pred_threshold: 0.05
+  pred_threshold: 0.5
 
 test:
-  pred_threshold: 0.05
+  pred_threshold: 0.5

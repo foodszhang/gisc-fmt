@@ -1,0 +1,14 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_real_20260618_luoshu1_v2_main
+  - _self_
+
+name: fmt_simgen_real_20260622_luoshu1_mixed3foci_main
+description: Fixed 0.5-threshold GISC-FMT mainline for real_20260622_luoshu1 mixed3foci manual-surface
+
+data:
+  data_dir: /home/foods/pro/FMT-SimGen/data/real_20260622_luoshu1_manual_surface_mixed3foci_1k_20k
+  train_dir: /home/foods/pro/FMT-SimGen/data/real_20260622_luoshu1_manual_surface_mixed3foci_1k_20k
+  val_dir: /home/foods/pro/FMT-SimGen/data/real_20260622_luoshu1_manual_surface_mixed3foci_1k_20k
+  test_dir: /home/foods/pro/FMT-SimGen/data/real_20260622_luoshu1_manual_surface_mixed3foci_1k_20k

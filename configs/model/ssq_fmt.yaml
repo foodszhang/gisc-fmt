@@ -79,8 +79,8 @@ ssq_fmt:
     residual_max: 1.0
     k_min: 1.0e-6
     p_min: 1.0e-6
-    tau_cand: 0.1
-    tau0: 0.25
+    tau_cand: 0.0
+    tau0: 0.0
     tau_p: 1.0
 
   fusion:
