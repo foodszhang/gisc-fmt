@@ -3,10 +3,14 @@ output_type: voxel
 num_views: 7
 geometry:
   global_voxel_shape: [190, 200, 104]
+benchmark:
+  display_name: 3D TransUNet (capacity control)
+  fidelity: controlled
+  native_output_shape: [64, 64, 32]
+  reference_output_shape: [190, 200, 104]
 transunet3d_baseline:
   base_channels: 8
   num_heads: 4
   max_tokens: 512
-  output_mode: roi
-  paste_roi_to_full: true
-  full_output_shape: [190, 200, 104]
+  native_output_shape: [64, 64, 32]
+  return_reference_grid: true
