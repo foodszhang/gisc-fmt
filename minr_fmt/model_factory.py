@@ -13,11 +13,11 @@ class ModelFactory:
 
     @staticmethod
     def create_uhr_deepfmt_model(config: Optional[Any] = None, **kwargs):
-        from .models.uhr_deepfmt import UHRDeepFMT3DUNet
+        from .models.native_grid_baselines import NativeGridUHRDeepFMTProxy
 
         if config is None:
-            raise ValueError("UHR-DeepFMT 模型需要配置对象")
-        return UHRDeepFMT3DUNet(config=config)
+            raise ValueError("UHR-DeepFMT proxy 需要配置对象")
+        return NativeGridUHRDeepFMTProxy(config=config)
 
     @staticmethod
     def create_vox_dmrn_model(config: Optional[Any] = None, **kwargs):
@@ -59,8 +59,6 @@ class ModelFactory:
             "fem2vox_unet": FEM2VoxUNet,
             "stage1_unet": FEM2VoxUNet,
             "stage1_interpolation": Stage1InterpolationBaseline,
-            # Controlled baselines reconstruct on a memory-safe native grid
-            # and use a fixed interpolation to the common reference grid.
             "cnn3d_baseline": NativeGridCNN3DBaseline,
             "transunet3d_baseline": NativeGridTransUNet3DBaseline,
         }
