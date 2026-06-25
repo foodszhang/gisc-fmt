@@ -1,0 +1,131 @@
+from types import SimpleNamespace as NS
+
+import pytest
+import torch
+import torch.nn.functional as F
+
+from minr_fmt.benchmark import get_baseline_spec, validate_baseline_protocol
+from minr_fmt.loss import VoxelReconstructionLoss
+from minr_fmt.models.native_grid_baselines import NativeGridCNN3DBaseline
+
+
+def _cfg(model_name: str, *, table_tier: str = "development"):
+    data = NS(
+        view_angles=[-90, -60, -30, 0, 30, 60, 90],
+        voxel_ranges=NS(x=[0, 10], y=[0, 12], z=[0, 6]),
+    )
+    geometry = NS(global_voxel_shape=[10, 12, 6])
+    model = NS(
+        name=model_name,
+        geometry=geometry,
+        benchmark=NS(
+            native_output_shape=[8, 8, 4],
+            physical_extent_mm=[10.0, 12.0, 6.0],
+        ),
+        cnn3d_baseline=NS(
+            base_channels=2,
+            native_output_shape=[8, 8, 4],
+            return_reference_grid=True,
+        ),
+    )
+    return NS(
+        data=data,
+        model=model,
+        benchmark_protocol=NS(
+            mode="native_to_reference",
+            table_tier=table_tier,
+            strict_fidelity=False,
+            allow_unsafe_fully_connected_head=False,
+            allow_unsafe_template_full_grid=False,
+        ),
+    )
+
+
+def _set_full_reference_grid(cfg):
+    cfg.data.voxel_ranges = NS(x=[0, 190], y=[0, 200], z=[0, 104])
+    cfg.model.geometry.global_voxel_shape = [190, 200, 104]
+    cfg.model.benchmark.physical_extent_mm = [38.0, 40.0, 20.8]
+
+
+def test_controlled_native_grid_model_returns_reference_grid():
+    cfg = _cfg("cnn3d_baseline")
+    model = NativeGridCNN3DBaseline(cfg).eval()
+    projections = {str(angle): torch.rand(1, 16, 16) for angle in cfg.data.view_angles}
+    with torch.no_grad():
+        out = model(projections)
+    assert out["pred_voxel"].shape == (1, 1, 10, 12, 6)
+    assert out["aux_outputs"]["native_prediction_shape"] == (8, 8, 4)
+    assert out["aux_outputs"]["native_pred_voxel"].shape == (1, 1, 8, 8, 4)
+    assert out["aux_outputs"]["train_on_native_grid"] is True
+    assert out["aux_outputs"]["fixed_output_resampling"] is True
+
+
+def test_native_grid_loss_resamples_continuous_target_and_backpropagates():
+    native_logits = torch.randn(2, 1, 8, 8, 4, requires_grad=True)
+    reference_logits = F.interpolate(
+        native_logits,
+        size=(10, 12, 6),
+        mode="trilinear",
+        align_corners=False,
+    )
+    continuous_target = torch.rand(2, 10, 12, 6)
+    losses = VoxelReconstructionLoss()(
+        reference_logits,
+        continuous_target,
+        {
+            "native_pred_voxel": native_logits,
+            "train_on_native_grid": True,
+        },
+    )
+    losses["total_loss"].backward()
+    assert native_logits.grad is not None
+    assert native_logits.grad.shape == native_logits.shape
+    assert torch.isfinite(native_logits.grad).all()
+
+
+def test_main_table_rejects_architecture_proxy():
+    cfg = _cfg("map_pgan", table_tier="main")
+    with pytest.raises(ValueError, match="not approved for the TMI main table"):
+        validate_baseline_protocol(cfg)
+
+
+def test_development_allows_proxy_but_keeps_fidelity_label():
+    cfg = _cfg("d2_recst", table_tier="development")
+    spec = validate_baseline_protocol(cfg)
+    assert spec.fidelity == "architecture_proxy"
+    assert spec.main_table_allowed is False
+
+
+def test_uhr_is_explicitly_labeled_as_unverified_proxy():
+    spec = get_baseline_spec("uhr_deepfmt")
+    assert "inspired" in spec.display_name.lower()
+    assert spec.fidelity == "architecture_proxy"
+    assert spec.main_table_allowed is False
+
+
+def test_native_grid_requires_explicit_physical_extent():
+    cfg = _cfg("cnn3d_baseline")
+    cfg.model.benchmark.physical_extent_mm = None
+    with pytest.raises(ValueError, match="physical_extent_mm"):
+        validate_baseline_protocol(cfg)
+
+
+def test_reference_grid_must_match_data_roi():
+    cfg = _cfg("cnn3d_baseline")
+    cfg.model.geometry.global_voxel_shape = [11, 12, 6]
+    with pytest.raises(ValueError, match="must match data.voxel_ranges"):
+        validate_baseline_protocol(cfg)
+
+
+def test_vox_dmrn_full_grid_head_is_blocked():
+    cfg = _cfg("vox_dmrn")
+    _set_full_reference_grid(cfg)
+    with pytest.raises(ValueError, match="fully connected output head"):
+        validate_baseline_protocol(cfg)
+
+
+def test_template_stn_full_grid_proxy_is_blocked():
+    cfg = _cfg("fmt_reconnet")
+    _set_full_reference_grid(cfg)
+    with pytest.raises(ValueError, match="full-grid 3-D warping"):
+        validate_baseline_protocol(cfg)

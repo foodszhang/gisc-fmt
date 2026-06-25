@@ -1,4 +1,4 @@
-"""Model factory for configured GISC-FMT and baseline models."""
+"""Model factory for SSQ-FMT and comparison baselines."""
 
 from typing import Any, Optional
 
@@ -13,11 +13,11 @@ class ModelFactory:
 
     @staticmethod
     def create_uhr_deepfmt_model(config: Optional[Any] = None, **kwargs):
-        from .models.uhr_deepfmt import UHRDeepFMT3DUNet
+        from .models.native_grid_baselines import NativeGridUHRDeepFMTProxy
 
         if config is None:
-            raise ValueError("UHR-DeepFMT 模型需要配置对象")
-        return UHRDeepFMT3DUNet(config=config)
+            raise ValueError("UHR-DeepFMT proxy 需要配置对象")
+        return NativeGridUHRDeepFMTProxy(config=config)
 
     @staticmethod
     def create_vox_dmrn_model(config: Optional[Any] = None, **kwargs):
@@ -31,34 +31,36 @@ class ModelFactory:
     def create_voxel_baseline_model(model_type: str, config: Optional[Any] = None, **kwargs):
         if config is None:
             raise ValueError("Voxel baseline 模型需要配置对象")
+        from .models.native_grid_baselines import (
+            NativeGridCNN3DBaseline,
+            NativeGridD2RecSTAdapted,
+            NativeGridDSPGNAdapted,
+            NativeGridMAPPGANAdapted,
+            NativeGridTransUNet3DBaseline,
+        )
         from .models.voxel_baselines import (
-            CNN3DBaseline,
-            D2RecSTAdapted,
-            DSPGNAdapted,
             FEM2VoxUNet,
             FMTReconNetAdapted,
             GenericVoxelBaseline,
-            MAPPGANAdapted,
             PGDPNNAdapted,
             Stage1InterpolationBaseline,
-            TransUNet3DBaseline,
             TwoStageDeepFMTAdapted,
         )
 
         registry = {
-            "map_pgan": MAPPGANAdapted,
-            "d2_recst": D2RecSTAdapted,
+            "map_pgan": NativeGridMAPPGANAdapted,
+            "d2_recst": NativeGridD2RecSTAdapted,
             "two_stage_deepfmt": TwoStageDeepFMTAdapted,
             "fmt_reconnet": FMTReconNetAdapted,
             "pgdpnn": PGDPNNAdapted,
             "pgd_pnn": PGDPNNAdapted,
             "pgd-pnn": PGDPNNAdapted,
-            "dspgn": DSPGNAdapted,
+            "dspgn": NativeGridDSPGNAdapted,
             "fem2vox_unet": FEM2VoxUNet,
             "stage1_unet": FEM2VoxUNet,
             "stage1_interpolation": Stage1InterpolationBaseline,
-            "cnn3d_baseline": CNN3DBaseline,
-            "transunet3d_baseline": TransUNet3DBaseline,
+            "cnn3d_baseline": NativeGridCNN3DBaseline,
+            "transunet3d_baseline": NativeGridTransUNet3DBaseline,
         }
         cls = registry.get(model_type, GenericVoxelBaseline)
         return cls(config)
@@ -68,12 +70,12 @@ class ModelFactory:
         if config is None:
             raise ValueError("FEM baseline 模型需要配置对象")
         from .models.fem_baselines import (
-            FISTAFEM,
-            L1FEM,
             ElasticNetFEM,
             FEMCoarseBaseline,
             FEMToVoxelBaseline,
+            FISTAFEM,
             GAICNLikeFEM,
+            L1FEM,
             StOMPFEM,
             TikhonovFEM,
         )
@@ -94,7 +96,7 @@ class ModelFactory:
 
     @staticmethod
     def create_gisc_fmt_model(config: Optional[Any] = None, **kwargs):
-        """Create GISC-FMT with backward-compatible multi-source extensions."""
+        """Create the legacy GISC-FMT model for backward-compatible ablations only."""
         from .models.gisc_multisource import GISCFMT
 
         if config is None:
@@ -103,7 +105,7 @@ class ModelFactory:
 
     @staticmethod
     def create_ssq_fmt_model(config: Optional[Any] = None, **kwargs):
-        """Create the final-method SSQ-FMT point model."""
+        """Create the current SSQ-FMT point model."""
         from .models.ssq_fmt import SSQFMT
 
         if config is None:

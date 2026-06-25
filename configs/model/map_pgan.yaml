@@ -7,10 +7,18 @@ pos_enc_dim: 60
 geometry:
   camera_distance: 200.0
   detector_size: [256, 256]
-  global_voxel_shape: [256, 256, 256]
+  global_voxel_shape: [190, 200, 104]
+benchmark:
+  display_name: MAP-PGAN-inspired adaptation
+  fidelity: architecture_proxy
+  reference_output_shape: [190, 200, 104]
+  physical_extent_mm: [38.0, 40.0, 20.8]
+  table_tier: appendix
 map_pgan:
   base_channels: 16
   latent_channels: 64
   internal_shape: [48, 50, 26]
+  # The current trainer has no alternating WGAN-GP optimization. Keep disabled
+  # and do not report this configuration as the original MAP-PGAN.
   use_gan: false
   lambda_adv: 0.0

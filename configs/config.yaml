@@ -11,13 +11,25 @@ defaults:
   - exp: default
   - _self_
 
-# optional: used for validate/test
+# Optional: used for validate/test. Publication evaluation fails if no checkpoint
+# is available; set allow_untrained_eval=true only for an explicit smoke test.
 ckpt_path: null
+allow_untrained_eval: false
 
 seed: 42
 deterministic: true
 benchmark: false
 verbose: false
+
+# Baseline reporting guard. Native-grid methods must share the same physical
+# reconstruction region and are mapped to the common evaluation grid only by a
+# fixed, parameter-free interpolation.
+benchmark_protocol:
+  mode: native_to_reference
+  table_tier: development
+  strict_fidelity: false
+  allow_unsafe_fully_connected_head: false
+  allow_unsafe_template_full_grid: false
 
 data:
   dataset_type: {}
