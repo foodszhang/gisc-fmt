@@ -1,12 +1,9 @@
-"""Memory-safe controlled voxel baselines for TMI comparison experiments.
+"""Memory-safe voxel baselines for TMI comparison experiments.
 
-These models reconstruct on a configurable native voxel grid and use a fixed,
-parameter-free trilinear mapping to the common reference grid.  The internal
-network therefore does not scale its activations or parameters to the full
-190 x 200 x 104 evaluation grid.
-
-The classes in this module are controlled architecture baselines.  They are
-not presented as reimplementations of a named literature method.
+Controlled models reconstruct on a configurable native voxel grid and use a
+fixed, parameter-free trilinear mapping to the common reference grid. Adapted
+literature proxies keep their existing heads but move the expensive surface
+lifting operation to the configured internal grid.
 """
 
 from __future__ import annotations
@@ -19,6 +16,9 @@ import torch.nn.functional as F
 
 from .voxel_baselines import (
     ConvBlock3d,
+    D2RecSTAdapted,
+    DSPGNAdapted,
+    MAPPGANAdapted,
     SurfaceVolumeBuilder,
     TransformerBottleneck3D,
     VNet3D,
@@ -160,3 +160,41 @@ class NativeGridTransUNet3DBaseline(_NativeGridMixin, nn.Module):
         aux = self._aux_outputs()
         aux["native_prediction_shape"] = tuple(int(v) for v in native_logits.shape[2:])
         return {"pred_voxel": pred, "aux_outputs": aux}
+
+
+class _NativeSurfaceProxyMixin:
+    """Move projection-to-volume lifting to the proxy's internal grid.
+
+    The legacy proxy first created a full-resolution one-channel shell, expanded
+    it to the latent channel count, and only then downsampled. Replacing the
+    builder is mathematically the same heuristic shell embedding at the proxy's
+    declared internal resolution, while avoiding the full-grid latent tensor.
+    """
+
+    def _use_internal_surface_grid(self, config) -> None:
+        internal_shape = tuple(int(v) for v in self.internal_shape)
+        self.surface_builder = SurfaceVolumeBuilder(internal_shape, config.data.view_angles)
+
+
+class NativeGridMAPPGANAdapted(_NativeSurfaceProxyMixin, MAPPGANAdapted):
+    """Memory-safe MAP-PGAN-inspired proxy; not the paper's WGAN-GP training."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self._use_internal_surface_grid(config)
+
+
+class NativeGridD2RecSTAdapted(_NativeSurfaceProxyMixin, D2RecSTAdapted):
+    """Memory-safe D2-RecST-inspired proxy; perceptual/adversarial domains remain absent."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self._use_internal_surface_grid(config)
+
+
+class NativeGridDSPGNAdapted(_NativeSurfaceProxyMixin, DSPGNAdapted):
+    """Memory-safe DSPGN-inspired proxy; not a system-matrix FEM graph implementation."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self._use_internal_surface_grid(config)
