@@ -7,9 +7,16 @@ pos_enc_dim: 60
 geometry:
   camera_distance: 200.0
   detector_size: [256, 256]
-  global_voxel_shape: [256, 256, 256]
+  global_voxel_shape: [190, 200, 104]
+benchmark:
+  display_name: D2-RecST-inspired adaptation
+  fidelity: architecture_proxy
+  reference_output_shape: [190, 200, 104]
+  table_tier: appendix
 d2_recst:
   base_channels: 16
   latent_channels: 64
   internal_shape: [48, 50, 26]
+  # The defining adversarial image-domain and perceptual transfer objectives
+  # are not implemented in the current trainer; keep this appendix-only.
   lambda_perceptual: 0.0
