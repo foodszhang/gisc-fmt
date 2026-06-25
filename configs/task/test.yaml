@@ -14,14 +14,13 @@ test:
   save_registered_seg: true
   save_proj_comparisons: true
 
-  # Segmentation metrics
-  # Components smaller than this (voxel count) are ignored for region count and distance metrics.
-  min_region_size: 10
-  # Physical spacing for ASSD/HD95 (x,y,z). If unknown, keep [1,1,1].
-  voxel_spacing: [1.0, 1.0, 1.0]
+  # Primary segmentation and localization metrics are computed without
+  # morphology-altering post-processing. A threshold selected on validation
+  # data should be supplied here and then frozen for the test set.
+  min_region_size: 1
+  voxel_spacing: [0.2, 0.2, 0.2]
 
-  # Connected components / region counting
-  # - cc_connectivity supports 6/18/26 (or 1/2/3 for ndimage.generate_binary_structure)
-  # - cc_dilation_iters dilates the mask before labeling to bridge small gaps
+  # Connected components / region counting. Do not bridge gaps for the primary
+  # comparison; any post-processed sensitivity analysis must be reported apart.
   cc_connectivity: 26
-  cc_dilation_iters: 1
+  cc_dilation_iters: 0
