@@ -13,6 +13,7 @@ benchmark:
   fidelity: architecture_proxy
   native_output_shape: [64, 64, 64]
   reference_output_shape: [190, 200, 104]
+  physical_extent_mm: [38.0, 40.0, 20.8]
   table_tier: appendix
 vox_dmrn:
   base_channels: 32
