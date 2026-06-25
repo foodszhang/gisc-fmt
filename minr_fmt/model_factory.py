@@ -33,33 +33,33 @@ class ModelFactory:
             raise ValueError("Voxel baseline 模型需要配置对象")
         from .models.native_grid_baselines import (
             NativeGridCNN3DBaseline,
+            NativeGridD2RecSTAdapted,
+            NativeGridDSPGNAdapted,
+            NativeGridMAPPGANAdapted,
             NativeGridTransUNet3DBaseline,
         )
         from .models.voxel_baselines import (
-            D2RecSTAdapted,
-            DSPGNAdapted,
             FEM2VoxUNet,
             FMTReconNetAdapted,
             GenericVoxelBaseline,
-            MAPPGANAdapted,
             PGDPNNAdapted,
             Stage1InterpolationBaseline,
             TwoStageDeepFMTAdapted,
         )
 
         registry = {
-            "map_pgan": MAPPGANAdapted,
-            "d2_recst": D2RecSTAdapted,
+            "map_pgan": NativeGridMAPPGANAdapted,
+            "d2_recst": NativeGridD2RecSTAdapted,
             "two_stage_deepfmt": TwoStageDeepFMTAdapted,
             "fmt_reconnet": FMTReconNetAdapted,
             "pgdpnn": PGDPNNAdapted,
             "pgd_pnn": PGDPNNAdapted,
             "pgd-pnn": PGDPNNAdapted,
-            "dspgn": DSPGNAdapted,
+            "dspgn": NativeGridDSPGNAdapted,
             "fem2vox_unet": FEM2VoxUNet,
             "stage1_unet": FEM2VoxUNet,
             "stage1_interpolation": Stage1InterpolationBaseline,
-            # Controlled baselines now reconstruct on a memory-safe native grid
+            # Controlled baselines reconstruct on a memory-safe native grid
             # and use a fixed interpolation to the common reference grid.
             "cnn3d_baseline": NativeGridCNN3DBaseline,
             "transunet3d_baseline": NativeGridTransUNet3DBaseline,
