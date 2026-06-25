@@ -2,8 +2,10 @@ from types import SimpleNamespace as NS
 
 import pytest
 import torch
+import torch.nn.functional as F
 
 from minr_fmt.benchmark import get_baseline_spec, validate_baseline_protocol
+from minr_fmt.loss import VoxelReconstructionLoss
 from minr_fmt.models.native_grid_baselines import NativeGridCNN3DBaseline
 
 
@@ -53,7 +55,32 @@ def test_controlled_native_grid_model_returns_reference_grid():
         out = model(projections)
     assert out["pred_voxel"].shape == (1, 1, 10, 12, 6)
     assert out["aux_outputs"]["native_prediction_shape"] == (8, 8, 4)
+    assert out["aux_outputs"]["native_pred_voxel"].shape == (1, 1, 8, 8, 4)
+    assert out["aux_outputs"]["train_on_native_grid"] is True
     assert out["aux_outputs"]["fixed_output_resampling"] is True
+
+
+def test_native_grid_loss_resamples_continuous_target_and_backpropagates():
+    native_logits = torch.randn(2, 1, 8, 8, 4, requires_grad=True)
+    reference_logits = F.interpolate(
+        native_logits,
+        size=(10, 12, 6),
+        mode="trilinear",
+        align_corners=False,
+    )
+    continuous_target = torch.rand(2, 10, 12, 6)
+    losses = VoxelReconstructionLoss()(
+        reference_logits,
+        continuous_target,
+        {
+            "native_pred_voxel": native_logits,
+            "train_on_native_grid": True,
+        },
+    )
+    losses["total_loss"].backward()
+    assert native_logits.grad is not None
+    assert native_logits.grad.shape == native_logits.shape
+    assert torch.isfinite(native_logits.grad).all()
 
 
 def test_main_table_rejects_architecture_proxy():
