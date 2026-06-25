@@ -6,10 +6,18 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 from scipy import ndimage
+from scipy.optimize import linear_sum_assignment
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from minr_fmt.utils.ssq_candidate_extraction import load_candidate_cache  # noqa: E402
 
 
 def find_samples(data_dir: Path, limit: int | None) -> list[Path]:
@@ -19,18 +27,13 @@ def find_samples(data_dir: Path, limit: int | None) -> list[Path]:
 
 
 def load_candidates(sample_dir: Path) -> np.ndarray:
-    cand_path = sample_dir / "proposal" / "candidate_anchors.npz"
-    if not cand_path.exists():
-        return np.zeros((0, 3), dtype=np.float32)
-    z = np.load(cand_path)
-    for key in ("candidate_centers_mm", "centers_mm", "centers"):
-        if key in z.files:
-            return z[key].astype(np.float32)
-    return np.zeros((0, 3), dtype=np.float32)
+    cache = load_candidate_cache(sample_dir)
+    return cache["centers_mm"][cache["valid"]].astype(np.float32)
 
 
 def component_centers(gt: np.ndarray, voxel_size_mm: float) -> np.ndarray:
-    labels, count = ndimage.label(gt > 0.5)
+    gt_norm = gt / max(float(np.nanmax(gt)), 1.0e-8)
+    labels, count = ndimage.label(gt_norm > 0.5)
     centers = []
     for idx in range(1, count + 1):
         coords = np.argwhere(labels == idx)
@@ -57,9 +60,16 @@ def main() -> None:
             dist = np.linalg.norm(comp[:, None] - cand[None], axis=-1)
             min_comp = dist.min(axis=1)
             min_cand = dist.min(axis=0)
+            row_ind, col_ind = linear_sum_assignment(dist)
+            matched_dist = dist[row_ind, col_ind]
         else:
+            dist = np.zeros((len(comp), len(cand)), dtype=np.float32)
             min_comp = np.full(len(comp), np.inf, dtype=np.float32)
             min_cand = np.full(len(cand), np.inf, dtype=np.float32)
+            matched_dist = np.asarray([], dtype=np.float32)
+        matched3 = matched_dist <= 3.0
+        one_to_one_matches_3mm = int(matched3.sum())
+        duplicate_count = int(max((min_cand <= 3.0).sum() - one_to_one_matches_3mm, 0))
         tumor_path = sample_dir / "tumor_params.json"
         tumor = json.loads(tumor_path.read_text()) if tumor_path.exists() else {}
         rows.append(
@@ -71,14 +81,22 @@ def main() -> None:
                 "candidate_recall_2mm": float((min_comp <= 2.0).mean()) if len(comp) else 1.0,
                 "candidate_recall_3mm": float((min_comp <= 3.0).mean()) if len(comp) else 1.0,
                 "candidate_recall_5mm": float((min_comp <= 5.0).mean()) if len(comp) else 1.0,
+                "candidate_precision_2mm": float((min_cand <= 2.0).mean()) if len(cand) else 0.0,
                 "candidate_precision_3mm": float((min_cand <= 3.0).mean()) if len(cand) else 0.0,
-                "duplicate_candidate_ratio": float(
-                    max(len(cand) - len(comp), 0) / max(len(cand), 1)
-                ),
+                "candidate_precision_5mm": float((min_cand <= 5.0).mean()) if len(cand) else 0.0,
+                "one_to_one_matched_distance_mean": float(np.mean(matched_dist))
+                if len(matched_dist)
+                else float("inf"),
+                "one_to_one_matched_distance_p95": float(np.percentile(matched_dist, 95))
+                if len(matched_dist)
+                else float("inf"),
+                "duplicate_candidate_count_3mm": duplicate_count,
+                "duplicate_candidate_ratio": float(duplicate_count / max(len(cand), 1)),
                 "mean_anchor_to_component_distance": float(np.mean(min_cand))
                 if len(cand)
                 else float("inf"),
                 "uncovered_component_count_3mm": int((min_comp > 3.0).sum()),
+                "unmatched_candidate_count_3mm": int((min_cand > 3.0).sum()),
                 "candidate_count_error": int(len(cand) - len(comp)),
                 "min_inter_source_distance": tumor.get("min_inter_source_distance_mm", None),
                 "weak_to_dominant_intensity_ratio": tumor.get(

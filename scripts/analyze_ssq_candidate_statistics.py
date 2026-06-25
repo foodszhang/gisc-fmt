@@ -6,9 +6,16 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from minr_fmt.utils.ssq_candidate_extraction import load_candidate_cache  # noqa: E402
 
 
 def find_samples(data_dir: Path, limit: int | None) -> list[Path]:
@@ -51,43 +58,46 @@ def main() -> None:
     counts: list[int] = []
     nn_dists: list[float] = []
     for sample_dir in find_samples(Path(args.data_dir), args.limit):
-        cand_path = sample_dir / "proposal" / "candidate_anchors.npz"
-        meta_path = sample_dir / "proposal" / "meas_backproj_meta.json"
-        if cand_path.exists():
-            z = np.load(cand_path)
-            centers = z["centers_mm"].astype(np.float32)
-            score = (
-                z["scores"].astype(np.float32)
-                if "scores" in z.files
-                else np.ones(len(centers), dtype=np.float32)
-            )
-            scale = (
-                z["scales_mm"].astype(np.float32)
-                if "scales_mm" in z.files
-                else np.full(len(centers), np.nan, dtype=np.float32)
-            )
-        else:
+        try:
+            cache = load_candidate_cache(sample_dir)
+        except FileNotFoundError:
             continue
-        if meta_path.exists():
-            meta = json.loads(meta_path.read_text())
-            version = meta.get("proposal_version", "unknown")
-        else:
-            version = "unknown"
-        finite_scale = scale[np.isfinite(scale)]
+        centers_all = cache["centers_mm"].astype(np.float32)
+        valid = cache["valid"].astype(bool)
+        centers = centers_all[valid]
+        score = cache["scores"].astype(np.float32)[valid]
+        raw_scale = cache["raw_support_scales_mm"].astype(np.float32)[valid]
+        clipped_scale = np.clip(raw_scale, 1.0, 12.0)
+        version = cache["metadata"].get("version", "unknown")
+        finite_scale = raw_scale[np.isfinite(raw_scale)]
         scales.extend(float(x) for x in finite_scale)
         scores.extend(float(x) for x in score)
         counts.append(int(len(centers)))
         if len(centers) > 1:
             dist = np.linalg.norm(centers[:, None] - centers[None], axis=-1)
-            dist[dist == 0] = np.inf
-            nn_dists.extend(float(x) for x in np.min(dist, axis=1))
+            np.fill_diagonal(dist, np.inf)
+            nearest = np.min(dist, axis=1)
+            nn_dists.extend(float(x) for x in nearest)
+            nearest_min = float(np.min(nearest))
+        else:
+            nearest_min = np.nan
         rows.append(
             {
                 "sample_id": sample_dir.name,
                 "proposal_version": version,
                 "candidate_count": int(len(centers)),
-                "scale_min": float(np.nanmin(scale)) if len(scale) else np.nan,
-                "scale_median": float(np.nanmedian(scale)) if len(scale) else np.nan,
+                "raw_scale_min": float(np.nanmin(raw_scale)) if len(raw_scale) else np.nan,
+                "raw_scale_median": float(np.nanmedian(raw_scale)) if len(raw_scale) else np.nan,
+                "clipped_scale_min": float(np.nanmin(clipped_scale))
+                if len(clipped_scale)
+                else np.nan,
+                "clipped_scale_median": float(np.nanmedian(clipped_scale))
+                if len(clipped_scale)
+                else np.nan,
+                "scale_clip_ratio": float(np.mean(raw_scale != clipped_scale))
+                if len(raw_scale)
+                else np.nan,
+                "nearest_neighbor_distance_mm": nearest_min,
                 "score_max": float(np.max(score)) if len(score) else np.nan,
             }
         )

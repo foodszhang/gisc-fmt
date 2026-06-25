@@ -33,6 +33,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from minr_fmt.utils.fmt_simgen_projection import project_points_mm_to_detector  # noqa: E402
+from minr_fmt.utils.ssq_candidate_extraction import (  # noqa: E402
+    extract_candidate_anchors,
+    write_candidate_cache,
+)
 
 
 def find_sample_dirs(data_dir: Path) -> list[Path]:
@@ -215,7 +219,13 @@ def process_sample(sample_dir: Path, params: dict[str, Any]) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     heatmap_path = out_dir / "meas_backproj_heatmap.npy"
     meta_path = out_dir / "meas_backproj_meta.json"
-    if heatmap_path.exists() and meta_path.exists() and not params["overwrite"]:
+    cand_path = out_dir / "candidate_anchors.npz"
+    if (
+        heatmap_path.exists()
+        and meta_path.exists()
+        and cand_path.exists()
+        and not params["overwrite"]
+    ):
         try:
             heat = np.load(heatmap_path)
             return {
@@ -229,6 +239,26 @@ def process_sample(sample_dir: Path, params: dict[str, Any]) -> dict[str, Any]:
             print(f"[WARN] Recomputing unreadable proposal for {sample_dir.name}: {exc}")
 
     heat, meta = compute_heatmap(sample_dir, params)
+    anchors = extract_candidate_anchors(
+        heat,
+        meta,
+        top_m=int(params["candidate_top_m"]),
+        smoothing_sigma_mm=params.get("candidate_smoothing_sigma_mm"),
+        smoothing_sigma_cells=params.get("candidate_smoothing_sigma_cells"),
+        nms_radius_mm=float(params["candidate_nms_radius_mm"]),
+        support_moment_radius_mm=float(params["candidate_support_moment_radius_mm"]),
+        min_value_ratio=float(params["candidate_min_value_ratio"]),
+    )
+    candidate_meta = {
+        **meta,
+        "smoothing_sigma_mm": params.get("candidate_smoothing_sigma_mm"),
+        "smoothing_sigma_cells": params.get("candidate_smoothing_sigma_cells"),
+        "nms_radius_mm": float(params["candidate_nms_radius_mm"]),
+        "support_moment_radius_mm": float(params["candidate_support_moment_radius_mm"]),
+        "min_value_ratio": float(params["candidate_min_value_ratio"]),
+        "top_m": int(params["candidate_top_m"]),
+    }
+    write_candidate_cache(sample_dir, anchors, candidate_meta)
     tmp_heatmap = heatmap_path.with_suffix(".tmp.npy")
     np.save(tmp_heatmap, heat)
     tmp_heatmap.replace(heatmap_path)
@@ -309,6 +339,12 @@ def main() -> None:
     parser.add_argument("--grid_size", nargs=3, type=int, default=[50, 60, 50])
     parser.add_argument("--gamma", type=float, default=0.5)
     parser.add_argument("--blur_sigma", type=float, default=1.0)
+    parser.add_argument("--candidate_top_m", type=int, default=5)
+    parser.add_argument("--candidate_smoothing_sigma_cells", type=float, default=1.0)
+    parser.add_argument("--candidate_smoothing_sigma_mm", type=float)
+    parser.add_argument("--candidate_nms_radius_mm", type=float, default=3.0)
+    parser.add_argument("--candidate_support_moment_radius_mm", type=float, default=4.0)
+    parser.add_argument("--candidate_min_value_ratio", type=float, default=0.1)
     parser.add_argument("--views", nargs="+", type=int, default=[-90, -60, -30, 0, 30, 60, 90])
     parser.add_argument("--camera_distance", type=float, default=200.0)
     parser.add_argument("--fov_mm", type=float, default=80.0)
@@ -354,6 +390,12 @@ def main() -> None:
         "overwrite": args.overwrite,
         "normalization": args.normalization,
         "coverage_gamma": args.coverage_gamma,
+        "candidate_top_m": args.candidate_top_m,
+        "candidate_smoothing_sigma_cells": args.candidate_smoothing_sigma_cells,
+        "candidate_smoothing_sigma_mm": args.candidate_smoothing_sigma_mm,
+        "candidate_nms_radius_mm": args.candidate_nms_radius_mm,
+        "candidate_support_moment_radius_mm": args.candidate_support_moment_radius_mm,
+        "candidate_min_value_ratio": args.candidate_min_value_ratio,
     }
 
     t0 = time.perf_counter()

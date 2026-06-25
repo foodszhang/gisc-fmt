@@ -28,49 +28,37 @@ class MeasurementDerivedCandidateBuilder(nn.Module):
     def forward(
         self, measurements: torch.Tensor, batch: dict[str, Any] | None = None
     ) -> dict[str, torch.Tensor]:
-        b, _v, _c, h, w = measurements.shape
+        b, _v, _c, _h, _w = measurements.shape
         device, dtype = measurements.device, measurements.dtype
         centers = torch.zeros((b, self.mmax, 3), device=device, dtype=dtype)
         scores = torch.zeros((b, self.mmax), device=device, dtype=dtype)
         raw_scales = torch.full((b, self.mmax), self.scale_min_mm, device=device, dtype=dtype)
         valid = torch.zeros((b, self.mmax), device=device, dtype=torch.bool)
 
-        if batch is not None and "candidate_centers_mm" in batch:
-            src_centers = batch["candidate_centers_mm"].to(device=device, dtype=dtype)
-            m = min(self.mmax, src_centers.shape[1])
-            centers[:, :m] = src_centers[:, :m]
-            if "candidate_scores" in batch:
-                scores[:, :m] = batch["candidate_scores"][:, :m].to(device=device, dtype=dtype)
-            else:
-                scores[:, :m] = 1.0
-            if "candidate_support_scales_mm" in batch:
-                raw_scales[:, :m] = batch["candidate_support_scales_mm"][:, :m].to(
-                    device=device, dtype=dtype
-                )
-            elif "candidate_scales_mm" in batch:
-                raw_scales[:, :m] = batch["candidate_scales_mm"][:, :m].to(
-                    device=device, dtype=dtype
-                )
-            if "candidate_valid_mask" in batch:
-                valid[:, :m] = batch["candidate_valid_mask"][:, :m].to(
-                    device=device, dtype=torch.bool
-                )
-            else:
-                valid[:, :m] = scores[:, :m] > self.threshold
+        if batch is None or "candidate_centers_mm" not in batch:
+            raise FileNotFoundError(
+                "SSQ candidate anchors are required. Generate proposal/candidate_anchors.npz "
+                "and load it through the dataset; online detector top-k fallback is disabled."
+            )
+        src_centers = batch["candidate_centers_mm"].to(device=device, dtype=dtype)
+        m = min(self.mmax, src_centers.shape[1])
+        centers[:, :m] = src_centers[:, :m]
+        if "candidate_scores" in batch:
+            scores[:, :m] = batch["candidate_scores"][:, :m].to(device=device, dtype=dtype)
         else:
-            field = measurements.mean(dim=(1, 2))
-            flat = field.reshape(b, -1)
-            topk = min(self.mmax, flat.shape[1])
-            vals, idx = torch.topk(flat, k=topk, dim=1)
-            ys = torch.div(idx, w, rounding_mode="floor")
-            xs = idx % w
-            maxv = vals[:, :1].clamp_min(1e-8)
-            sx, sy, sz = self.trunk_size_mm
-            centers[:, :topk, 0] = (xs.to(dtype) + 0.5) / float(w) * sx
-            centers[:, :topk, 1] = (ys.to(dtype) + 0.5) / float(h) * sy
-            centers[:, :topk, 2] = 0.5 * sz
-            scores[:, :topk] = (vals / maxv).clamp(0.0, 1.0)
-            valid[:, :topk] = vals > self.threshold
+            scores[:, :m] = 1.0
+        if "candidate_support_scales_mm" in batch:
+            raw_scales[:, :m] = batch["candidate_support_scales_mm"][:, :m].to(
+                device=device, dtype=dtype
+            )
+        elif "candidate_scales_mm" in batch:
+            raw_scales[:, :m] = batch["candidate_scales_mm"][:, :m].to(device=device, dtype=dtype)
+        if "candidate_valid_mask" in batch:
+            valid[:, :m] = batch["candidate_valid_mask"][:, :m].to(
+                device=device, dtype=torch.bool
+            )
+        else:
+            valid[:, :m] = scores[:, :m] > self.threshold
 
         clipped = raw_scales.clamp(self.scale_min_mm, self.scale_max_mm)
         return {
