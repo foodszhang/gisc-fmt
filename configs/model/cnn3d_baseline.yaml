@@ -8,6 +8,7 @@ benchmark:
   fidelity: controlled
   native_output_shape: [64, 64, 32]
   reference_output_shape: [190, 200, 104]
+  physical_extent_mm: [38.0, 40.0, 20.8]
 cnn3d_baseline:
   base_channels: 8
   native_output_shape: [64, 64, 32]
