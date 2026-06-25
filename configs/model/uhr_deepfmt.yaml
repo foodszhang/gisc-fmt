@@ -13,6 +13,7 @@ benchmark:
   fidelity: mechanism_preserving_adaptation
   native_output_shape: [64, 64, 64]
   reference_output_shape: [190, 200, 104]
+  physical_extent_mm: [38.0, 40.0, 20.8]
 uhr_deepfmt:
   base_channels: 8
   num_levels: 3
