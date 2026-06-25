@@ -1,10 +1,4 @@
-"""Baseline fidelity registry and benchmark preflight checks.
-
-The registry separates official/paper-guided methods from adapted mechanisms and
-controlled architectures. Exact literature names are not allowed in the TMI
-main table when the implementation does not preserve the paper's defining
-mechanisms and training objective.
-"""
+"""Baseline fidelity registry and TMI comparison preflight checks."""
 
 from __future__ import annotations
 
@@ -13,6 +7,9 @@ import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+_DEFAULT_REFERENCE_SHAPE = (190, 200, 104)
+_DEFAULT_PHYSICAL_EXTENT_MM = (38.0, 40.0, 20.8)
 
 
 @dataclass(frozen=True)
@@ -25,190 +22,131 @@ class BaselineSpec:
     reference: str | None = None
 
 
+def _spec(
+    method_id: str,
+    display_name: str,
+    fidelity: str,
+    main_table_allowed: bool,
+    reason: str,
+    reference: str | None = None,
+) -> BaselineSpec:
+    return BaselineSpec(
+        method_id,
+        display_name,
+        fidelity,
+        main_table_allowed,
+        reason,
+        reference,
+    )
+
+
 _SPECS = {
-    "ssq_fmt": BaselineSpec(
-        "ssq_fmt", "SSQ-FMT", "proposed", True, "Current proposed method."
-    ),
-    "tikhonov_fem": BaselineSpec(
-        "tikhonov_fem",
-        "Tikhonov-FEM",
-        "classical",
-        True,
+    "ssq_fmt": _spec("ssq_fmt", "SSQ-FMT", "proposed", True, "Current proposed method."),
+    "tikhonov_fem": _spec(
+        "tikhonov_fem", "Tikhonov-FEM", "classical", True,
         "Deterministic classical inverse solver.",
     ),
-    "l1_fem": BaselineSpec(
-        "l1_fem",
-        "L1-FEM",
-        "classical",
-        True,
-        "Deterministic sparse inverse solver; use only when its regularization is tuned on validation data.",
+    "l1_fem": _spec(
+        "l1_fem", "L1-FEM", "classical", True,
+        "Sparse inverse solver; regularization must be selected on validation data.",
     ),
-    "elasticnet_fem": BaselineSpec(
-        "elasticnet_fem",
-        "ElasticNet-FEM",
-        "classical",
-        False,
-        "Valid classical control, but redundant with L1/FISTA for the compact main table.",
+    "elasticnet_fem": _spec(
+        "elasticnet_fem", "ElasticNet-FEM", "classical", False,
+        "Valid classical control but redundant with L1/FISTA in the compact main table.",
     ),
-    "fista_fem": BaselineSpec(
-        "fista_fem",
-        "FISTA-L1-FEM",
-        "classical",
-        True,
+    "fista_fem": _spec(
+        "fista_fem", "FISTA-L1-FEM", "classical", True,
         "Deterministic sparse inverse solver.",
     ),
-    "stomp_fem": BaselineSpec(
-        "stomp_fem",
-        "StOMP-FEM",
-        "classical",
-        True,
+    "stomp_fem": _spec(
+        "stomp_fem", "StOMP-FEM", "classical", True,
         "Deterministic sparse inverse solver.",
     ),
-    "fem_coarse": BaselineSpec(
-        "fem_coarse",
-        "Coarse FEM reconstruction",
-        "physical_control",
-        True,
-        "Stage-1 physical reconstruction control; not an independent learned competitor.",
+    "fem_coarse": _spec(
+        "fem_coarse", "Coarse FEM reconstruction", "physical_control", True,
+        "Stage-1 physical control, not an independent learned competitor.",
     ),
-    "fem_to_voxel": BaselineSpec(
-        "fem_to_voxel",
-        "FEM-to-voxel interpolation",
-        "physical_control",
-        True,
+    "fem_to_voxel": _spec(
+        "fem_to_voxel", "FEM-to-voxel interpolation", "physical_control", True,
         "Deterministic mapping of the coarse FEM result to the common voxel grid.",
     ),
-    "stage1_fem": BaselineSpec(
-        "stage1_fem",
-        "Coarse FEM reconstruction",
-        "physical_control",
-        True,
-        "Alias of the stage-1 physical reconstruction control.",
+    "stage1_fem": _spec(
+        "stage1_fem", "Coarse FEM reconstruction", "physical_control", True,
+        "Alias of the stage-1 physical control.",
     ),
-    "stage1_to_voxel": BaselineSpec(
-        "stage1_to_voxel",
-        "FEM-to-voxel interpolation",
-        "physical_control",
-        True,
+    "stage1_to_voxel": _spec(
+        "stage1_to_voxel", "FEM-to-voxel interpolation", "physical_control", True,
         "Alias of the deterministic FEM-to-voxel control.",
     ),
-    "fem2vox_unet": BaselineSpec(
-        "fem2vox_unet",
-        "FEM-prior residual 3D CNN",
-        "controlled",
-        True,
-        "Controlled refinement baseline that explicitly consumes the same coarse FEM prior.",
-    ),
-    "stage1_unet": BaselineSpec(
-        "stage1_unet",
-        "FEM-prior residual 3D CNN",
-        "controlled",
-        True,
-        "Alias of the FEM-prior refinement control.",
-    ),
-    "stage1_interpolation": BaselineSpec(
-        "stage1_interpolation",
-        "FEM-to-voxel interpolation",
-        "physical_control",
-        True,
+    "stage1_interpolation": _spec(
+        "stage1_interpolation", "FEM-to-voxel interpolation", "physical_control", True,
         "Deterministic interpolation baseline.",
     ),
-    "cnn3d_baseline": BaselineSpec(
-        "cnn3d_baseline",
-        "3D CNN (capacity control)",
-        "controlled",
-        True,
-        "Controlled architecture baseline; not a literature-method reimplementation.",
+    "fem2vox_unet": _spec(
+        "fem2vox_unet", "FEM-prior residual 3D CNN", "controlled", True,
+        "Controlled refinement baseline consuming the same coarse FEM prior.",
     ),
-    "transunet3d_baseline": BaselineSpec(
-        "transunet3d_baseline",
-        "3D TransUNet (capacity control)",
-        "controlled",
-        True,
-        "Controlled architecture baseline; not a literature-method reimplementation.",
+    "stage1_unet": _spec(
+        "stage1_unet", "FEM-prior residual 3D CNN", "controlled", True,
+        "Alias of the FEM-prior refinement control.",
     ),
-    "uhr_deepfmt": BaselineSpec(
-        "uhr_deepfmt",
-        "UHR-DeepFMT (adapted)",
-        "mechanism_preserving_adaptation",
-        True,
-        "Retains a 3-D encoder-decoder and SE-based skip fusion, but the original data formation and exact dual-sampling implementation are unavailable.",
+    "cnn3d_baseline": _spec(
+        "cnn3d_baseline", "3D CNN (capacity control)", "controlled", True,
+        "Controlled architecture baseline, not a literature-method reproduction.",
+    ),
+    "transunet3d_baseline": _spec(
+        "transunet3d_baseline", "3D TransUNet (capacity control)", "controlled", True,
+        "Controlled architecture baseline, not a literature-method reproduction.",
+    ),
+    "uhr_deepfmt": _spec(
+        "uhr_deepfmt", "UHR-DeepFMT (adapted)", "mechanism_preserving_adaptation", True,
+        "Retains a 3-D encoder-decoder and SE skip fusion, but exact dual-sampling input formation is unavailable.",
         "10.1109/TMI.2021.3071556",
     ),
-    "pah2t_former": BaselineSpec(
-        "pah2t_former",
-        "PAH2T-Former (adapted)",
-        "mechanism_preserving_adaptation",
-        False,
-        "Current code keeps paired spatial/channel attention modules but maps view depth to reconstruction depth heuristically; appendix only until paper-faithful input formation is verified.",
+    "pah2t_former": _spec(
+        "pah2t_former", "PAH2T-Former (adapted)", "mechanism_preserving_adaptation", False,
+        "Paired attention is retained, but view-to-volume input formation is heuristic.",
         "10.1109/TCI.2025.3559431",
     ),
-    "map_pgan": BaselineSpec(
-        "map_pgan",
-        "MAP-PGAN-inspired adaptation",
-        "architecture_proxy",
-        False,
-        "Current training does not implement the defining WGAN, gradient penalty, parameterized skip connections, and attention-prior loss.",
+    "map_pgan": _spec(
+        "map_pgan", "MAP-PGAN-inspired adaptation", "architecture_proxy", False,
+        "WGAN optimization, gradient penalty, parameterized skips, and attention-prior loss are absent.",
         "10.1364/BOE.469505",
     ),
-    "d2_recst": BaselineSpec(
-        "d2_recst",
-        "D2-RecST-inspired adaptation",
-        "architecture_proxy",
-        False,
-        "Current perceptual-domain objective is inactive and the defining image-domain adversarial training is absent.",
+    "d2_recst": _spec(
+        "d2_recst", "D2-RecST-inspired adaptation", "architecture_proxy", False,
+        "Perceptual transfer is inactive and image-domain adversarial training is absent.",
         "10.1016/j.cmpb.2022.107293",
     ),
-    "dspgn": BaselineSpec(
-        "dspgn",
-        "DSPGN-inspired adaptation",
-        "architecture_proxy",
-        False,
-        "Current graph branch does not embed the FEM imaging-system prior or reconstruct on the paper's mesh graph.",
+    "dspgn": _spec(
+        "dspgn", "DSPGN-inspired adaptation", "architecture_proxy", False,
+        "The FEM imaging-system prior and paper-specific mesh graph are absent.",
         "10.1016/j.cmpb.2025.108948",
     ),
-    "fmt_reconnet": BaselineSpec(
-        "fmt_reconnet",
-        "Template-STN reconstruction control",
-        "architecture_proxy",
-        False,
-        "The available description is insufficient for an exact implementation; current code shares a generic template-STN-VNet proxy.",
+    "fmt_reconnet": _spec(
+        "fmt_reconnet", "Template-STN reconstruction control", "architecture_proxy", False,
+        "Available details are insufficient for exact reproduction; code uses a generic template-STN-VNet proxy.",
         "10.1109/EMBC53108.2024.10781645",
     ),
-    "pgdpnn": BaselineSpec(
-        "pgdpnn",
-        "Template-STN reconstruction control",
-        "architecture_proxy",
-        False,
-        "Current implementation is identical to the FMT-ReconNet proxy and must not be reported as a separate literature method.",
+    "pgdpnn": _spec(
+        "pgdpnn", "Template-STN reconstruction control", "architecture_proxy", False,
+        "Implementation is identical to the FMT-ReconNet proxy and is not an independent method.",
     ),
-    "two_stage_deepfmt": BaselineSpec(
-        "two_stage_deepfmt",
-        "Two-stage projection-to-volume control",
-        "architecture_proxy",
-        False,
-        "The current learned profile-to-slice mapping is not a verified inverse-Radon implementation.",
+    "two_stage_deepfmt": _spec(
+        "two_stage_deepfmt", "Two-stage projection-to-volume control", "architecture_proxy", False,
+        "The learned profile-to-slice mapping is not a verified inverse-Radon implementation.",
     ),
-    "vox_dmrn": BaselineSpec(
-        "vox_dmrn",
-        "Vox-DMRN (single-view adaptation)",
-        "architecture_proxy",
-        False,
-        "Single-view input and a fully connected voxel head are not directly comparable with the seven-view protocol and become unsafe at the reference grid size.",
+    "vox_dmrn": _spec(
+        "vox_dmrn", "Vox-DMRN (single-view adaptation)", "architecture_proxy", False,
+        "Single-view input and a fully connected voxel head do not match the seven-view protocol.",
     ),
-    "gaicn": BaselineSpec(
-        "gaicn",
-        "Graph-unrolled FEM control",
-        "architecture_proxy",
-        False,
-        "Repository class is explicitly GAICN-like rather than a verified paper-faithful implementation.",
+    "gaicn": _spec(
+        "gaicn", "Graph-unrolled FEM control", "architecture_proxy", False,
+        "The repository class is explicitly GAICN-like rather than paper-faithful.",
     ),
 }
 
-_ALIASES = {
-    "pgd_pnn": "pgdpnn",
-    "pgd-pnn": "pgdpnn",
-}
+_ALIASES = {"pgd_pnn": "pgdpnn", "pgd-pnn": "pgdpnn"}
 
 
 def _canonical_method_id(method_id: str) -> str:
@@ -220,26 +158,8 @@ def get_baseline_spec(method_id: str) -> BaselineSpec:
     method_id = _canonical_method_id(method_id)
     return _SPECS.get(
         method_id,
-        BaselineSpec(method_id, method_id, "unclassified", False, "No fidelity audit is registered."),
+        _spec(method_id, method_id, "unclassified", False, "No fidelity audit is registered."),
     )
-
-
-def _as_tuple3(value: Any, default: tuple[int, int, int]) -> tuple[int, int, int]:
-    if value is None:
-        return default
-    values = tuple(int(v) for v in value)
-    if len(values) != 3 or any(v <= 0 for v in values):
-        raise ValueError(f"Expected a positive 3-D shape, got {values}")
-    return values
-
-
-def _as_float_tuple3(value: Any, default: tuple[float, float, float]) -> tuple[float, float, float]:
-    if value is None:
-        return default
-    values = tuple(float(v) for v in value)
-    if len(values) != 3 or any(v <= 0.0 for v in values):
-        raise ValueError(f"Expected a positive 3-D physical extent, got {values}")
-    return values
 
 
 def _get_nested(obj: Any, *keys: str, default=None):
@@ -254,22 +174,54 @@ def _get_nested(obj: Any, *keys: str, default=None):
     return current
 
 
-def _roi_shape_from_data(cfg: Any) -> tuple[int, int, int] | None:
+def _tuple3(value: Any, default: tuple[int, int, int]) -> tuple[int, int, int]:
+    if value is None:
+        return default
+    values = tuple(int(v) for v in value)
+    if len(values) != 3 or any(v <= 0 for v in values):
+        raise ValueError(f"Expected a positive 3-D shape, got {values}")
+    return values
+
+
+def _float_tuple3(value: Any, default: tuple[float, float, float]) -> tuple[float, float, float]:
+    if value is None:
+        return default
+    values = tuple(float(v) for v in value)
+    if len(values) != 3 or any(v <= 0.0 for v in values):
+        raise ValueError(f"Expected a positive 3-D physical extent, got {values}")
+    return values
+
+
+def _roi_shape(cfg: Any) -> tuple[int, int, int] | None:
     ranges = _get_nested(cfg, "data", "voxel_ranges", default=None)
     if ranges is None:
         return None
     try:
-        return (
-            int(_get_nested(ranges, "x")[1] - _get_nested(ranges, "x")[0]),
-            int(_get_nested(ranges, "y")[1] - _get_nested(ranges, "y")[0]),
-            int(_get_nested(ranges, "z")[1] - _get_nested(ranges, "z")[0]),
-        )
+        axes = [_get_nested(ranges, axis) for axis in ("x", "y", "z")]
+        return tuple(int(axis[1] - axis[0]) for axis in axes)
     except (TypeError, IndexError, KeyError):
         return None
 
 
+def _reference_shape(cfg: Any) -> tuple[int, int, int]:
+    roi = _roi_shape(cfg)
+    declared = _get_nested(cfg, "model", "geometry", "global_voxel_shape", default=None)
+    return _tuple3(declared, roi or _DEFAULT_REFERENCE_SHAPE)
+
+
+def _native_shape(cfg: Any, raw_method_id: str) -> tuple[int, int, int] | None:
+    section_shape = _get_nested(
+        cfg, "model", raw_method_id, "native_output_shape", default=None
+    )
+    if section_shape is None:
+        section_shape = _get_nested(cfg, "model", raw_method_id, "internal_shape", default=None)
+    if section_shape is None:
+        section_shape = _get_nested(cfg, "model", "benchmark", "native_output_shape", default=None)
+    return None if section_shape is None else _tuple3(section_shape, _reference_shape(cfg))
+
+
 def validate_baseline_protocol(cfg: Any) -> BaselineSpec:
-    """Validate reporting tier, common grid, and unsafe full-grid architectures."""
+    """Validate reporting tier, common physical grid, and unsafe architectures."""
 
     raw_method_id = str(_get_nested(cfg, "model", "name", default="")).lower()
     method_id = _canonical_method_id(raw_method_id)
@@ -281,85 +233,62 @@ def validate_baseline_protocol(cfg: Any) -> BaselineSpec:
     if mode not in {"native_to_reference", "resolution_matched", "development"}:
         raise ValueError(f"Unknown benchmark protocol mode: {mode}")
 
-    reference_shape = _as_tuple3(
-        _get_nested(cfg, "model", "geometry", "global_voxel_shape", default=None),
-        (190, 200, 104),
-    )
-    roi_shape = _roi_shape_from_data(cfg)
-    if roi_shape is not None and reference_shape != roi_shape:
+    roi = _roi_shape(cfg)
+    reference_shape = _reference_shape(cfg)
+    if roi is not None and reference_shape != roi:
         raise ValueError(
             "The common evaluation grid must match data.voxel_ranges. "
-            f"reference_shape={reference_shape}, roi_shape={roi_shape}."
+            f"reference_shape={reference_shape}, roi_shape={roi}."
         )
 
-    native_shape = _get_nested(cfg, "model", raw_method_id, "native_output_shape", default=None)
-    if native_shape is None:
-        native_shape = _get_nested(cfg, "model", "benchmark", "native_output_shape", default=None)
+    native_shape = _native_shape(cfg, raw_method_id)
     if native_shape is not None:
-        native_shape = _as_tuple3(native_shape, reference_shape)
         physical_extent = _get_nested(
-            cfg,
-            "model",
-            "benchmark",
-            "physical_extent_mm",
-            default=None,
+            cfg, "model", "benchmark", "physical_extent_mm", default=None
         )
         if physical_extent is None:
             raise ValueError(
-                f"{raw_method_id} declares native_output_shape={native_shape} but does not declare "
-                "model.benchmark.physical_extent_mm. Native and reference grids must explicitly share "
-                "the same physical reconstruction region."
+                f"{raw_method_id} declares native/internal shape {native_shape} but does not declare "
+                "model.benchmark.physical_extent_mm. Native and reference grids must explicitly "
+                "cover the same physical reconstruction region."
             )
-        _as_float_tuple3(physical_extent, (38.0, 40.0, 20.8))
+        _float_tuple3(physical_extent, _DEFAULT_PHYSICAL_EXTENT_MM)
 
     if table_tier == "main" and not spec.main_table_allowed:
         raise ValueError(
             f"{raw_method_id} is not approved for the TMI main table: {spec.reason} "
-            "Use benchmark_protocol.table_tier=appendix/development or implement the missing defining mechanisms."
+            "Use appendix/development tier or implement the missing defining mechanisms."
         )
     if strict and spec.fidelity in {"architecture_proxy", "unclassified"}:
         raise ValueError(f"Strict fidelity check failed for {raw_method_id}: {spec.reason}")
 
     reference_voxels = math.prod(reference_shape)
     if method_id == "vox_dmrn" and reference_voxels > 1_000_000:
-        allow = bool(_get_nested(protocol, "allow_unsafe_fully_connected_head", default=False))
-        if not allow:
+        if not bool(_get_nested(protocol, "allow_unsafe_fully_connected_head", default=False)):
             raise ValueError(
-                "vox_dmrn is blocked on the common reference grid because its fully connected output head "
-                f"would emit {reference_voxels:,} voxels. Keep its native grid and evaluate after fixed resampling, "
-                "or use it only in a single-view appendix experiment."
+                "vox_dmrn is blocked on the common reference grid because its fully connected "
+                f"output head would emit {reference_voxels:,} voxels."
             )
 
     if method_id in {"fmt_reconnet", "pgdpnn"} and reference_voxels > 1_000_000:
-        allow = bool(_get_nested(protocol, "allow_unsafe_template_full_grid", default=False))
-        if not allow:
+        if not bool(_get_nested(protocol, "allow_unsafe_template_full_grid", default=False)):
             raise ValueError(
-                f"{raw_method_id} is blocked at reference_shape={reference_shape}: the current template-STN-VNet "
-                "proxy performs full-grid 3-D warping and refinement. A native-grid template library and explicit "
-                "physical-space mapping are required before large-grid training."
+                f"{raw_method_id} is blocked at reference_shape={reference_shape}: the current "
+                "template-STN-VNet proxy performs full-grid 3-D warping and refinement."
             )
 
     return spec
 
 
 def write_baseline_manifest(cfg: Any, output_dir: str | Path) -> Path:
-    """Write an auditable method-fidelity record next to experiment outputs."""
+    """Write an auditable method-fidelity and grid record for one run."""
 
     spec = validate_baseline_protocol(cfg)
     raw_method_id = str(_get_nested(cfg, "model", "name", default="")).lower()
-    reference_shape = _as_tuple3(
-        _get_nested(cfg, "model", "geometry", "global_voxel_shape", default=None),
-        (190, 200, 104),
-    )
-    native_shape = _get_nested(cfg, "model", raw_method_id, "native_output_shape", default=None)
-    if native_shape is None:
-        native_shape = _get_nested(cfg, "model", "benchmark", "native_output_shape", default=None)
+    reference_shape = _reference_shape(cfg)
+    native_shape = _native_shape(cfg, raw_method_id)
     physical_extent = _get_nested(
-        cfg,
-        "model",
-        "benchmark",
-        "physical_extent_mm",
-        default=None,
+        cfg, "model", "benchmark", "physical_extent_mm", default=None
     )
     protocol = _get_nested(cfg, "benchmark_protocol", default={}) or {}
     payload = {
@@ -371,7 +300,7 @@ def write_baseline_manifest(cfg: Any, output_dir: str | Path) -> Path:
         "reference_grid_shape": list(reference_shape),
         "native_grid_shape": list(native_shape) if native_shape is not None else None,
         "physical_extent_mm": list(physical_extent) if physical_extent is not None else None,
-        "fixed_resampling_to_reference": native_shape is not None and tuple(native_shape) != reference_shape,
+        "fixed_resampling_to_reference": native_shape is not None and native_shape != reference_shape,
     }
     path = Path(output_dir) / "baseline_manifest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
