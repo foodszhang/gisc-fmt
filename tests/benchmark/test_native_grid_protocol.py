@@ -16,7 +16,10 @@ def _cfg(model_name: str, *, table_tier: str = "development"):
     model = NS(
         name=model_name,
         geometry=geometry,
-        benchmark=NS(native_output_shape=[8, 8, 4]),
+        benchmark=NS(
+            native_output_shape=[8, 8, 4],
+            physical_extent_mm=[10.0, 12.0, 6.0],
+        ),
         cnn3d_baseline=NS(
             base_channels=2,
             native_output_shape=[8, 8, 4],
@@ -27,20 +30,25 @@ def _cfg(model_name: str, *, table_tier: str = "development"):
         data=data,
         model=model,
         benchmark_protocol=NS(
+            mode="native_to_reference",
             table_tier=table_tier,
             strict_fidelity=False,
             allow_unsafe_fully_connected_head=False,
+            allow_unsafe_template_full_grid=False,
         ),
     )
+
+
+def _set_full_reference_grid(cfg):
+    cfg.data.voxel_ranges = NS(x=[0, 190], y=[0, 200], z=[0, 104])
+    cfg.model.geometry.global_voxel_shape = [190, 200, 104]
+    cfg.model.benchmark.physical_extent_mm = [38.0, 40.0, 20.8]
 
 
 def test_controlled_native_grid_model_returns_reference_grid():
     cfg = _cfg("cnn3d_baseline")
     model = NativeGridCNN3DBaseline(cfg).eval()
-    projections = {
-        str(angle): torch.rand(1, 16, 16)
-        for angle in cfg.data.view_angles
-    }
+    projections = {str(angle): torch.rand(1, 16, 16) for angle in cfg.data.view_angles}
     with torch.no_grad():
         out = model(projections)
     assert out["pred_voxel"].shape == (1, 1, 10, 12, 6)
@@ -67,8 +75,29 @@ def test_uhr_is_explicitly_labeled_adapted():
     assert spec.fidelity == "mechanism_preserving_adaptation"
 
 
+def test_native_grid_requires_explicit_physical_extent():
+    cfg = _cfg("cnn3d_baseline")
+    cfg.model.benchmark.physical_extent_mm = None
+    with pytest.raises(ValueError, match="physical_extent_mm"):
+        validate_baseline_protocol(cfg)
+
+
+def test_reference_grid_must_match_data_roi():
+    cfg = _cfg("cnn3d_baseline")
+    cfg.model.geometry.global_voxel_shape = [11, 12, 6]
+    with pytest.raises(ValueError, match="must match data.voxel_ranges"):
+        validate_baseline_protocol(cfg)
+
+
 def test_vox_dmrn_full_grid_head_is_blocked():
     cfg = _cfg("vox_dmrn")
-    cfg.model.geometry.global_voxel_shape = [190, 200, 104]
+    _set_full_reference_grid(cfg)
     with pytest.raises(ValueError, match="fully connected output head"):
+        validate_baseline_protocol(cfg)
+
+
+def test_template_stn_full_grid_proxy_is_blocked():
+    cfg = _cfg("fmt_reconnet")
+    _set_full_reference_grid(cfg)
+    with pytest.raises(ValueError, match="full-grid 3-D warping"):
         validate_baseline_protocol(cfg)
