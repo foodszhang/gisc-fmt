@@ -1,4 +1,4 @@
-"""Model factory for configured GISC-FMT and baseline models."""
+"""Model factory for SSQ-FMT and comparison baselines."""
 
 from typing import Any, Optional
 
@@ -31,8 +31,11 @@ class ModelFactory:
     def create_voxel_baseline_model(model_type: str, config: Optional[Any] = None, **kwargs):
         if config is None:
             raise ValueError("Voxel baseline 模型需要配置对象")
+        from .models.native_grid_baselines import (
+            NativeGridCNN3DBaseline,
+            NativeGridTransUNet3DBaseline,
+        )
         from .models.voxel_baselines import (
-            CNN3DBaseline,
             D2RecSTAdapted,
             DSPGNAdapted,
             FEM2VoxUNet,
@@ -41,7 +44,6 @@ class ModelFactory:
             MAPPGANAdapted,
             PGDPNNAdapted,
             Stage1InterpolationBaseline,
-            TransUNet3DBaseline,
             TwoStageDeepFMTAdapted,
         )
 
@@ -57,8 +59,10 @@ class ModelFactory:
             "fem2vox_unet": FEM2VoxUNet,
             "stage1_unet": FEM2VoxUNet,
             "stage1_interpolation": Stage1InterpolationBaseline,
-            "cnn3d_baseline": CNN3DBaseline,
-            "transunet3d_baseline": TransUNet3DBaseline,
+            # Controlled baselines now reconstruct on a memory-safe native grid
+            # and use a fixed interpolation to the common reference grid.
+            "cnn3d_baseline": NativeGridCNN3DBaseline,
+            "transunet3d_baseline": NativeGridTransUNet3DBaseline,
         }
         cls = registry.get(model_type, GenericVoxelBaseline)
         return cls(config)
@@ -68,12 +72,12 @@ class ModelFactory:
         if config is None:
             raise ValueError("FEM baseline 模型需要配置对象")
         from .models.fem_baselines import (
-            FISTAFEM,
-            L1FEM,
             ElasticNetFEM,
             FEMCoarseBaseline,
             FEMToVoxelBaseline,
+            FISTAFEM,
             GAICNLikeFEM,
+            L1FEM,
             StOMPFEM,
             TikhonovFEM,
         )
@@ -94,7 +98,7 @@ class ModelFactory:
 
     @staticmethod
     def create_gisc_fmt_model(config: Optional[Any] = None, **kwargs):
-        """Create GISC-FMT with backward-compatible multi-source extensions."""
+        """Create the legacy GISC-FMT model for backward-compatible ablations only."""
         from .models.gisc_multisource import GISCFMT
 
         if config is None:
@@ -103,7 +107,7 @@ class ModelFactory:
 
     @staticmethod
     def create_ssq_fmt_model(config: Optional[Any] = None, **kwargs):
-        """Create the final-method SSQ-FMT point model."""
+        """Create the current SSQ-FMT point model."""
         from .models.ssq_fmt import SSQFMT
 
         if config is None:
