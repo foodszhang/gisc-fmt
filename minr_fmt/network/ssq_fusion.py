@@ -1,4 +1,4 @@
-"""Candidate-specific per-view representation, fusion, and assignment."""
+"""Per-view source-hypothesis representations, quotient fusion, and legacy assignment."""
 
 from __future__ import annotations
 
@@ -231,6 +231,84 @@ class CandidateSpecificViewFusion(nn.Module):
             z_shared = (branch_support[..., None] * z).sum(dim=2, keepdim=True) / denom[..., None]
             z = z_shared.expand_as(z)
         return z, weights, lam
+
+
+class SourceHypothesisQuotientAggregator(nn.Module):
+    """Physics-anchored reliability quotient over the view equivalence class."""
+
+    def __init__(
+        self,
+        feature_dim: int,
+        hidden_dim: int = 64,
+        temperature: float = 1.0,
+        delta_r_max: float = 0.25,
+        a_beta: float = 1.0,
+        a_xi: float = 1.0,
+        a_sigma: float = 0.5,
+        a_center: float = 0.25,
+        eps: float = 1.0e-8,
+    ):
+        super().__init__()
+        self.reliability_residual = make_residual_mlp(
+            feature_dim + 4, hidden_dim, 1, blocks=1
+        )
+        zero_init_last_linear(self.reliability_residual)
+        self.temperature = float(temperature)
+        self.delta_r_max = float(delta_r_max)
+        self.a_beta = float(a_beta)
+        self.a_xi = float(a_xi)
+        self.a_sigma = float(a_sigma)
+        self.a_center = float(a_center)
+        self.eps = float(eps)
+
+    def forward(
+        self,
+        per_view_evidence: torch.Tensor,
+        geometry_features: torch.Tensor,
+        routed_support: torch.Tensor,
+        view_valid: torch.Tensor,
+        proposal_valid: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Aggregate ``[B,N,V,M,C]`` evidence into a quotient representative."""
+        if per_view_evidence.dim() != 5:
+            raise ValueError("per_view_evidence must have shape [B,N,V,M,C]")
+        if geometry_features.shape[-1] != 4:
+            raise ValueError("geometry_features must contain [beta, xi, sigma, center_distance]")
+        beta, xi, sigma, center = geometry_features.unbind(dim=-1)
+        log_r_phy = (
+            torch.log(routed_support.clamp_min(self.eps))
+            + self.a_beta * beta[..., None]
+            - self.a_xi * xi[..., None]
+            - self.a_sigma * sigma[..., None]
+            - self.a_center * center[..., None]
+        )
+        geom = geometry_features[..., None, :].expand(*per_view_evidence.shape[:-1], 4)
+        learned = self.delta_r_max * torch.tanh(
+            self.reliability_residual(torch.cat([per_view_evidence, geom], dim=-1)).squeeze(-1)
+        )
+        valid = view_valid[..., None] & proposal_valid[:, None, None, :]
+        weights = masked_softmax(
+            (log_r_phy + learned) / max(self.temperature, self.eps), valid, dim=2
+        )
+        quotient = (weights[..., None] * per_view_evidence).sum(dim=2)
+        dispersion = (
+            weights
+            * (per_view_evidence - quotient[:, :, None]).square().mean(dim=-1)
+        ).sum(dim=2)
+        support = (weights * routed_support).sum(dim=2)
+        has_view = valid.any(dim=2)
+        quotient = torch.where(has_view[..., None], quotient, torch.zeros_like(quotient))
+        dispersion = torch.where(has_view, dispersion, torch.zeros_like(dispersion))
+        support = torch.where(has_view, support, torch.zeros_like(support))
+        return {
+            "quotient": quotient,
+            "dispersion": dispersion,
+            "view_weights": weights,
+            "support": support.clamp(0.0, 1.0),
+            "valid": has_view,
+            "log_reliability_physics": log_r_phy,
+            "reliability_residual": learned,
+        }
 
 
 class CandidateAssignmentHead(nn.Module):

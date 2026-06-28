@@ -364,6 +364,9 @@ class MorphologyAwareDensityLoss(nn.Module):
         candidate_assignment_target_mode: str = "best_prior",
         component_match_center_weight: float = 0.25,
         component_unmatched_weight: float = 0.25,
+        lambda_shared: float = 0.0,
+        lambda_quot: float = 0.0,
+        lambda_res: float = 0.0,
     ):
         super().__init__()
         self.lambda_sdf = float(lambda_sdf)
@@ -387,6 +390,9 @@ class MorphologyAwareDensityLoss(nn.Module):
         self.candidate_assignment_target_mode = str(candidate_assignment_target_mode)
         self.component_match_center_weight = float(component_match_center_weight)
         self.component_unmatched_weight = float(component_unmatched_weight)
+        self.lambda_shared = float(lambda_shared)
+        self.lambda_quot = float(lambda_quot)
+        self.lambda_res = float(lambda_res)
 
     @staticmethod
     def _sample_gt(gt_voxels: torch.Tensor, points_ijk: torch.Tensor) -> torch.Tensor:
@@ -528,6 +534,43 @@ class MorphologyAwareDensityLoss(nn.Module):
             + self.tversky_weight * tversky_loss
             + self.sparse_weight * sparse_loss
         )
+        shared_density_loss = pred.sum() * 0.0
+        quotient_consistency_loss = pred.sum() * 0.0
+        residual_regularization_loss = pred.sum() * 0.0
+        if aux_outputs is not None and torch.is_tensor(aux_outputs.get("shared_density")):
+            shared_pred = aux_outputs["shared_density"].to(dtype=pred.dtype).clamp(0.0, 1.0)
+            shared_err = F.smooth_l1_loss(shared_pred, target_density, reduction="none")
+            shared_base = (shared_err * density_weight).sum() / density_weight.sum().clamp_min(1e-8)
+            shared_flat = shared_pred.squeeze(-1)
+            shared_intersection = (shared_flat * target_flat * support_flat).sum(dim=1)
+            shared_denom = (
+                (shared_flat * support_flat).sum(dim=1)
+                + (target_flat * support_flat).sum(dim=1)
+            )
+            shared_dice = (2.0 * shared_intersection + eps) / (shared_denom + eps)
+            shared_dice_loss = (
+                1.0 - shared_dice[valid_samples].mean()
+                if valid_samples.any()
+                else shared_pred.sum() * 0.0
+            )
+            shared_sparse = (
+                shared_pred * (1.0 - target_density.clamp(0.0, 1.0)) * support
+            ).sum() / support.sum().clamp_min(1e-8)
+            shared_density_loss = (
+                shared_base
+                + self.dice_weight * shared_dice_loss
+                + self.sparse_weight * shared_sparse
+            )
+            total = total + self.lambda_shared * shared_density_loss
+        if aux_outputs is not None:
+            quotient_value = aux_outputs.get("quotient_consistency_loss")
+            residual_value = aux_outputs.get("residual_regularization_loss")
+            if torch.is_tensor(quotient_value):
+                quotient_consistency_loss = quotient_value
+                total = total + self.lambda_quot * quotient_consistency_loss
+            if torch.is_tensor(residual_value):
+                residual_regularization_loss = residual_value
+                total = total + self.lambda_res * residual_regularization_loss
         candidate_branch_density_loss = pred.sum() * 0.0
         candidate_branch_dice_loss = pred.sum() * 0.0
         candidate_assignment_loss = pred.sum() * 0.0
@@ -769,6 +812,9 @@ class MorphologyAwareDensityLoss(nn.Module):
             "dice_loss": dice_loss,
             "tversky_loss": tversky_loss,
             "sparse_loss": sparse_loss,
+            "shared_density_loss": shared_density_loss,
+            "quotient_consistency_loss": quotient_consistency_loss,
+            "residual_regularization_loss": residual_regularization_loss,
             "candidate_branch_density_loss": candidate_branch_density_loss,
             "candidate_branch_dice_loss": candidate_branch_dice_loss,
             "candidate_assignment_loss": candidate_assignment_loss,

@@ -16,6 +16,24 @@ ssq_fmt:
   hidden_dim: 96
   density_output_mode: candidate_scalar_composition
 
+  composition:
+    mode: legacy_branch_mixture
+    delta_l_max: 3.0
+    tau_u: 1.0
+
+  quotient:
+    temperature: 1.0
+    delta_r_max: 0.25
+    reliability_hidden_dim: 64
+    a_beta: 1.0
+    a_xi: 1.0
+    a_sigma: 0.5
+    a_center: 0.25
+    subset_consistency:
+      enabled: false
+      seed: 20260628
+      min_support: 1.0e-4
+
   query_density_backbone:
     enabled: false
     normalization: per_view_max

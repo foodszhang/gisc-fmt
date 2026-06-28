@@ -1,0 +1,19 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_shq_quotient_residual
+  - _self_
+
+name: fmt_simgen_v2_shq_quotient_consistency
+description: SHQ-FMT quotient residual with deterministic view-subset consistency
+
+model:
+  ssq_fmt:
+    quotient:
+      subset_consistency:
+        enabled: true
+        seed: 20260628
+        min_support: 1.0e-4
+
+loss:
+  lambda_quot: 0.05

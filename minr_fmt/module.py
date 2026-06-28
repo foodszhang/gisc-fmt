@@ -417,6 +417,9 @@ class TrainingLightningModule(LightningModule):
                 "component_match_center_weight", 0.25
             ),
             component_unmatched_weight=loss_cfg.get("component_unmatched_weight", 0.25),
+            lambda_shared=loss_cfg.get("lambda_shared", 0.0),
+            lambda_quot=loss_cfg.get("lambda_quot", 0.0),
+            lambda_res=loss_cfg.get("lambda_res", 0.0),
         )
 
     def _is_ssq_model(self) -> bool:

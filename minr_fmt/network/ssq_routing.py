@@ -41,8 +41,10 @@ class CandidateSurfaceRouter(nn.Module):
         self.query_chunk_size = int(query_chunk_size)
         self.checkpoint_routing = bool(checkpoint_routing)
         self.measurement_consistency_temperature = float(measurement_consistency_temperature)
-        if compensation_routing_mode not in {"joint", "independent"}:
-            raise ValueError("compensation_routing_mode must be 'joint' or 'independent'")
+        if compensation_routing_mode not in {"joint", "independent", "proposal_only"}:
+            raise ValueError(
+                "compensation_routing_mode must be 'joint', 'independent', or 'proposal_only'"
+            )
         self.compensation_routing_mode = str(compensation_routing_mode)
 
     def forward(
@@ -139,7 +141,12 @@ class CandidateSurfaceRouter(nn.Module):
         correction_parts = []
         geom_feat = geom[:, :, :, None].expand(b, v, n, k, 2)
         q_feat = points_mm[:, None, :, None].expand(b, v, n, k, 3)
-        for idx in range(mb):
+        first_branch = 1 if self.compensation_routing_mode == "proposal_only" else 0
+        if first_branch == 1:
+            correction_parts.append(
+                torch.zeros((b, v, n, k), device=points_mm.device, dtype=points_mm.dtype)
+            )
+        for idx in range(first_branch, mb):
             rel_feat = rel_query[:, None, :, idx : idx + 1].expand(b, v, n, k, 3)
             p_feat = p_all[:, None, :, None, idx : idx + 1].expand(b, v, n, k, 1)
             correction_in = torch.cat(
@@ -154,7 +161,7 @@ class CandidateSurfaceRouter(nn.Module):
         correction = torch.stack(correction_parts, dim=-1)
         logits = self.tau_K * torch.log(k_all) + self.delta_q * correction
         valid = sample_valid[..., None] & branch_valid[:, None, None, None]
-        if self.compensation_routing_mode == "independent" and m > 0:
+        if self.compensation_routing_mode in {"independent", "proposal_only"} and m > 0:
             compensation_zeta = sample_valid[..., None].to(dtype=logits.dtype)
             candidate_zeta = masked_softmax(logits[..., 1:], valid[..., 1:], dim=-1)
             zeta = torch.cat([compensation_zeta, candidate_zeta], dim=-1)

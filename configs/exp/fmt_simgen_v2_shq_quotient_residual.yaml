@@ -1,0 +1,47 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_final
+  - _self_
+
+name: fmt_simgen_v2_shq_quotient_residual
+description: SHQ-FMT quotient field with bounded source-hypothesis residual correction
+
+data:
+  center_distance_targets: false
+  ssq_candidates:
+    enabled: true
+    candidate_filename: candidate_anchors.npz
+    candidate_cache_version: ssq_candidate_anchors_v2
+    reextract_candidates: false
+
+model:
+  ssq_fmt:
+    composition:
+      mode: quotient_residual
+      delta_l_max: 3.0
+      tau_u: 1.0
+    routing:
+      compensation_routing_mode: proposal_only
+    quotient:
+      temperature: 1.0
+      delta_r_max: 0.25
+      a_beta: 1.0
+      a_xi: 1.0
+      a_sigma: 0.5
+      a_center: 0.25
+      subset_consistency:
+        enabled: false
+        seed: 20260628
+        min_support: 1.0e-4
+    candidate_field:
+      support_envelope_power: 0.0
+
+loss:
+  lambda_shared: 1.0
+  lambda_quot: 0.0
+  lambda_res: 0.001
+  candidate_branch_density_weight: 0.0
+  candidate_branch_dice_weight: 0.0
+  candidate_assignment_weight: 0.0
+  lambda_sdf: 0.0

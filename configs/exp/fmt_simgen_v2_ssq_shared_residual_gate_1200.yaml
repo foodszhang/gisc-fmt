@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 name: fmt_simgen_v2_ssq_shared_residual_gate_1200
-description: Shared measurement field with candidate-local residual composition on 1200 samples
+description: Legacy GT-refiner development gate; not valid for formal SHQ-FMT evaluation
 
 data:
   train_max_samples: 1200

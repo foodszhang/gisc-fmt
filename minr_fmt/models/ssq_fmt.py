@@ -28,6 +28,8 @@ from minr_fmt.network.ssq_decoder import (
     CompensationDensityDecoder,
     CompensationMorphologyDecoder,
     FourierPositionEncoding,
+    SharedDensityLogitDecoder,
+    SourceHypothesisResidualDecoder,
 )
 from minr_fmt.network.ssq_encoder import (
     ShallowSurfaceEncoder,
@@ -37,6 +39,7 @@ from minr_fmt.network.ssq_fusion import (
     CandidateAssignmentHead,
     CandidateSpecificViewFusion,
     CandidateViewEncoder,
+    SourceHypothesisQuotientAggregator,
 )
 from minr_fmt.network.ssq_geometry import GeometryQueryMapper, infer_detector_margin_map
 from minr_fmt.network.ssq_sampler import QueryDependentSurfaceSampler, local_template
@@ -84,6 +87,50 @@ _ENCODER_PROFILES = {
         "output_channels": 96,
     },
 }
+
+
+def compose_quotient_residual_density(
+    shared_logit: torch.Tensor,
+    delta_logit: torch.Tensor,
+    relative_query: torch.Tensor,
+    candidate_scores: torch.Tensor,
+    candidate_support: torch.Tensor,
+    quotient_dispersion: torch.Tensor,
+    candidate_valid: torch.Tensor,
+    tau_u: float,
+) -> dict[str, torch.Tensor]:
+    """Apply the permutation-invariant SHQ bounded residual composition."""
+    if delta_logit.shape[2] == 0:
+        empty = shared_logit.new_zeros((*shared_logit.shape[:2], 0))
+        return {
+            "density": torch.sigmoid(shared_logit),
+            "residual_correction": torch.zeros_like(shared_logit),
+            "proposal_gate": shared_logit.new_zeros(shared_logit.shape[:2]),
+            "alpha": empty,
+            "applicability": empty,
+        }
+    spatial_prior = torch.exp(-0.5 * relative_query.square().sum(dim=-1))
+    applicability = (
+        candidate_valid[:, None].to(delta_logit.dtype)
+        * candidate_scores[:, None].detach().to(delta_logit.dtype).clamp(0.0, 1.0)
+        * spatial_prior.clamp(0.0, 1.0)
+        * candidate_support.clamp(0.0, 1.0)
+        * torch.exp(-quotient_dispersion.clamp_min(0.0) / max(float(tau_u), 1.0e-6))
+    )
+    applicability = torch.nan_to_num(applicability, nan=0.0, posinf=0.0).clamp(0.0, 1.0)
+    applicability_sum = applicability.sum(dim=-1, keepdim=True)
+    alpha = applicability / applicability_sum.clamp_min(1.0e-8)
+    proposal_gate = 1.0 - torch.exp(-applicability_sum.squeeze(-1))
+    residual_correction = proposal_gate[..., None] * (
+        alpha[..., None] * delta_logit
+    ).sum(dim=2)
+    return {
+        "density": torch.sigmoid(shared_logit + residual_correction),
+        "residual_correction": residual_correction,
+        "proposal_gate": proposal_gate,
+        "alpha": alpha,
+        "applicability": applicability,
+    }
 
 
 class SurfaceMeasurementNormalizer(nn.Module):
@@ -327,6 +374,31 @@ class SSQFMT(nn.Module):
             query_chunk_size=int(_cfg_get(ssq, "fusion.query_chunk_size", 4096)),
             checkpoint_fusion=bool(memory_cfg.get("checkpoint_fusion", False)),
         )
+        composition_cfg = ssq.get("composition", {})
+        self.composition_mode = str(composition_cfg.get("mode", "legacy_branch_mixture"))
+        if self.composition_mode not in {"legacy_branch_mixture", "quotient_residual"}:
+            raise ValueError(
+                "composition.mode must be 'legacy_branch_mixture' or 'quotient_residual'"
+            )
+        quotient_cfg = ssq.get("quotient", {})
+        self.quotient_aggregator = SourceHypothesisQuotientAggregator(
+            representation_dim,
+            hidden_dim=int(quotient_cfg.get("reliability_hidden_dim", 64)),
+            temperature=float(quotient_cfg.get("temperature", 1.0)),
+            delta_r_max=float(quotient_cfg.get("delta_r_max", 0.25)),
+            a_beta=float(quotient_cfg.get("a_beta", 1.0)),
+            a_xi=float(quotient_cfg.get("a_xi", 1.0)),
+            a_sigma=float(quotient_cfg.get("a_sigma", 0.5)),
+            a_center=float(quotient_cfg.get("a_center", 0.25)),
+        )
+        self.delta_l_max = float(composition_cfg.get("delta_l_max", 3.0))
+        self.tau_u = float(composition_cfg.get("tau_u", 1.0))
+        consistency_cfg = quotient_cfg.get("subset_consistency", {})
+        self.quotient_consistency_enabled = bool(consistency_cfg.get("enabled", False))
+        self.quotient_consistency_seed = int(consistency_cfg.get("seed", 20260628))
+        self.quotient_consistency_min_support = float(
+            consistency_cfg.get("min_support", 1.0e-4)
+        )
         self.assignment_head = CandidateAssignmentHead(
             representation_dim,
             hidden_dim,
@@ -353,6 +425,22 @@ class SSQFMT(nn.Module):
         decoder_chunk_size = int(_cfg_get(ssq, "decoder.query_chunk_size", 4096))
         self.compensation_density_decoder = CompensationDensityDecoder(
             representation_dim,
+            self.position_encoding.out_dim,
+            hidden_dim,
+            positive_ratio,
+            query_chunk_size=decoder_chunk_size,
+            checkpoint_decoder=bool(memory_cfg.get("checkpoint_decoder", False)),
+        )
+        self.shared_density_logit_decoder = SharedDensityLogitDecoder(
+            representation_dim,
+            self.position_encoding.out_dim,
+            hidden_dim,
+            positive_ratio,
+            query_chunk_size=decoder_chunk_size,
+            checkpoint_decoder=bool(memory_cfg.get("checkpoint_decoder", False)),
+        )
+        self.source_hypothesis_residual_decoder = SourceHypothesisResidualDecoder(
+            representation_dim * 2 + 6,
             self.position_encoding.out_dim,
             hidden_dim,
             positive_ratio,
@@ -446,6 +534,9 @@ class SSQFMT(nn.Module):
                 "candidate_normalization": "sample_percentile",
                 "candidate_support_envelope_power": self.candidate_support_envelope_power,
                 "candidate_field_mode": self.candidate_field_mode,
+                "composition_mode": self.composition_mode,
+                "delta_l_max": self.delta_l_max,
+                "tau_u": self.tau_u,
             }
         )
         total_params = sum(p.numel() for p in self.parameters())
@@ -554,6 +645,11 @@ class SSQFMT(nn.Module):
                 if self.measurement_consistency_enabled or self.candidate_context_enabled
                 else None,
             )
+        if self.composition_mode == "quotient_residual":
+            candidates = {
+                key: value.detach() if torch.is_tensor(value) else value
+                for key, value in candidates.items()
+            }
         router = self.candidate_router(
             samples,
             query_coordinates_mm,
@@ -562,6 +658,18 @@ class SSQFMT(nn.Module):
             return_diagnostics=return_diagnostics,
         )
         per_view = self.view_encoder(samples, router, mapped)
+        if self.composition_mode == "quotient_residual":
+            return self._forward_quotient_residual(
+                per_view,
+                samples,
+                mapped,
+                router,
+                candidates,
+                query_coordinates_mm,
+                norm_scale,
+                candidate_norm_scale,
+                return_diagnostics,
+            )
         z, view_weights, Lambda = self.view_fusion(
             per_view, router["r"], mapped["valid_mask"], router["branch_valid"]
         )
@@ -850,3 +958,197 @@ class SSQFMT(nn.Module):
             }
             out["diagnostics"] = diagnostics
         return out
+
+    def _quotient_geometry(
+        self, samples: dict[str, torch.Tensor], mapped: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        beta = (
+            mapped["boundary_distance"]
+            / max(self.surface_sampler.boundary_margin_radius_px, 1.0e-6)
+        ).clamp(0.0, 1.0)
+        xi = mapped["detector_side_path_proxy"].clamp(0.0, 1.0)
+        sigma = (
+            (samples["sigma_f"] - self.surface_sampler.sigma_min_px)
+            / max(self.surface_sampler.sigma_max_px - self.surface_sampler.sigma_min_px, 1.0e-6)
+        ).clamp(0.0, 1.0)
+        center_distance = mapped["grid"].square().sum(dim=-1).sqrt().div(2.0**0.5).clamp(0.0, 1.0)
+        return torch.stack([beta, xi, sigma, center_distance], dim=-1).permute(0, 2, 1, 3)
+
+    @staticmethod
+    def _deterministic_view_subsets(
+        view_valid: torch.Tensor, seed: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Split each query's valid views into deterministic non-empty subsets when possible."""
+        v = view_valid.shape[-1]
+        order = (torch.arange(v, device=view_valid.device) * 1103515245 + seed) % 2147483647
+        keys = order.to(dtype=torch.float32).view(1, 1, v).expand_as(view_valid)
+        keys = keys.masked_fill(~view_valid, float("inf"))
+        rank = keys.argsort(dim=-1).argsort(dim=-1)
+        count = view_valid.sum(dim=-1, keepdim=True)
+        split = (count + 1) // 2
+        usable = count >= 2
+        subset_a = view_valid & (rank < split) & usable
+        subset_b = view_valid & (rank >= split) & usable
+        return subset_a, subset_b
+
+    def _forward_quotient_residual(
+        self,
+        per_view: torch.Tensor,
+        samples: dict[str, torch.Tensor],
+        mapped: dict[str, torch.Tensor],
+        router: dict[str, torch.Tensor],
+        candidates: dict[str, torch.Tensor],
+        points_mm: torch.Tensor,
+        norm_scale: torch.Tensor,
+        candidate_norm_scale: torch.Tensor,
+        return_diagnostics: bool,
+    ) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
+        geometry = self._quotient_geometry(samples, mapped)
+        view_valid = mapped["valid_mask"].permute(0, 2, 1)
+        support = router["r"].permute(0, 2, 1, 3).clamp(0.0, 1.0)
+        b = points_mm.shape[0]
+        shared_valid = torch.ones((b, 1), dtype=torch.bool, device=points_mm.device)
+        shared = self.quotient_aggregator(
+            per_view[:, :, :, :1], geometry, support[:, :, :, :1], view_valid, shared_valid
+        )
+        candidate_valid = candidates["candidate_valid_mask"]
+        candidate = self.quotient_aggregator(
+            per_view[:, :, :, 1:], geometry, support[:, :, :, 1:], view_valid, candidate_valid
+        )
+        q_s = shared["quotient"].squeeze(2)
+        trunk = torch.tensor(self.trunk_size_mm, device=points_mm.device, dtype=points_mm.dtype)
+        query_norm = (points_mm / trunk.clamp_min(1.0e-6)).mul(2.0).sub(1.0)
+        shared_logit = self.shared_density_logit_decoder(q_s, self.position_encoding(query_norm))
+        shared_density = torch.sigmoid(shared_logit)
+        m = candidate_valid.shape[1]
+        if m > 0:
+            delta = points_mm[:, :, None] - candidates["candidate_centers_mm"][:, None]
+            relative = torch.einsum(
+                "bnmi,bmij->bnmj", delta, candidates["candidate_support_inverse_sqrt_mm"]
+            )
+            encoded_relative = self.position_encoding(relative.clamp(-4.0, 4.0))
+            q_m = candidate["quotient"]
+            dispersion = candidate["dispersion"]
+            candidate_score = candidates["candidate_scores"].detach().to(q_m.dtype)
+            covariance = candidates["candidate_support_covariances_mm"].detach().float()
+            eigenvalues = torch.linalg.eigvalsh(covariance).clamp_min(1.0e-8).sqrt().to(q_m.dtype)
+            eigenvalues = eigenvalues / max(self._candidate_cfg.get("scale_max_mm", 12.0), 1.0e-6)
+            context = torch.cat(
+                [
+                    q_s[:, :, None].expand(-1, -1, m, -1),
+                    q_m - q_s[:, :, None],
+                    dispersion[..., None],
+                    candidate_score[:, None, :, None].expand(-1, points_mm.shape[1], -1, -1),
+                    candidate["support"][..., None],
+                    eigenvalues[:, None].expand(-1, points_mm.shape[1], -1, -1),
+                ],
+                dim=-1,
+            )
+            raw_residual = self.source_hypothesis_residual_decoder(context, encoded_relative)
+            delta_logit = self.delta_l_max * torch.tanh(raw_residual)
+            composition = compose_quotient_residual_density(
+                shared_logit,
+                delta_logit,
+                relative,
+                candidate_score,
+                candidate["support"],
+                dispersion,
+                candidate_valid,
+                self.tau_u,
+            )
+            alpha = composition["alpha"]
+            applicability = composition["applicability"]
+            proposal_gate = composition["proposal_gate"]
+            residual_correction = composition["residual_correction"]
+        else:
+            q_m = q_s.new_zeros((*q_s.shape[:2], 0, q_s.shape[-1]))
+            dispersion = q_s.new_zeros((*q_s.shape[:2], 0))
+            alpha = q_s.new_zeros((*q_s.shape[:2], 0))
+            applicability = alpha
+            delta_logit = q_s.new_zeros((*q_s.shape[:2], 0, 1))
+            proposal_gate = q_s.new_zeros(q_s.shape[:2])
+            residual_correction = shared_logit.new_zeros(shared_logit.shape)
+        final_logit = shared_logit + residual_correction
+        density = torch.sigmoid(final_logit)
+        quotient_loss = density.sum() * 0.0
+        if self.training and self.quotient_consistency_enabled:
+            subset_a, subset_b = self._deterministic_view_subsets(
+                view_valid, self.quotient_consistency_seed
+            )
+            quotient_loss = self._subset_quotient_loss(
+                per_view, geometry, support, subset_a, subset_b, candidate_valid
+            )
+        residual_loss = (
+            proposal_gate[..., None]
+            * (alpha[..., None] * delta_logit.abs()).sum(dim=2)
+        ).mean()
+        no_candidate = applicability.sum(dim=-1) <= 1.0e-8
+        aux_outputs: dict[str, torch.Tensor] = {
+            "shared_density": shared_density,
+            "shared_logit": shared_logit,
+            "final_density": density,
+            "final_logit": final_logit,
+            "residual_correction": residual_correction,
+            "proposal_gate": proposal_gate,
+            "alpha": alpha,
+            "candidate_applicability": applicability,
+            "quotient_dispersion": dispersion,
+            "quotient_view_weights": candidate["view_weights"],
+            "aggregated_candidate_support": candidate["support"],
+            "quotient_consistency_loss": quotient_loss,
+            "residual_regularization_loss": residual_loss,
+            "measurement_supported": shared["valid"].squeeze(-1),
+            "candidate_valid_mask": candidate_valid.detach(),
+        }
+        out: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {
+            "density": density,
+            "aux_outputs": aux_outputs,
+        }
+        if return_diagnostics:
+            diagnostics = dict(aux_outputs)
+            diagnostics.update(
+                {
+                    "normalization_scale": norm_scale,
+                    "candidate_normalization_scale": candidate_norm_scale,
+                    "quotient_shared_norm": q_s.norm(dim=-1),
+                    "quotient_candidate_norm": q_m.norm(dim=-1),
+                    "shared_quotient_dispersion": shared["dispersion"].squeeze(-1),
+                    "shared_quotient_view_weights": shared["view_weights"].squeeze(-1),
+                    "effective_residual_magnitude": residual_correction.abs().mean(),
+                    "final_minus_shared_density_magnitude": (density - shared_density).abs().mean(),
+                    "candidate_valid_count": candidate_valid.sum(dim=-1),
+                    "no_candidate_fallback_ratio": no_candidate.to(density.dtype).mean(),
+                    "candidate_centers_mm": candidates["candidate_centers_mm"],
+                    "candidate_scores": candidates["candidate_scores"],
+                }
+            )
+            out["diagnostics"] = diagnostics
+        return out
+
+    def _subset_quotient_loss(
+        self,
+        per_view: torch.Tensor,
+        geometry: torch.Tensor,
+        support: torch.Tensor,
+        subset_a: torch.Tensor,
+        subset_b: torch.Tensor,
+        candidate_valid: torch.Tensor,
+    ) -> torch.Tensor:
+        branch_valid = torch.cat(
+            [
+                torch.ones((candidate_valid.shape[0], 1), dtype=torch.bool, device=per_view.device),
+                candidate_valid,
+            ],
+            dim=1,
+        )
+        qa = self.quotient_aggregator(per_view, geometry, support, subset_a, branch_valid)
+        qb = self.quotient_aggregator(per_view, geometry, support, subset_b, branch_valid)
+        eligible = (
+            qa["valid"]
+            & qb["valid"]
+            & (qa["support"] >= self.quotient_consistency_min_support)
+            & (qb["support"] >= self.quotient_consistency_min_support)
+        )
+        error = (qa["quotient"] - qb["quotient"].detach()).square().mean(dim=-1)
+        error = error + (qb["quotient"] - qa["quotient"].detach()).square().mean(dim=-1)
+        return error[eligible].mean() if eligible.any() else per_view.sum() * 0.0

@@ -1,5 +1,9 @@
 # SSQ-FMT Final Method Implementation
 
+> Legacy implementation note: the formal method has moved to SHQ-FMT quotient residual
+> composition. See `docs/shq_quotient_field_implementation.md`. This document describes the
+> retained `legacy_branch_mixture` path and historical results only.
+
 Status as of 2026-06-25: implemented and smoke-tested, but the short training gate has
 not reached the quality threshold for formal runs.
 

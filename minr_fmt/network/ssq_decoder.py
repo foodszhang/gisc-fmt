@@ -96,6 +96,13 @@ class CompensationDensityDecoder(_ImplicitDecoder):
     pass
 
 
+class SharedDensityLogitDecoder(_ImplicitDecoder):
+    """Decode the complete shared quotient directly to an unconstrained density logit."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs, return_logits=True)
+
+
 class CandidateDensityDecoder(_ImplicitDecoder):
     def forward(self, z: torch.Tensor, encoded_relative: torch.Tensor) -> torch.Tensor:
         return super().forward(z, encoded_relative)
@@ -109,6 +116,16 @@ class CandidateDensityResidualDecoder(_ImplicitDecoder):
 
     def forward(self, z: torch.Tensor, encoded_relative: torch.Tensor) -> torch.Tensor:
         return super().forward(z, encoded_relative)
+
+
+class SourceHypothesisResidualDecoder(_ImplicitDecoder):
+    """Zero-initialized candidate quotient residual logit head."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs, return_logits=True, zero_init_output=True)
+
+    def forward(self, context: torch.Tensor, encoded_relative: torch.Tensor) -> torch.Tensor:
+        return super().forward(context, encoded_relative)
 
 
 class CandidateFieldCalibrator(nn.Module):
