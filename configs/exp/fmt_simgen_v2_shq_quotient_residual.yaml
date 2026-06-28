@@ -56,3 +56,6 @@ loss:
   candidate_branch_dice_weight: 0.0
   candidate_assignment_weight: 0.0
   lambda_sdf: 0.0
+
+diagnostics:
+  gradient_norm_every_n_steps: 100

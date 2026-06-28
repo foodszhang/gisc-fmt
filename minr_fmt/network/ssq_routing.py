@@ -22,6 +22,31 @@ class ResidualMLPBlock(nn.Module):
         return inputs + self.net(self.norm(inputs))
 
 
+class FactorizedRoutingHead(nn.Module):
+    """Apply a concatenated linear layer without materializing the concatenation."""
+
+    def __init__(self, sample_dim: int, candidate_dim: int, hidden_dim: int = 64):
+        super().__init__()
+        self.sample_linear = nn.Linear(sample_dim, hidden_dim, bias=False)
+        self.candidate_linear = nn.Linear(candidate_dim, hidden_dim, bias=False)
+        self.interaction_linear = nn.Linear(sample_dim, hidden_dim)
+        self.activation = nn.SiLU()
+        self.output = nn.Linear(hidden_dim, 1)
+
+    def forward(
+        self,
+        sample_embedding: torch.Tensor,
+        candidate_embedding: torch.Tensor,
+        candidate_projection: torch.Tensor,
+    ) -> torch.Tensor:
+        hidden = self.sample_linear(sample_embedding).unsqueeze(-2)
+        hidden = hidden + self.candidate_linear(candidate_embedding)
+        hidden = hidden + self.interaction_linear(
+            sample_embedding.unsqueeze(-2) * candidate_projection
+        )
+        return self.output(self.activation(hidden))
+
+
 class CandidateSurfaceRouter(nn.Module):
     def __init__(
         self,
@@ -57,9 +82,7 @@ class CandidateSurfaceRouter(nn.Module):
             nn.SiLU(),
         )
         self.candidate_projection = nn.Linear(candidate_dim, sample_dim)
-        self.routing_head = nn.Sequential(
-            nn.Linear(sample_dim * 2 + candidate_dim, 64), nn.SiLU(), nn.Linear(64, 1)
-        )
+        self.routing_head = FactorizedRoutingHead(sample_dim, candidate_dim)
         self.evidence_head = nn.Sequential(nn.Linear(sample_dim, 32), nn.SiLU(), nn.Linear(32, 1))
         zero_init_last_linear(self.routing_head)
         zero_init_last_linear(self.evidence_head)
@@ -195,12 +218,10 @@ class CandidateSurfaceRouter(nn.Module):
             p_feat = p_m[:, None, :, None, :, None].expand(b, v, n, k, m, 1)
             candidate_input = torch.cat([rel_feat, p_feat, k_m[..., None]], dim=-1)
             candidate_embedding = self.candidate_encoder(candidate_input)
-            sample_expanded = sample_embedding.unsqueeze(-2).expand(b, v, n, k, m, -1)
             projected = self.candidate_projection(candidate_embedding)
-            routing_input = torch.cat(
-                [sample_expanded, candidate_embedding, sample_expanded * projected], dim=-1
-            )
-            candidate_logits = self.routing_head(routing_input).squeeze(-1)
+            candidate_logits = self.routing_head(
+                sample_embedding, candidate_embedding, projected
+            ).squeeze(-1)
             correction[..., 1:] = torch.tanh(candidate_logits)
         logits = self.tau_K * torch.log(k_all.clamp_min(self.k_min)) + self.delta_q * correction
         candidate_view_valid = (

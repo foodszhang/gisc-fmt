@@ -119,6 +119,7 @@ class TrainingLightningModule(LightningModule):
 
         # Training metrics tracking
         self.best_dice = -1.0
+        self._last_gradient_norm_step = -1
 
         # Test-time state (initialized in on_test_start)
         self._test_out_dir: Path | None = None
@@ -1371,15 +1372,15 @@ class TrainingLightningModule(LightningModule):
 
     @staticmethod
     def _module_gradient_norm(module: torch.nn.Module) -> torch.Tensor:
-        squared = None
-        for parameter in module.parameters():
-            if parameter.grad is None:
-                continue
-            value = parameter.grad.detach().float().square().sum()
-            squared = value if squared is None else squared + value
-        if squared is None:
+        gradients = [
+            parameter.grad.detach()
+            for parameter in module.parameters()
+            if parameter.grad is not None
+        ]
+        if not gradients:
             return next(module.parameters()).new_zeros(())
-        return squared.sqrt()
+        per_tensor = torch._foreach_norm(gradients, 2.0)
+        return torch.stack([value.float() for value in per_tensor]).norm(2.0)
 
     def on_after_backward(self) -> None:
         if (
@@ -1387,6 +1388,12 @@ class TrainingLightningModule(LightningModule):
             or getattr(self.net, "composition_mode", None) != "quotient_residual"
         ):
             return
+        step = int(self.global_step)
+        diagnostics_cfg = self.cfg.get("diagnostics", {}) or {}
+        log_interval = max(int(diagnostics_cfg.get("gradient_norm_every_n_steps", 100)), 1)
+        if step == 0 or step == self._last_gradient_norm_step or step % log_interval != 0:
+            return
+        self._last_gradient_norm_step = step
         modules = {
             "surface_encoder": self.net.surface_encoder,
             "shared_decoder": self.net.shared_density_logit_decoder,
