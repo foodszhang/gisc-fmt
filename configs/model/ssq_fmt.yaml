@@ -118,6 +118,9 @@ ssq_fmt:
     occupancy_evidence_floor: 0.05
     compensation_routing_mode: joint
     query_chunk_size: 4096
+    sample_embedding_dim: 64
+    candidate_embedding_dim: 16
+    query_coordinate_scale_mm: 40.0
 
   representation:
     hidden_dim: 96

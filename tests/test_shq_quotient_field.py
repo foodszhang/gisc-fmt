@@ -84,6 +84,9 @@ def test_quotient_masks_weights_and_dispersion():
     assert torch.allclose(out["view_weights"][0, 0, :, 0].sum(), torch.tensor(1.0))
     assert torch.count_nonzero(out["view_weights"][..., 1]) == 0
     assert torch.count_nonzero(out["view_weights"][0, 1]) == 0
+    support[:, :, 0, 0] = 0.0
+    zero_support = aggregator(evidence, geometry, support, view_valid, proposal_valid)
+    assert torch.count_nonzero(zero_support["view_weights"][:, :, 0, 0]) == 0
     assert out["dispersion"][0, 0, 0] < 1.0e-7
     assert torch.isfinite(out["quotient"]).all()
 
@@ -187,7 +190,5 @@ def test_shq_smoke_m_zero_one_five_and_all_views_invalid():
         assert out["density"].shape == (2, 5, 1)
         assert torch.isfinite(out["density"]).all()
     batch["detector_valid_mask"].zero_()
-    out = model(
-        batch["surface_measurements_packed"], batch["query_coordinates_mm"], batch=batch
-    )
+    out = model(batch["surface_measurements_packed"], batch["query_coordinates_mm"], batch=batch)
     assert torch.isfinite(out["density"]).all()

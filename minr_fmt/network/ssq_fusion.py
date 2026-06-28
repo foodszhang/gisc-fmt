@@ -286,7 +286,13 @@ class SourceHypothesisQuotientAggregator(nn.Module):
         learned = self.delta_r_max * torch.tanh(
             self.reliability_residual(torch.cat([per_view_evidence, geom], dim=-1)).squeeze(-1)
         )
-        valid = view_valid[..., None] & proposal_valid[:, None, None, :]
+        if view_valid.dim() == 3:
+            valid = view_valid[..., None]
+        elif view_valid.dim() == 4:
+            valid = view_valid
+        else:
+            raise ValueError("view_valid must have shape [B,N,V] or [B,N,V,M]")
+        valid = valid & proposal_valid[:, None, None, :] & (routed_support > 0.0)
         weights = masked_softmax(
             (log_r_phy + learned) / max(self.temperature, self.eps), valid, dim=2
         )

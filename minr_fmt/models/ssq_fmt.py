@@ -353,6 +353,13 @@ class SSQFMT(nn.Module):
             compensation_routing_mode=str(
                 _cfg_get(ssq, "routing.compensation_routing_mode", "joint")
             ),
+            sample_embedding_dim=int(_cfg_get(ssq, "routing.sample_embedding_dim", 64)),
+            candidate_embedding_dim=int(
+                _cfg_get(ssq, "routing.candidate_embedding_dim", 16)
+            ),
+            query_coordinate_scale_mm=float(
+                _cfg_get(ssq, "routing.query_coordinate_scale_mm", 40.0)
+            ),
         )
         self.measurement_consistency_enabled = (
             float(_cfg_get(ssq, "routing.measurement_consistency_logit_weight", 0.0)) != 0.0
@@ -1012,8 +1019,16 @@ class SSQFMT(nn.Module):
             per_view[:, :, :, :1], geometry, support[:, :, :, :1], view_valid, shared_valid
         )
         candidate_valid = candidates["candidate_valid_mask"]
+        candidate_view_valid = view_valid[..., None]
+        if candidate_valid.shape[1] > 0:
+            detector_visible = candidates["candidate_detector_valid_mask"]
+            candidate_view_valid = candidate_view_valid & detector_visible[:, None]
         candidate = self.quotient_aggregator(
-            per_view[:, :, :, 1:], geometry, support[:, :, :, 1:], view_valid, candidate_valid
+            per_view[:, :, :, 1:],
+            geometry,
+            support[:, :, :, 1:],
+            candidate_view_valid,
+            candidate_valid,
         )
         q_s = shared["quotient"].squeeze(2)
         trunk = torch.tensor(self.trunk_size_mm, device=points_mm.device, dtype=points_mm.dtype)

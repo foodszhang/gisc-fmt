@@ -22,6 +22,62 @@ from .loss import (
 from .model_factory import ModelFactory
 from .utils.utils import get_psnr_3d, get_ssim_3d
 
+E15_INIT_WHITELIST = (
+    "surface_encoder.",
+    "surface_sampler.context_net.",
+    "surface_sampler.sample_projection.",
+    "view_encoder.",
+    "shared_density_logit_decoder.",
+)
+
+E15_EXPLICIT_KEY_MAP = {
+    "shared_unet.feature_fusion.0.double_conv.0.weight": "surface_encoder.fuse.1.net.0.weight",
+    "shared_unet.feature_fusion.0.double_conv.1.weight": "surface_encoder.fuse.1.net.1.weight",
+    "shared_unet.feature_fusion.0.double_conv.1.bias": "surface_encoder.fuse.1.net.1.bias",
+    "density_head.mlp_out.3.weight": "shared_density_logit_decoder.fusion.6.weight",
+    "density_head.mlp_out.3.bias": "shared_density_logit_decoder.fusion.6.bias",
+}
+
+
+def load_e15_compatible_weights(model: torch.nn.Module, checkpoint_path: str) -> dict[str, list]:
+    """Load only explicitly whitelisted, name- and shape-identical E15 tensors."""
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    source = checkpoint.get("state_dict", checkpoint)
+    source = {key.removeprefix("net."): value for key, value in source.items()}
+    target = model.state_dict()
+    loaded: dict[str, torch.Tensor] = {}
+    mismatched: list[tuple[str, tuple[int, ...], tuple[int, ...]]] = []
+    intentionally_skipped: list[str] = []
+    for source_key, value in source.items():
+        key = E15_EXPLICIT_KEY_MAP.get(source_key, source_key)
+        explicitly_mapped = source_key in E15_EXPLICIT_KEY_MAP
+        if not key.startswith(E15_INIT_WHITELIST):
+            intentionally_skipped.append(source_key)
+            continue
+        if not explicitly_mapped and not source_key.startswith(E15_INIT_WHITELIST):
+            intentionally_skipped.append(key)
+            continue
+        if key in target and target[key].shape == value.shape:
+            loaded[key] = value
+        elif key in target:
+            mismatched.append((key, tuple(value.shape), tuple(target[key].shape)))
+        else:
+            intentionally_skipped.append(source_key)
+    missing = sorted(
+        key for key in target if key.startswith(E15_INIT_WHITELIST) and key not in loaded
+    )
+    model.load_state_dict(loaded, strict=False)
+    report = {
+        "loaded_keys": sorted(loaded),
+        "missing_keys": missing,
+        "shape_mismatched_keys": mismatched,
+        "intentionally_skipped_keys": sorted(intentionally_skipped),
+    }
+    print(f"[e15-init] checkpoint={checkpoint_path}")
+    for name, values in report.items():
+        print(f"[e15-init] {name} ({len(values)}): {values}")
+    return report
+
 
 class TrainingLightningModule(LightningModule):
     """
@@ -137,9 +193,7 @@ class TrainingLightningModule(LightningModule):
             return
 
         def apply_ssq_controls(initial_state: dict[str, torch.Tensor]) -> None:
-            reset_modules = [
-                str(name) for name in getattr(finetune_cfg, "reset_modules", []) or []
-            ]
+            reset_modules = [str(name) for name in getattr(finetune_cfg, "reset_modules", []) or []]
             if reset_modules:
                 reset_prefixes = tuple(f"{name}." for name in reset_modules)
                 reset_state = {
@@ -163,8 +217,7 @@ class TrainingLightningModule(LightningModule):
                 for parameter in self.net.get_submodule(module_name).parameters():
                     parameter.requires_grad = False
             train_modules_only = [
-                str(name)
-                for name in getattr(finetune_cfg, "train_modules_only", []) or []
+                str(name) for name in getattr(finetune_cfg, "train_modules_only", []) or []
             ]
             if train_modules_only:
                 for parameter in self.net.parameters():
@@ -183,6 +236,13 @@ class TrainingLightningModule(LightningModule):
         init_from = str(getattr(finetune_cfg, "init_from_ckpt", "") or "")
         if init_from:
             if self._is_ssq_model():
+                if bool(getattr(finetune_cfg, "e15_compatible_init", False)):
+                    initial_state = {
+                        key: value.detach().clone() for key, value in self.net.state_dict().items()
+                    }
+                    load_e15_compatible_weights(self.net, init_from)
+                    apply_ssq_controls(initial_state)
+                    return
                 ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
                 state = ckpt.get("state_dict", ckpt)
                 net_state = {
@@ -194,8 +254,7 @@ class TrainingLightningModule(LightningModule):
                     net_state = state
                 current_state = self.net.state_dict()
                 allow_missing_prefixes = tuple(
-                    str(prefix)
-                    for prefix in getattr(finetune_cfg, "allow_missing_prefixes", [])
+                    str(prefix) for prefix in getattr(finetune_cfg, "allow_missing_prefixes", [])
                 )
                 matching_state = {
                     key: value
@@ -207,14 +266,10 @@ class TrainingLightningModule(LightningModule):
                 allowed_extension = (
                     bool(allow_missing_prefixes)
                     and not unexpected_source
-                    and all(
-                        key.startswith(allow_missing_prefixes) for key in missing_current
-                    )
+                    and all(key.startswith(allow_missing_prefixes) for key in missing_current)
                 )
                 if allowed_extension:
-                    missing, unexpected = self.net.load_state_dict(
-                        matching_state, strict=False
-                    )
+                    missing, unexpected = self.net.load_state_dict(matching_state, strict=False)
                     if unexpected or sorted(missing) != missing_current:
                         raise RuntimeError(
                             "SSQ extension initialization produced inconsistent keys: "
@@ -397,25 +452,17 @@ class TrainingLightningModule(LightningModule):
             tversky_alpha=loss_cfg.get("tversky_alpha", 0.6),
             tversky_beta=loss_cfg.get("tversky_beta", 0.4),
             tversky_gamma=loss_cfg.get("tversky_gamma", 1.33),
-            candidate_branch_density_weight=loss_cfg.get(
-                "candidate_branch_density_weight", 0.0
-            ),
+            candidate_branch_density_weight=loss_cfg.get("candidate_branch_density_weight", 0.0),
             candidate_branch_dice_weight=loss_cfg.get("candidate_branch_dice_weight", 0.0),
             candidate_branch_prior_power=loss_cfg.get("candidate_branch_prior_power", 1.0),
             candidate_branch_min_prior=loss_cfg.get("candidate_branch_min_prior", 0.0),
-            candidate_branch_target_mode=loss_cfg.get(
-                "candidate_branch_target_mode", "soft_prior"
-            ),
+            candidate_branch_target_mode=loss_cfg.get("candidate_branch_target_mode", "soft_prior"),
             candidate_assignment_weight=loss_cfg.get("candidate_assignment_weight", 0.0),
-            candidate_assignment_min_prior=loss_cfg.get(
-                "candidate_assignment_min_prior", 0.05
-            ),
+            candidate_assignment_min_prior=loss_cfg.get("candidate_assignment_min_prior", 0.05),
             candidate_assignment_target_mode=loss_cfg.get(
                 "candidate_assignment_target_mode", "best_prior"
             ),
-            component_match_center_weight=loss_cfg.get(
-                "component_match_center_weight", 0.25
-            ),
+            component_match_center_weight=loss_cfg.get("component_match_center_weight", 0.25),
             component_unmatched_weight=loss_cfg.get("component_unmatched_weight", 0.25),
             lambda_shared=loss_cfg.get("lambda_shared", 0.0),
             lambda_quot=loss_cfg.get("lambda_quot", 0.0),
@@ -1128,6 +1175,7 @@ class TrainingLightningModule(LightningModule):
             voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
             out = self._call_ssq_model(batch, return_diagnostics=False)
             pred_prob = out["density"].clamp(0.0, 1.0)
+            diagnostics = out.get("diagnostics", out.get("aux_outputs", {}))
             full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
             if full_grid:
                 density_gt = point_densities.reshape(voxel_shape_tuple)
@@ -1147,6 +1195,51 @@ class TrainingLightningModule(LightningModule):
                     (2.0 * intersection + 1e-8) / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
                 ).mean()
                 metric_name = "val_query_dice"
+            if "shared_density" in diagnostics:
+                shared_prob = diagnostics["shared_density"].clamp(0.0, 1.0)
+                if full_grid:
+                    shared_dice = dice_coefficient(
+                        shared_prob.reshape(voxel_shape_tuple),
+                        density_gt_bin,
+                        threshold=self._validation_pred_threshold,
+                    )
+                else:
+                    shared_bin = (
+                        shared_prob.squeeze(-1) >= self._validation_pred_threshold
+                    ).float()
+                    shared_intersection = (shared_bin * gt_bin).sum(dim=1)
+                    shared_dice = (
+                        (2.0 * shared_intersection + 1e-8)
+                        / (shared_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+                    ).mean()
+                self.log(
+                    "val_shared_dice", shared_dice, on_step=False, on_epoch=True, sync_dist=True
+                )
+                self.log(
+                    "val_final_minus_shared_dice",
+                    dice - shared_dice,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+                gate = diagnostics["proposal_gate"].detach().float().reshape(-1)
+                applicability = diagnostics["candidate_applicability"].detach().float()
+                dispersion = diagnostics["quotient_dispersion"].detach().float()
+                residual = diagnostics["residual_correction"].detach().float()
+                diagnostic_scalars = {
+                    "val_proposal_gate_mean": gate.mean(),
+                    "val_proposal_gate_p10": torch.quantile(gate, 0.1),
+                    "val_proposal_gate_p90": torch.quantile(gate, 0.9),
+                    "val_candidate_applicability_mean": applicability.mean()
+                    if applicability.numel()
+                    else gate.new_zeros(()),
+                    "val_quotient_dispersion_mean": dispersion.mean()
+                    if dispersion.numel()
+                    else gate.new_zeros(()),
+                    "val_residual_correction_abs_mean": residual.abs().mean(),
+                }
+                for name, value in diagnostic_scalars.items():
+                    self.log(name, value, on_step=False, on_epoch=True, sync_dist=True)
             self.log(
                 metric_name,
                 dice,
@@ -1275,6 +1368,40 @@ class TrainingLightningModule(LightningModule):
 
         # Restore training mode after evaluation to keep behavior consistent
         self.net.train()
+
+    @staticmethod
+    def _module_gradient_norm(module: torch.nn.Module) -> torch.Tensor:
+        squared = None
+        for parameter in module.parameters():
+            if parameter.grad is None:
+                continue
+            value = parameter.grad.detach().float().square().sum()
+            squared = value if squared is None else squared + value
+        if squared is None:
+            return next(module.parameters()).new_zeros(())
+        return squared.sqrt()
+
+    def on_after_backward(self) -> None:
+        if (
+            not self._is_ssq_model()
+            or getattr(self.net, "composition_mode", None) != "quotient_residual"
+        ):
+            return
+        modules = {
+            "surface_encoder": self.net.surface_encoder,
+            "shared_decoder": self.net.shared_density_logit_decoder,
+            "quotient_reliability": self.net.quotient_aggregator.reliability_residual,
+            "residual_decoder": self.net.source_hypothesis_residual_decoder,
+        }
+        for name, module in modules.items():
+            self.log(
+                f"train_grad_norm_{name}",
+                self._module_gradient_norm(module),
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+                sync_dist=True,
+            )
 
     def configure_optimizers(self):
         """

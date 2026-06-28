@@ -62,8 +62,10 @@ class FmtSimGenProjDataset(Dataset):
         target_files = self.config.get(
             "descatter_target_files", self.config.get("descatter_target_file")
         )
-        if target_files is None:
+        if target_files is None and "descatter_target_files" not in self.config:
             target_files = ["proj_noscatter.npz", "no_proj.npz"]
+        elif target_files is None:
+            target_files = []
         elif isinstance(target_files, str):
             target_files = [target_files]
         self.descatter_target_files = [str(p) for p in target_files]

@@ -9,6 +9,17 @@ description: SHQ-FMT quotient field with bounded source-hypothesis residual corr
 
 data:
   center_distance_targets: false
+  load_stage1_prior: false
+  load_stage1_mesh: false
+  descatter_target_file: null
+  descatter_target_files: []
+  morphology:
+    enabled: false
+    require_precomputed: false
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
   ssq_candidates:
     enabled: true
     candidate_filename: candidate_anchors.npz
