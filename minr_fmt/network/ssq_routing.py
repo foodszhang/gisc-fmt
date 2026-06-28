@@ -24,6 +24,9 @@ class CandidateSurfaceRouter(nn.Module):
         mode: str = "pre_aggregation",
         reliability_mode: str = "evidence",
         query_chunk_size: int = 4096,
+        checkpoint_routing: bool = False,
+        measurement_consistency_temperature: float = 0.15,
+        compensation_routing_mode: str = "joint",
     ):
         super().__init__()
         self.routing_net = make_residual_mlp(feature_dim + 10, hidden_dim, 1, blocks=2)
@@ -36,6 +39,11 @@ class CandidateSurfaceRouter(nn.Module):
         self.mode = str(mode)
         self.reliability_mode = str(reliability_mode)
         self.query_chunk_size = int(query_chunk_size)
+        self.checkpoint_routing = bool(checkpoint_routing)
+        self.measurement_consistency_temperature = float(measurement_consistency_temperature)
+        if compensation_routing_mode not in {"joint", "independent"}:
+            raise ValueError("compensation_routing_mode must be 'joint' or 'independent'")
+        self.compensation_routing_mode = str(compensation_routing_mode)
 
     def forward(
         self,
@@ -43,6 +51,7 @@ class CandidateSurfaceRouter(nn.Module):
         points_mm: torch.Tensor,
         candidates: dict[str, torch.Tensor],
         mapped: dict[str, torch.Tensor],
+        return_diagnostics: bool = False,
     ) -> dict[str, torch.Tensor]:
         n = points_mm.shape[1]
         chunk = self.query_chunk_size
@@ -56,10 +65,17 @@ class CandidateSurfaceRouter(nn.Module):
                         points_mm[:, start:end],
                         candidates,
                         _slice_mapped(mapped, start, end),
+                        return_diagnostics=return_diagnostics,
                     )
                 )
             return _cat_router_parts(parts)
-        return self._forward_impl(samples, points_mm, candidates, mapped)
+        return self._forward_impl(
+            samples,
+            points_mm,
+            candidates,
+            mapped,
+            return_diagnostics=return_diagnostics,
+        )
 
     def _forward_impl(
         self,
@@ -67,6 +83,7 @@ class CandidateSurfaceRouter(nn.Module):
         points_mm: torch.Tensor,
         candidates: dict[str, torch.Tensor],
         mapped: dict[str, torch.Tensor],
+        return_diagnostics: bool = False,
     ) -> dict[str, torch.Tensor]:
         sample_features = samples["sample_features"]
         sample_valid = samples["sample_valid"]
@@ -74,18 +91,17 @@ class CandidateSurfaceRouter(nn.Module):
         sample_measurements = samples["sample_measurements"]
         b, v, n, k, c = sample_features.shape
         centers = candidates["candidate_centers_mm"]
-        scales = candidates["candidate_support_scales_mm"].clamp_min(1e-6)
+        inverse_sqrt = candidates["candidate_support_inverse_sqrt_mm"]
         cand_valid = candidates["candidate_valid_mask"]
         m = centers.shape[1]
         mb = m + 1
 
         if m > 0:
             rel_query = torch.zeros((b, n, mb, 3), device=points_mm.device, dtype=points_mm.dtype)
-            rel_query[:, :, 1:] = (points_mm[:, :, None] - centers[:, None]) / scales[
-                :, None, :, None
-            ]
-            dist2 = (points_mm[:, :, None] - centers[:, None]).square().sum(dim=-1)
-            p_m = torch.exp(-dist2 / (2.0 * scales[:, None].square().clamp_min(1e-12)))
+            delta = points_mm[:, :, None] - centers[:, None]
+            relative = torch.einsum("bnmi,bmij->bnmj", delta, inverse_sqrt)
+            rel_query[:, :, 1:] = relative
+            p_m = torch.exp(-0.5 * relative.square().sum(dim=-1))
             p_m = torch.where(cand_valid[:, None], p_m, torch.zeros_like(p_m))
             p0 = (1.0 - p_m.amax(dim=-1, keepdim=True)).clamp(0.0, 1.0)
             cand_uv = candidates["candidate_uv_px"]
@@ -120,22 +136,30 @@ class CandidateSurfaceRouter(nn.Module):
             ],
             dim=-1,
         )
-        route_feat = route_features[:, :, :, :, None].expand(b, v, n, k, mb, c)
-        rel_feat = rel_query[:, None, :, None].expand(b, v, n, k, mb, 3)
-        geom_feat = geom[:, :, :, None, None].expand(b, v, n, k, mb, 2)
-        p_feat = p_all[:, None, :, None, :, None].expand(b, v, n, k, mb, 1)
-        q_feat = points_mm[:, None, :, None, None].expand(b, v, n, k, mb, 3)
-        correction_in = torch.cat(
-            [route_feat, rel_feat, geom_feat, p_feat, k_all[..., None], q_feat], dim=-1
-        )
-        if self.training and correction_in.requires_grad:
-            correction_raw = checkpoint(self.routing_net, correction_in, use_reentrant=False)
-        else:
-            correction_raw = self.routing_net(correction_in)
-        correction = torch.tanh(correction_raw).squeeze(-1)
+        correction_parts = []
+        geom_feat = geom[:, :, :, None].expand(b, v, n, k, 2)
+        q_feat = points_mm[:, None, :, None].expand(b, v, n, k, 3)
+        for idx in range(mb):
+            rel_feat = rel_query[:, None, :, idx : idx + 1].expand(b, v, n, k, 3)
+            p_feat = p_all[:, None, :, None, idx : idx + 1].expand(b, v, n, k, 1)
+            correction_in = torch.cat(
+                [route_features, rel_feat, geom_feat, p_feat, k_all[..., idx : idx + 1], q_feat],
+                dim=-1,
+            )
+            if self.checkpoint_routing and self.training and correction_in.requires_grad:
+                correction_raw = checkpoint(self.routing_net, correction_in, use_reentrant=False)
+            else:
+                correction_raw = self.routing_net(correction_in)
+            correction_parts.append(torch.tanh(correction_raw).squeeze(-1))
+        correction = torch.stack(correction_parts, dim=-1)
         logits = self.tau_K * torch.log(k_all) + self.delta_q * correction
         valid = sample_valid[..., None] & branch_valid[:, None, None, None]
-        zeta = masked_softmax(logits, valid, dim=-1, fallback_index=0)
+        if self.compensation_routing_mode == "independent" and m > 0:
+            compensation_zeta = sample_valid[..., None].to(dtype=logits.dtype)
+            candidate_zeta = masked_softmax(logits[..., 1:], valid[..., 1:], dim=-1)
+            zeta = torch.cat([compensation_zeta, candidate_zeta], dim=-1)
+        else:
+            zeta = masked_softmax(logits, valid, dim=-1, fallback_index=0)
         zeta = torch.where(sample_valid[..., None], zeta, torch.zeros_like(zeta))
 
         weighted_route = a_kernel[..., None] * zeta
@@ -147,7 +171,7 @@ class CandidateSurfaceRouter(nn.Module):
             [sample_features, sample_measurements, geom[:, :, :, None].expand(b, v, n, k, 2)],
             dim=-1,
         )
-        if self.training and ev_in.requires_grad:
+        if self.checkpoint_routing and self.training and ev_in.requires_grad:
             ev_raw = checkpoint(self.evidence_net, ev_in, use_reentrant=False)
         else:
             ev_raw = self.evidence_net(ev_in)
@@ -155,18 +179,37 @@ class CandidateSurfaceRouter(nn.Module):
         e = (a_kernel[..., None] * zeta * e_sample[..., None]).sum(dim=3).clamp(0.0, 1.0)
         nu = (e / a.clamp_min(1e-8)).clamp(0.0, 1.0)
         r = a if self.reliability_mode == "assignment_only" else (a * nu).clamp(0.0, 1.0)
-        return {
+        measurement_consistency = torch.ones_like(p_m)
+        center_measurements = candidates.get("candidate_center_measurements")
+        if m > 0 and torch.is_tensor(center_measurements):
+            query_measurements = (a_kernel * sample_measurements.squeeze(-1)).sum(dim=3)
+            difference = (
+                query_measurements[..., None] - center_measurements[:, :, None]
+            ).abs()
+            similarity = torch.exp(
+                -difference / max(self.measurement_consistency_temperature, 1.0e-6)
+            )
+            pair_valid = mapped["valid_mask"][..., None] & cand_visible[:, :, None]
+            pair_weight = pair_valid.to(dtype=similarity.dtype)
+            measurement_consistency = (similarity * pair_weight).sum(dim=1)
+            measurement_consistency = measurement_consistency / pair_weight.sum(dim=1).clamp_min(
+                1.0
+            )
+        out = {
             "zeta": zeta,
             "a": a,
             "e": e,
-            "e_sample": e_sample.clamp(0.0, 1.0),
             "nu": nu,
             "r": r,
             "p_all": p_all,
-            "K_all": k_all,
             "branch_valid": branch_valid,
             "relative_query": rel_query,
+            "measurement_consistency": measurement_consistency,
         }
+        if return_diagnostics:
+            out["e_sample"] = e_sample.clamp(0.0, 1.0)
+            out["K_all"] = k_all
+        return out
 
 
 def _slice_samples(
@@ -205,8 +248,9 @@ def _cat_router_parts(parts: list[dict[str, torch.Tensor]]) -> dict[str, torch.T
         "nu": 2,
         "r": 2,
         "p_all": 1,
-        "K_all": 2,
         "relative_query": 1,
+        "measurement_consistency": 1,
+        "K_all": 2,
     }
     for key, value in parts[0].items():
         dim = query_dim_by_key.get(key)

@@ -1,0 +1,48 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_train_32gb
+  - _self_
+
+name: fmt_simgen_v2_ssq_full_refined_32gb
+description: Full-data 32GB SSQ training with measurement-refined candidates
+
+seed: 42
+
+data:
+  train_max_samples: null
+  val_max_samples: null
+  test_max_samples: null
+  num_workers: 2
+  persistent_workers: false
+  prefetch_factor: 1
+  ssq_candidates:
+    top_m: 5
+    candidate_filename: candidate_anchors_refiner_full_v1.npz
+    reextract_candidates: false
+
+model:
+  ssq_fmt:
+    candidate_context:
+      enabled: true
+      hidden_dim: 64
+      field_hidden_dim: 64
+    routing:
+      compensation_routing_mode: independent
+      query_chunk_size: 8192
+    representation:
+      query_chunk_size: 8192
+    fusion:
+      query_chunk_size: 8192
+    decoder:
+      positive_ratio_init: 0.012
+      query_chunk_size: 8192
+
+loss:
+  candidate_assignment_weight: 0.0
+  candidate_branch_density_weight: 0.0
+  candidate_branch_dice_weight: 0.0
+
+trainer:
+  max_epochs: 60
+  check_val_every_n_epoch: 2

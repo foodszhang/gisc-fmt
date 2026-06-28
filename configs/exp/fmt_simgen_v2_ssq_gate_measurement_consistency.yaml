@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_32gb
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_measurement_consistency
+description: Full SSQ-FMT with query-to-candidate projection-signature consistency
+
+model:
+  ssq_fmt:
+    routing:
+      measurement_consistency_temperature: 0.15
+      measurement_consistency_logit_weight: 1.0
+
+optim:
+  lr: 0.00001
+  scheduler:
+    warmup_epochs: 0
+
+trainer:
+  max_epochs: 2
+  check_val_every_n_epoch: 1

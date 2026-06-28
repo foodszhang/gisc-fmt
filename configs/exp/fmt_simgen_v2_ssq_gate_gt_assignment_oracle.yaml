@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_assignment
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_gt_assignment_oracle
+description: Training-only GT-positive oracle responsibility diagnostic
+
+model:
+  finetune:
+    train_modules_only:
+      - assignment_head
+
+loss:
+  candidate_assignment_weight: 1.0
+  candidate_assignment_min_prior: 0.05
+  candidate_assignment_target_mode: best_positive_density
+  candidate_branch_density_weight: 0.0
+  candidate_branch_dice_weight: 0.0
+
+optim:
+  lr: 0.00005

@@ -1,0 +1,40 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_component_matched_q12288
+  - _self_
+
+name: fmt_simgen_v2_ssq_reset_candidate_probe
+description: Diagnostic fresh candidate path over frozen SSQ encoder
+
+data:
+  train_max_samples: 200
+  val_max_samples: 50
+
+model:
+  finetune:
+    init_from_ckpt: outputs/ssq_fmt_full_refined_2400_300_q8192_e60/checkpoints/epoch=07-val_dice=0.5702.ckpt
+    reset_modules:
+      - assignment_head
+      - candidate_density_decoder
+      - candidate_context_encoder
+      - candidate_field_calibrator
+    train_modules_only:
+      - surface_sampler
+      - candidate_router
+      - view_encoder
+      - view_fusion
+      - assignment_head
+      - candidate_density_decoder
+      - candidate_context_encoder
+      - candidate_field_calibrator
+
+optim:
+  lr: 0.0005
+  scheduler:
+    warmup_epochs: 0
+
+trainer:
+  max_epochs: 5
+  check_val_every_n_epoch: 1
+

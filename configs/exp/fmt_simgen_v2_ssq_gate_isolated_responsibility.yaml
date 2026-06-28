@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_responsibility
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_isolated_responsibility
+description: Isolated candidate responsibility gate without shared-feature drift
+
+model:
+  finetune:
+    train_modules_only:
+      - assignment_head
+      - candidate_density_decoder
+
+loss:
+  candidate_assignment_weight: 1.0
+  candidate_assignment_min_prior: 0.05
+  candidate_branch_density_weight: 1.0
+  candidate_branch_dice_weight: 0.25
+  candidate_branch_target_mode: best_positive_prior
+
+optim:
+  lr: 0.00005

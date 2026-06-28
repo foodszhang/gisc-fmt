@@ -1,0 +1,19 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_refined_joint_scratch
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_refined_joint_scratch_supervised
+description: From-scratch refined-candidate joint training with explicit responsibility
+
+loss:
+  candidate_assignment_weight: 0.25
+  candidate_assignment_min_prior: 0.05
+  candidate_assignment_target_mode: best_prior
+  candidate_branch_density_weight: 1.0
+  candidate_branch_dice_weight: 0.25
+  candidate_branch_target_mode: one_hot_positive_prior
+
+trainer:
+  max_epochs: 10

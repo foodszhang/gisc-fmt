@@ -114,6 +114,15 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def git_blob_sha(repo: Path, path: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "hash-object", str(path.relative_to(repo))], cwd=repo, text=True
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
 def ensure_dirs(paths: Paths) -> None:
     for sub in [
         paths.out_dir,
@@ -844,7 +853,7 @@ def export_source_hypothesis_data(paths: Paths, sample_ids: list[str], out_dir: 
 
 
 def write_evidence_audit(
-    paths: Paths, audit_rows: list[dict], script_sha: str, commit: str
+    paths: Paths, audit_rows: list[dict], script_sha: str, script_blob: str, commit: str
 ) -> None:
     unsupported = [
         {
@@ -880,8 +889,9 @@ def write_evidence_audit(
     lines = [
         "# SSQ-FMT Evidence Audit",
         "",
-        f"- generator_git_commit: `{commit}`",
-        f"- generator_sha256: `{script_sha}`",
+        f"- generator_repo_head_at_generation: `{commit}`",
+        f"- generator_script_git_blob_sha: `{script_blob}`",
+        f"- generator_script_sha256: `{script_sha}`",
         f"- generation_command: `{GENERATION_COMMAND}`",
         "",
     ]
@@ -907,12 +917,15 @@ def write_evidence_audit(
     save_json(paths.out_dir / "evidence_audit.json", all_rows)
 
 
-def write_redesign_audit(paths: Paths, cases: pd.DataFrame, script_sha: str, commit: str) -> None:
+def write_redesign_audit(
+    paths: Paths, cases: pd.DataFrame, script_sha: str, script_blob: str, commit: str
+) -> None:
     lines = [
         "# SSQ-FMT Figure Redesign Audit",
         "",
-        f"- generator_git_commit: `{commit}`",
-        f"- generator_sha256: `{script_sha}`",
+        f"- generator_repo_head_at_generation: `{commit}`",
+        f"- generator_script_git_blob_sha: `{script_blob}`",
+        f"- generator_script_sha256: `{script_sha}`",
         f"- generation_command: `{GENERATION_COMMAND}`",
         "",
         "## Removed Or Downgraded Figures",
@@ -1041,6 +1054,7 @@ def main() -> None:
     commit = git_commit(repo)
     script_path = Path(__file__).resolve()
     script_sha = sha256_file(script_path)
+    script_blob = git_blob_sha(repo, script_path)
     manifest: list[dict] = []
     audit_rows: list[dict] = []
 
@@ -1100,15 +1114,16 @@ def main() -> None:
         },
     ]
     save_json(paths.out_dir / "missing_data_manifest.json", missing)
-    write_evidence_audit(paths, audit_rows, script_sha, commit)
-    write_redesign_audit(paths, cases, script_sha, commit)
+    write_evidence_audit(paths, audit_rows, script_sha, script_blob, commit)
+    write_redesign_audit(paths, cases, script_sha, script_blob, commit)
     write_readme(paths)
     write_latex(paths, manifest)
     save_json(
         paths.out_dir / "figure_manifest.json",
         {
-            "generator_git_commit": commit,
-            "generator_sha256": script_sha,
+            "generator_repo_head_at_generation": commit,
+            "generator_script_git_blob_sha": script_blob,
+            "generator_script_sha256": script_sha,
             "generation_command": GENERATION_COMMAND,
             "figures": manifest,
         },
@@ -1126,8 +1141,9 @@ def main() -> None:
             ],
             "missing_entries": len(missing),
             "methods": list(METHOD_RUNS),
-            "generator_git_commit": commit,
-            "generator_sha256": script_sha,
+            "generator_repo_head_at_generation": commit,
+            "generator_script_git_blob_sha": script_blob,
+            "generator_script_sha256": script_sha,
             "evaluation_protocol": EVAL_PROTOCOL,
         },
     )

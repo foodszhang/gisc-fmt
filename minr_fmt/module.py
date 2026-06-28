@@ -136,6 +136,50 @@ class TrainingLightningModule(LightningModule):
         if finetune_cfg is None:
             return
 
+        def apply_ssq_controls(initial_state: dict[str, torch.Tensor]) -> None:
+            reset_modules = [
+                str(name) for name in getattr(finetune_cfg, "reset_modules", []) or []
+            ]
+            if reset_modules:
+                reset_prefixes = tuple(f"{name}." for name in reset_modules)
+                reset_state = {
+                    key: value
+                    for key, value in initial_state.items()
+                    if key.startswith(reset_prefixes)
+                }
+                missing, unexpected = self.net.load_state_dict(reset_state, strict=False)
+                if unexpected:
+                    raise RuntimeError(
+                        f"SSQ module reset produced unexpected keys: {unexpected[:20]}"
+                    )
+                print(
+                    f"[finetune] reset modules to fresh initialization: {reset_modules}; "
+                    f"keys={len(reset_state)}"
+                )
+            freeze_modules = [
+                str(name) for name in getattr(finetune_cfg, "freeze_modules", []) or []
+            ]
+            for module_name in freeze_modules:
+                for parameter in self.net.get_submodule(module_name).parameters():
+                    parameter.requires_grad = False
+            train_modules_only = [
+                str(name)
+                for name in getattr(finetune_cfg, "train_modules_only", []) or []
+            ]
+            if train_modules_only:
+                for parameter in self.net.parameters():
+                    parameter.requires_grad = False
+                for module_name in train_modules_only:
+                    for parameter in self.net.get_submodule(module_name).parameters():
+                        parameter.requires_grad = True
+            if reset_modules or freeze_modules or train_modules_only:
+                trainable = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+                total = sum(p.numel() for p in self.net.parameters())
+                print(
+                    f"[finetune] SSQ controls: freeze={freeze_modules} "
+                    f"train_only={train_modules_only}; trainable={trainable}/{total}"
+                )
+
         init_from = str(getattr(finetune_cfg, "init_from_ckpt", "") or "")
         if init_from:
             if self._is_ssq_model():
@@ -149,6 +193,39 @@ class TrainingLightningModule(LightningModule):
                 if not net_state:
                     net_state = state
                 current_state = self.net.state_dict()
+                allow_missing_prefixes = tuple(
+                    str(prefix)
+                    for prefix in getattr(finetune_cfg, "allow_missing_prefixes", [])
+                )
+                matching_state = {
+                    key: value
+                    for key, value in net_state.items()
+                    if key in current_state and current_state[key].shape == value.shape
+                }
+                missing_current = sorted(set(current_state) - set(matching_state))
+                unexpected_source = sorted(set(net_state) - set(matching_state))
+                allowed_extension = (
+                    bool(allow_missing_prefixes)
+                    and not unexpected_source
+                    and all(
+                        key.startswith(allow_missing_prefixes) for key in missing_current
+                    )
+                )
+                if allowed_extension:
+                    missing, unexpected = self.net.load_state_dict(
+                        matching_state, strict=False
+                    )
+                    if unexpected or sorted(missing) != missing_current:
+                        raise RuntimeError(
+                            "SSQ extension initialization produced inconsistent keys: "
+                            f"missing={missing[:20]} unexpected={unexpected[:20]}"
+                        )
+                    print(
+                        f"[finetune] initialized SSQ-FMT extension from {init_from}; "
+                        f"new_keys={len(missing_current)}"
+                    )
+                    apply_ssq_controls(current_state)
+                    return
                 if all(
                     key in current_state and current_state[key].shape == value.shape
                     for key, value in net_state.items()
@@ -180,6 +257,7 @@ class TrainingLightningModule(LightningModule):
                         f"[finetune] strictly initialized SSQ-FMT query backbone from "
                         f"{init_from}; mapped_backbone_keys={len(mapped)}"
                     )
+                apply_ssq_controls(current_state)
                 return
             ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
             state = ckpt.get("state_dict", ckpt)
@@ -242,6 +320,34 @@ class TrainingLightningModule(LightningModule):
             total = sum(p.numel() for p in self.net.parameters())
             print(f"[finetune] trainable parameters: {trainable}/{total}")
 
+        freeze_modules = list(getattr(finetune_cfg, "freeze_modules", []) or [])
+        for module_name in freeze_modules:
+            module = self.net.get_submodule(str(module_name))
+            for param in module.parameters():
+                param.requires_grad = False
+        if freeze_modules:
+            trainable = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+            total = sum(p.numel() for p in self.net.parameters())
+            print(
+                f"[finetune] frozen modules: {freeze_modules}; "
+                f"trainable parameters: {trainable}/{total}"
+            )
+
+        train_modules_only = list(getattr(finetune_cfg, "train_modules_only", []) or [])
+        if train_modules_only:
+            for param in self.net.parameters():
+                param.requires_grad = False
+            for module_name in train_modules_only:
+                module = self.net.get_submodule(str(module_name))
+                for param in module.parameters():
+                    param.requires_grad = True
+            trainable = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+            total = sum(p.numel() for p in self.net.parameters())
+            print(
+                f"[finetune] trainable modules only: {train_modules_only}; "
+                f"trainable parameters: {trainable}/{total}"
+            )
+
     def _setup_loss(self):
         """Create loss function from config"""
         loss_cfg = self.cfg.loss
@@ -286,6 +392,31 @@ class TrainingLightningModule(LightningModule):
             pos_weight=loss_cfg.get("pos_weight", 1.0),
             dice_weight=loss_cfg.get("dice_weight", 0.0),
             sparse_weight=loss_cfg.get("sparse_weight", 0.0),
+            density_bce_weight=loss_cfg.get("density_bce_weight", 0.0),
+            tversky_weight=loss_cfg.get("tversky_weight", 0.0),
+            tversky_alpha=loss_cfg.get("tversky_alpha", 0.6),
+            tversky_beta=loss_cfg.get("tversky_beta", 0.4),
+            tversky_gamma=loss_cfg.get("tversky_gamma", 1.33),
+            candidate_branch_density_weight=loss_cfg.get(
+                "candidate_branch_density_weight", 0.0
+            ),
+            candidate_branch_dice_weight=loss_cfg.get("candidate_branch_dice_weight", 0.0),
+            candidate_branch_prior_power=loss_cfg.get("candidate_branch_prior_power", 1.0),
+            candidate_branch_min_prior=loss_cfg.get("candidate_branch_min_prior", 0.0),
+            candidate_branch_target_mode=loss_cfg.get(
+                "candidate_branch_target_mode", "soft_prior"
+            ),
+            candidate_assignment_weight=loss_cfg.get("candidate_assignment_weight", 0.0),
+            candidate_assignment_min_prior=loss_cfg.get(
+                "candidate_assignment_min_prior", 0.05
+            ),
+            candidate_assignment_target_mode=loss_cfg.get(
+                "candidate_assignment_target_mode", "best_prior"
+            ),
+            component_match_center_weight=loss_cfg.get(
+                "component_match_center_weight", 0.25
+            ),
+            component_unmatched_weight=loss_cfg.get("component_unmatched_weight", 0.25),
         )
 
     def _is_ssq_model(self) -> bool:
@@ -781,6 +912,9 @@ class TrainingLightningModule(LightningModule):
                 gt_voxels=batch.get("gt_voxels"),
                 points_ijk=batch.get("points_ijk"),
                 sdf_targets=batch.get("sdf_targets"),
+                query_component_ids=batch.get("query_component_ids"),
+                gt_component_centers_mm=batch.get("gt_component_centers_mm"),
+                gt_component_valid_mask=batch.get("gt_component_valid_mask"),
             )
             density_logits = (
                 aux_outputs.get("density_logits") if isinstance(aux_outputs, dict) else None

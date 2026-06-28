@@ -1,0 +1,26 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_sync_gate_200_50_q8192
+  - _self_
+
+name: fmt_simgen_v2_ssq_evidence_competition_gate
+description: From-scratch SSQ gate with E15-aligned encoding and occupancy-evidence competition
+
+data:
+  dataset_type: fmt_simgen
+
+model:
+  ssq_fmt:
+    normalization:
+      mode: per_view_max
+      percentile: 99.9
+      candidate_percentile: 99.9
+    encoder:
+      profile: base
+    routing:
+      occupancy_evidence_weight: 0.5
+      occupancy_evidence_floor: 0.05
+
+trainer:
+  max_epochs: 10

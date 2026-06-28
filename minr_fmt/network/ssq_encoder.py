@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 
 def _group_count(channels: int) -> int:
@@ -72,11 +73,13 @@ class SharedResidualUNetPyramidEncoder(nn.Module):
         output_channels: int = 96,
         dropout: float = 0.0,
         use_pyramid_fusion: bool = True,
+        checkpoint_encoder: bool = False,
     ):
         super().__init__()
         c1, c2, c3, c4 = [int(v) for v in stage_channels]
         b1, b2, b3, b4 = [int(v) for v in stage_blocks]
         self.use_pyramid_fusion = bool(use_pyramid_fusion)
+        self.checkpoint_encoder = bool(checkpoint_encoder)
         self.stem = ConvNormAct(in_channels, int(stem_channels))
         self.stage1_in = ConvNormAct(int(stem_channels), c1)
         self.stage1 = nn.Sequential(*(ResidualBlock2d(c1, dropout) for _ in range(b1)))
@@ -105,18 +108,23 @@ class SharedResidualUNetPyramidEncoder(nn.Module):
             self.fuse = nn.Sequential(ConvNormAct(c1, out), ConvNormAct(out, out))
         self.out_channels = out
 
+    def _maybe_checkpoint(self, module: nn.Module, x: torch.Tensor) -> torch.Tensor:
+        if self.checkpoint_encoder and self.training:
+            return checkpoint(module, x, use_reentrant=False)
+        return module(x)
+
     def _encode_flat(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem(x)
-        s1 = self.stage1(self.stage1_in(x))
-        s2 = self.stage2(self.down2(s1))
-        s3 = self.stage3(self.down3(s2))
-        s4 = self.stage4(self.down4(s3))
+        s1 = self._maybe_checkpoint(self.stage1, self.stage1_in(x))
+        s2 = self._maybe_checkpoint(self.stage2, self.down2(s1))
+        s3 = self._maybe_checkpoint(self.stage3, self.down3(s2))
+        s4 = self._maybe_checkpoint(self.stage4, self.down4(s3))
         up4 = F.interpolate(s4, size=s3.shape[-2:], mode="bilinear", align_corners=False)
-        h3 = self.dec3(torch.cat([self.up43(up4), s3], dim=1))
+        h3 = self._maybe_checkpoint(self.dec3, torch.cat([self.up43(up4), s3], dim=1))
         up3 = F.interpolate(h3, size=s2.shape[-2:], mode="bilinear", align_corners=False)
-        h2 = self.dec2(torch.cat([self.up32(up3), s2], dim=1))
+        h2 = self._maybe_checkpoint(self.dec2, torch.cat([self.up32(up3), s2], dim=1))
         up2 = F.interpolate(h2, size=s1.shape[-2:], mode="bilinear", align_corners=False)
-        h1 = self.dec1(torch.cat([self.up21(up2), s1], dim=1))
+        h1 = self._maybe_checkpoint(self.dec1, torch.cat([self.up21(up2), s1], dim=1))
         if not self.use_pyramid_fusion:
             return self.fuse(h1)
         p1 = self.proj1(h1)

@@ -12,7 +12,12 @@ from omegaconf import DictConfig, OmegaConf
 from scipy import ndimage
 from torch.utils.data import Dataset
 
-from minr_fmt.utils.ssq_candidate_extraction import CANDIDATE_CACHE_VERSION, load_candidate_cache
+from minr_fmt.utils.ssq_candidate_extraction import (
+    CANDIDATE_CACHE_VERSION,
+    candidate_support_covariances_mm,
+    extract_candidate_anchors,
+    load_candidate_cache,
+)
 
 from .query_sampler import NonGTQuerySampler
 
@@ -111,6 +116,27 @@ class FmtSimGenProjDataset(Dataset):
         self.source_hypothesis_min_value_ratio = float(source_hyp_cfg.get("min_value_ratio", 0.1))
         ssq_candidate_cfg = self.config.get("ssq_candidates", {}) or {}
         self.ssq_candidates_enabled = bool(ssq_candidate_cfg.get("enabled", False))
+        self.ssq_anisotropic_support = bool(
+            ssq_candidate_cfg.get("anisotropic_support", False)
+        )
+        self.ssq_support_moment_radius_mm = float(
+            ssq_candidate_cfg.get("support_moment_radius_mm", 4.0)
+        )
+        self.ssq_reextract_candidates = bool(
+            ssq_candidate_cfg.get("reextract_candidates", False)
+        )
+        self.ssq_candidate_smoothing_sigma_cells = float(
+            ssq_candidate_cfg.get("smoothing_sigma_cells", 1.0)
+        )
+        self.ssq_candidate_nms_radius_mm = float(
+            ssq_candidate_cfg.get("nms_radius_mm", 3.0)
+        )
+        self.ssq_candidate_min_value_ratio = float(
+            ssq_candidate_cfg.get("min_value_ratio", 0.1)
+        )
+        self.ssq_candidate_filename = str(
+            ssq_candidate_cfg.get("candidate_filename", "candidate_anchors.npz")
+        )
         if self.ssq_candidates_enabled:
             self.source_hypothesis_top_m = int(
                 ssq_candidate_cfg.get("top_m", self.source_hypothesis_top_m)
@@ -149,6 +175,11 @@ class FmtSimGenProjDataset(Dataset):
             self.config.get("query_epoch_seed_stride", 1_000_003) or 1_000_003
         )
         self.current_epoch = 0
+        component_cfg = self.config.get("component_supervision", {}) or {}
+        self.component_supervision_enabled = bool(component_cfg.get("enabled", False))
+        self.component_supervision_max_components = int(
+            component_cfg.get("max_components", 5) or 5
+        )
         self._base_seed = int(self.config.get("subset_seed", 0) or 0) + {
             "train": 0,
             "val": 1000,
@@ -345,6 +376,52 @@ class FmtSimGenProjDataset(Dataset):
             gt = gt / gt_max
         return gt
 
+    def _component_supervision(
+        self,
+        sample_dir: Path,
+        gt: np.ndarray,
+        points_mm: np.ndarray,
+        point_densities: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        max_components = self.component_supervision_max_components
+        centers = np.zeros((max_components, 3), dtype=np.float32)
+        valid = np.zeros(max_components, dtype=np.bool_)
+        tumor_path = sample_dir / "tumor_params.json"
+        foci = []
+        if tumor_path.exists():
+            foci = json.loads(tumor_path.read_text()).get("foci", [])
+        for component_index, focus in enumerate(foci[:max_components]):
+            center = focus.get("center")
+            if center is not None and len(center) == 3:
+                centers[component_index] = np.asarray(center, dtype=np.float32)
+                valid[component_index] = True
+        if not valid.any():
+            labels, count = ndimage.label(
+                gt > 0.5, ndimage.generate_binary_structure(3, 1)
+            )
+            components = []
+            for label_id in range(1, count + 1):
+                coordinates = np.argwhere(labels == label_id)
+                if len(coordinates):
+                    components.append((len(coordinates), coordinates))
+            components.sort(key=lambda item: item[0], reverse=True)
+            for component_index, (_, coordinates) in enumerate(
+                components[:max_components]
+            ):
+                centers[component_index] = (
+                    coordinates.mean(axis=0) + 0.5
+                ) * self.voxel_size_mm
+                valid[component_index] = True
+        query_ids = np.zeros(len(points_mm), dtype=np.int64)
+        positive = point_densities > 0.0
+        if positive.any() and valid.any():
+            valid_indices = np.flatnonzero(valid)
+            distance = np.linalg.norm(
+                points_mm[positive, None] - centers[valid_indices][None], axis=-1
+            )
+            query_ids[positive] = valid_indices[distance.argmin(axis=1)] + 1
+        return query_ids, centers, valid
+
     def _load_stage1_prior(self, sample_dir: Path, target_shape: tuple[int, ...]):
         for rel_path in self.stage1_prior_files:
             path = sample_dir / rel_path
@@ -401,18 +478,59 @@ class FmtSimGenProjDataset(Dataset):
         peak_scores = np.zeros((top_m,), dtype=np.float32)
         scales = np.zeros((top_m,), dtype=np.float32)
         valid = np.zeros((top_m,), dtype=np.float32)
-        cache = load_candidate_cache(sample_dir, expected_version=CANDIDATE_CACHE_VERSION)
+        cache = load_candidate_cache(
+            sample_dir,
+            expected_version=CANDIDATE_CACHE_VERSION,
+            filename=self.ssq_candidate_filename,
+        )
+        if self.ssq_reextract_candidates or top_m > int(cache["centers_mm"].shape[0]):
+            heatmap_path = sample_dir / self.proposal_subdir / self.proposal_filename
+            metadata_path = sample_dir / self.proposal_subdir / self.proposal_meta_filename
+            heatmap = np.load(heatmap_path).astype(np.float32)
+            metadata = json.loads(metadata_path.read_text())
+            anchors = extract_candidate_anchors(
+                heatmap,
+                metadata,
+                top_m=top_m,
+                smoothing_sigma_cells=self.ssq_candidate_smoothing_sigma_cells,
+                nms_radius_mm=self.ssq_candidate_nms_radius_mm,
+                support_moment_radius_mm=self.ssq_support_moment_radius_mm,
+                min_value_ratio=self.ssq_candidate_min_value_ratio,
+            )
+            cache = {
+                "centers_mm": anchors["centers_mm"],
+                "scores": anchors["scores"],
+                "raw_support_scales_mm": anchors["raw_support_scales_mm"],
+                "valid": anchors["valid"],
+            }
         n = min(top_m, int(cache["centers_mm"].shape[0]))
         centers[:n] = cache["centers_mm"][:n]
         peak_scores[:n] = cache["scores"][:n]
         scales[:n] = cache["raw_support_scales_mm"][:n]
         valid[:n] = cache["valid"][:n].astype(np.float32)
-        return {
+        result = {
             "centers": centers,
             "peak_scores": peak_scores,
             "scales": scales,
             "valid": valid,
         }
+        if self.ssq_anisotropic_support:
+            heatmap_path = sample_dir / self.proposal_subdir / self.proposal_filename
+            metadata_path = sample_dir / self.proposal_subdir / self.proposal_meta_filename
+            if not heatmap_path.exists() or not metadata_path.exists():
+                raise FileNotFoundError(
+                    f"Anisotropic SSQ support requires {heatmap_path} and {metadata_path}"
+                )
+            heatmap = np.load(heatmap_path).astype(np.float32)
+            metadata = json.loads(metadata_path.read_text())
+            result["support_covariances_mm"] = candidate_support_covariances_mm(
+                heatmap,
+                centers,
+                valid > 0.0,
+                np.asarray(metadata["cell_size_mm"], dtype=np.float32),
+                self.ssq_support_moment_radius_mm,
+            )
+        return result
 
     def _build_center_distance_targets(self, gt: np.ndarray) -> dict[str, np.ndarray]:
         structure = ndimage.generate_binary_structure(3, 1)
@@ -608,6 +726,19 @@ class FmtSimGenProjDataset(Dataset):
             "projection_scales": projection_scales,
             "num_foci": num_foci,
         }
+        if self.component_supervision_enabled and self.is_training:
+            component_ids, component_centers, component_valid = self._component_supervision(
+                sample_dir, gt, points_mm, point_densities
+            )
+            item["query_component_ids"] = torch.tensor(
+                component_ids, dtype=torch.long, device=self.device
+            )
+            item["gt_component_centers_mm"] = torch.tensor(
+                component_centers, dtype=torch.float32, device=self.device
+            )
+            item["gt_component_valid_mask"] = torch.tensor(
+                component_valid, dtype=torch.bool, device=self.device
+            )
         if sdf_targets is not None:
             item["sdf_targets"] = torch.tensor(
                 sdf_targets, dtype=torch.float32, device=self.device
@@ -664,6 +795,12 @@ class FmtSimGenProjDataset(Dataset):
                 item["candidate_valid_mask"] = torch.tensor(
                     source_hyp["valid"] > 0.0, dtype=torch.bool, device=self.device
                 )
+                if "support_covariances_mm" in source_hyp:
+                    item["candidate_support_covariances_mm"] = torch.tensor(
+                        source_hyp["support_covariances_mm"],
+                        dtype=torch.float32,
+                        device=self.device,
+                    )
         if self.source_hypothesis_enabled:
             source_hyp = self._load_source_hypotheses(sample_dir)
             item["source_hypothesis_centers"] = torch.tensor(

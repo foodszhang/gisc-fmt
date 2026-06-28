@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e15_sync_gate_200_50_q8192
+  - _self_
+
+name: fmt_simgen_v2_e15_sync_gate_1200
+description: E15 synchronized 1200/150 comparison with the SSQ query protocol
+
+data:
+  train_max_samples: 1200
+  val_max_samples: 150
+
+trainer:
+  max_epochs: 10

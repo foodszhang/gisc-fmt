@@ -125,6 +125,18 @@ def run(cfg: DictConfig) -> Optional[float]:
     task = str(cfg.get("task", "fit")).lower()
     weights_only = bool(cfg.get("ckpt_weights_only", True))
 
+    if task == "fit" and weights_only and ckpt_path not in (None, "", "null"):
+        checkpoint = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
+        state_dict = checkpoint.get("state_dict", checkpoint)
+        missing, unexpected = model.load_state_dict(state_dict, strict=True)
+        rank_zero_log(
+            logger,
+            "info",
+            "Loaded model weights only from "
+            f"{ckpt_path} (missing={len(missing)}, unexpected={len(unexpected)})",
+        )
+        ckpt_path = None
+
     # If user didn't specify ckpt_path for validate/test, try to use the last checkpoint.
     if task in {"validate", "test"} and (ckpt_path is None or str(ckpt_path) in {"", "null"}):
         last_ckpt = Path(str(cfg.paths.checkpoint_dir)) / "last.ckpt"

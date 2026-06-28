@@ -114,6 +114,8 @@ def compute_heatmap(sample_dir: Path, params: dict[str, Any]) -> tuple[np.ndarra
     views = [int(v) for v in params["views"]]
     heat_sum = torch.zeros(points_mm.shape[1], dtype=torch.float32)
     valid_count = torch.zeros(points_mm.shape[1], dtype=torch.float32)
+    sampled_views = []
+    valid_views = []
 
     z = np.load(sample_dir / "proj.npz")
     raw_proj: dict[int, np.ndarray] = {}
@@ -173,11 +175,29 @@ def compute_heatmap(sample_dir: Path, params: dict[str, Any]) -> tuple[np.ndarra
         valid_f = valid_f * sampled_depth_valid
         heat_sum += sampled * valid_f
         valid_count += valid_f
+        sampled_views.append(sampled.clamp_min(0.0))
+        valid_views.append(valid_f)
 
     c_prop = (valid_count / max(float(len(views)), 1.0)).clamp(0.0, 1.0)
-    heat = (
-        c_prop.pow(float(params["coverage_gamma"])) * heat_sum / torch.clamp(valid_count, min=1.0)
-    ).numpy()
+    fusion_mode = str(params.get("view_fusion", "arithmetic_mean"))
+    if fusion_mode == "arithmetic_mean":
+        fused = heat_sum / torch.clamp(valid_count, min=1.0)
+    else:
+        values = torch.stack(sampled_views, dim=0)
+        validity = torch.stack(valid_views, dim=0)
+        eps = float(params["eps"])
+        if fusion_mode == "geometric_mean":
+            fused = torch.exp(
+                (torch.log(values.clamp_min(eps)) * validity).sum(dim=0)
+                / valid_count.clamp_min(1.0)
+            )
+        elif fusion_mode == "harmonic_mean":
+            fused = valid_count / (
+                (validity / values.clamp_min(eps)).sum(dim=0).clamp_min(eps)
+            )
+        else:
+            raise ValueError(f"Unsupported proposal view_fusion={fusion_mode!r}")
+    heat = (c_prop.pow(float(params["coverage_gamma"])) * fused).numpy()
     heat = np.clip(heat.reshape(grid_size).astype(np.float32), 0.0, None)
     gamma = float(params["gamma"])
     if gamma != 1.0:
@@ -202,6 +222,7 @@ def compute_heatmap(sample_dir: Path, params: dict[str, Any]) -> tuple[np.ndarra
         if params["normalization"] == "joint_sample_percentile_99.9"
         else "legacy_per_view_max",
         "normalization": params["normalization"],
+        "view_fusion": fusion_mode,
         "percentile": 99.9 if params["normalization"] == "joint_sample_percentile_99.9" else None,
         "views": views,
         "camera_distance_mm": float(params["camera_distance_mm"]),
@@ -363,6 +384,11 @@ def main() -> None:
         default="joint_sample_percentile_99.9",
     )
     parser.add_argument("--coverage_gamma", type=float, default=1.0)
+    parser.add_argument(
+        "--view_fusion",
+        choices=["arithmetic_mean", "geometric_mean", "harmonic_mean"],
+        default="arithmetic_mean",
+    )
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir).expanduser()
@@ -390,6 +416,7 @@ def main() -> None:
         "overwrite": args.overwrite,
         "normalization": args.normalization,
         "coverage_gamma": args.coverage_gamma,
+        "view_fusion": args.view_fusion,
         "candidate_top_m": args.candidate_top_m,
         "candidate_smoothing_sigma_cells": args.candidate_smoothing_sigma_cells,
         "candidate_smoothing_sigma_mm": args.candidate_smoothing_sigma_mm,

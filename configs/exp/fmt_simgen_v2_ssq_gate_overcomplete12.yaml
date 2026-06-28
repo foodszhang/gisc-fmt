@@ -1,0 +1,45 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_32gb
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_overcomplete12
+description: Full SSQ-FMT with an overcomplete measurement-derived candidate set
+
+data:
+  sample_num: 2048
+  num_queries: 2048
+  eval_sample_num: 2048
+  query_sampling:
+    num_queries: ${data.num_queries}
+  ssq_candidates:
+    top_m: 12
+    reextract_candidates: true
+    smoothing_sigma_cells: 3.0
+    nms_radius_mm: 5.0
+    support_moment_radius_mm: 4.0
+    min_value_ratio: 0.02
+
+model:
+  ssq_fmt:
+    candidates:
+      mmax: 12
+    routing:
+      query_chunk_size: 2048
+      active_candidate_top_k: 3
+    representation:
+      query_chunk_size: 2048
+    fusion:
+      query_chunk_size: 2048
+    decoder:
+      query_chunk_size: 2048
+
+optim:
+  lr: 0.00001
+  scheduler:
+    warmup_epochs: 0
+
+trainer:
+  max_epochs: 2
+  check_val_every_n_epoch: 1

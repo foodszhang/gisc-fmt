@@ -64,6 +64,53 @@ def _support_scale_mm(
     return max(moment, float(np.mean(cell_size_mm)))
 
 
+def candidate_support_covariances_mm(
+    heatmap: np.ndarray,
+    centers_mm: np.ndarray,
+    valid: np.ndarray,
+    cell_size_mm: np.ndarray,
+    radius_mm: float,
+    *,
+    scale_min_mm: float = 1.0,
+    scale_max_mm: float = 12.0,
+) -> np.ndarray:
+    """Estimate anisotropic candidate support from local proposal-heatmap moments."""
+    heat = np.clip(np.nan_to_num(heatmap.astype(np.float32), nan=0.0), 0.0, None)
+    cell_size = np.asarray(cell_size_mm, dtype=np.float32)
+    covariances = np.zeros((len(centers_mm), 3, 3), dtype=np.float32)
+    fallback = np.eye(3, dtype=np.float32) * float(scale_min_mm) ** 2
+    radius_cells = np.maximum(np.ceil(float(radius_mm) / cell_size).astype(np.int64), 1)
+    for index, center_mm in enumerate(np.asarray(centers_mm, dtype=np.float32)):
+        covariances[index] = fallback
+        if not bool(valid[index]):
+            continue
+        center_cell = center_mm / cell_size - 0.5
+        lo = np.maximum(np.floor(center_cell).astype(np.int64) - radius_cells, 0)
+        hi = np.minimum(
+            np.ceil(center_cell).astype(np.int64) + radius_cells + 1,
+            np.asarray(heat.shape),
+        )
+        slices = tuple(slice(int(a), int(b)) for a, b in zip(lo, hi, strict=True))
+        local = heat[slices]
+        weights = local.reshape(-1).astype(np.float64)
+        if local.size == 0 or float(weights.sum()) <= 0.0:
+            continue
+        coords = np.stack(
+            np.meshgrid(*[np.arange(s.start, s.stop) for s in slices], indexing="ij"),
+            axis=-1,
+        )
+        coords_mm = (coords.reshape(-1, 3).astype(np.float32) + 0.5) * cell_size[None]
+        relative = coords_mm - center_mm[None]
+        covariance = (relative.T * weights) @ relative / weights.sum()
+        # Preserve the old radial-RMS scale when the local support is isotropic.
+        covariance = 3.0 * covariance
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance.astype(np.float64))
+        eigenvalues = np.clip(eigenvalues, float(scale_min_mm) ** 2, float(scale_max_mm) ** 2)
+        covariance = (eigenvectors * eigenvalues[None]) @ eigenvectors.T
+        covariances[index] = covariance.astype(np.float32)
+    return covariances
+
+
 def extract_candidate_anchors(
     heatmap: np.ndarray,
     metadata: dict[str, Any],

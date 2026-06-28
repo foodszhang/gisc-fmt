@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import torch
 
 from minr_fmt.models.ssq_fmt import SSQFMT
@@ -39,3 +41,28 @@ def test_low_lambda_candidate_keeps_assignment_and_decoder_gradients():
     assert (out["diagnostics"]["pi"][..., 1:] > 0).any()
     assert _has_grad(model.assignment_head.candidate_assignment_head)
     assert _has_grad(model.candidate_density_decoder)
+
+
+def test_independent_compensation_is_invariant_to_candidate_centers():
+    cfg = make_cfg(mmax=2)
+    cfg.model.ssq_fmt.routing = {"compensation_routing_mode": "independent"}
+    model = SSQFMT(cfg).eval()
+    batch_a = make_batch(mmax=2)
+    batch_b = deepcopy(batch_a)
+    batch_b["candidate_centers_mm"] = batch_a["candidate_centers_mm"] + 8.0
+    with torch.no_grad():
+        out_a = model(
+            batch_a["surface_measurements_packed"],
+            batch_a["query_coordinates_mm"],
+            batch=batch_a,
+            return_diagnostics=True,
+        )
+        out_b = model(
+            batch_b["surface_measurements_packed"],
+            batch_b["query_coordinates_mm"],
+            batch=batch_b,
+            return_diagnostics=True,
+        )
+    d0_a = out_a["diagnostics"]["branch_density"][:, :, 0]
+    d0_b = out_b["diagnostics"]["branch_density"][:, :, 0]
+    assert torch.allclose(d0_a, d0_b, atol=1.0e-6, rtol=1.0e-6)

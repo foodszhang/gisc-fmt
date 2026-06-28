@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_responsibility
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_forced_responsibility
+description: Candidate responsibility gate with a frozen compensation density decoder
+
+model:
+  finetune:
+    freeze_modules:
+      - compensation_density_decoder
+
+loss:
+  candidate_assignment_weight: 2.0
+  candidate_assignment_min_prior: 0.05
+  candidate_branch_density_weight: 1.0
+  candidate_branch_dice_weight: 0.25
+  candidate_branch_target_mode: best_positive_prior
+
+optim:
+  lr: 0.00005

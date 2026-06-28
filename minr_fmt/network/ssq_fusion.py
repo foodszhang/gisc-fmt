@@ -21,6 +21,7 @@ class CandidateViewEncoder(nn.Module):
         blocks: int = 3,
         dropout: float = 0.0,
         query_chunk_size: int = 4096,
+        checkpoint_representation: bool = False,
     ):
         super().__init__()
         self.representation_net = make_residual_mlp(
@@ -31,6 +32,7 @@ class CandidateViewEncoder(nn.Module):
             dropout=dropout,
         )
         self.query_chunk_size = int(query_chunk_size)
+        self.checkpoint_representation = bool(checkpoint_representation)
 
     def forward(
         self,
@@ -67,15 +69,11 @@ class CandidateViewEncoder(nn.Module):
         mb = zeta.shape[-1]
         offsets = samples["offsets_template"].to(device=f.device, dtype=f.dtype)
         offsets = offsets / offsets.abs().amax().clamp_min(1.0)
-        local = torch.cat(
-            [
-                f[:, :, :, :, None].expand(b, v, n, k, mb, c),
-                offsets[None, None, None, :, None].expand(b, v, n, k, mb, 2),
-            ],
-            dim=-1,
-        )
-        weighted = (a_kernel[..., None, None] * zeta[..., None] * local).sum(dim=3)
-        pooled = weighted / router["a"].clamp_min(1e-8)[..., None]
+        assignment = a_kernel[..., None] * zeta
+        pooled_features = torch.einsum("bvnkm,bvnkc->bvnmc", assignment, f)
+        pooled_offsets = torch.einsum("bvnkm,kd->bvnmd", assignment, offsets)
+        pooled = torch.cat([pooled_features, pooled_offsets], dim=-1)
+        pooled = pooled / router["a"].clamp_min(1e-8)[..., None]
         geom = torch.stack(
             [
                 mapped["detector_side_path_proxy"],
@@ -86,7 +84,7 @@ class CandidateViewEncoder(nn.Module):
         stats = torch.stack([router["a"], router["nu"]], dim=-1)
         rel = router["relative_query"][:, None].expand(b, v, n, mb, 3)
         rep_in = torch.cat([pooled, stats, rel, geom], dim=-1)
-        if self.training and rep_in.requires_grad:
+        if self.checkpoint_representation and self.training and rep_in.requires_grad:
             rep = checkpoint(self.representation_net, rep_in, use_reentrant=False)
         else:
             rep = self.representation_net(rep_in)
@@ -150,6 +148,7 @@ class CandidateSpecificViewFusion(nn.Module):
         hidden_dim: int = 128,
         mode: str = "candidate_specific",
         query_chunk_size: int = 4096,
+        checkpoint_fusion: bool = False,
     ):
         super().__init__()
         self.transform = make_residual_mlp(
@@ -159,6 +158,7 @@ class CandidateSpecificViewFusion(nn.Module):
         zero_init_last_linear(self.cross_view_fusion)
         self.mode = str(mode)
         self.query_chunk_size = int(query_chunk_size)
+        self.checkpoint_fusion = bool(checkpoint_fusion)
 
     def forward(
         self,
@@ -199,7 +199,7 @@ class CandidateSpecificViewFusion(nn.Module):
         branch_valid: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         b, n, v, mb, c = per_view.shape
-        if self.training and per_view.requires_grad:
+        if self.checkpoint_fusion and self.training and per_view.requires_grad:
             h = checkpoint(self.transform, per_view, use_reentrant=False)
         else:
             h = self.transform(per_view)
@@ -214,7 +214,7 @@ class CandidateSpecificViewFusion(nn.Module):
             (sum_support - support_valid)[..., None] > 0.0, loo, torch.zeros_like(loo)
         )
         correction_in = torch.cat([h, loo, h - loo, h * loo], dim=-1)
-        if self.training and correction_in.requires_grad:
+        if self.checkpoint_fusion and self.training and correction_in.requires_grad:
             correction = checkpoint(self.cross_view_fusion, correction_in, use_reentrant=False)
         else:
             correction = self.cross_view_fusion(correction_in)
@@ -244,6 +244,10 @@ class CandidateAssignmentHead(nn.Module):
         support_logit_weight: float = 1.0,
         tau0: float = 0.25,
         tau_p: float = 1.0,
+        measurement_consistency_logit_weight: float = 0.0,
+        active_candidate_top_k: int = 0,
+        occupancy_evidence_weight: float = 0.0,
+        occupancy_evidence_floor: float = 0.05,
     ):
         super().__init__()
         self.compensation_assignment_head = make_residual_mlp(
@@ -258,6 +262,23 @@ class CandidateAssignmentHead(nn.Module):
         self.support_logit_weight = float(support_logit_weight)
         self.tau0 = float(tau0)
         self.tau_p = float(tau_p)
+        self.measurement_consistency_logit_weight = float(
+            measurement_consistency_logit_weight
+        )
+        self.active_candidate_top_k = int(active_candidate_top_k)
+        self.occupancy_evidence_weight = float(occupancy_evidence_weight)
+        self.occupancy_evidence_floor = float(occupancy_evidence_floor)
+
+    def apply_occupancy_evidence(
+        self, prior_pi: torch.Tensor, branch_density: torch.Tensor
+    ) -> torch.Tensor:
+        """Convert geometric assignment into a density-evidence candidate posterior."""
+        if self.occupancy_evidence_weight <= 0.0:
+            return prior_pi
+        evidence = branch_density.squeeze(-1).clamp(self.occupancy_evidence_floor, 1.0)
+        log_posterior = prior_pi.clamp_min(1.0e-8).log()
+        log_posterior = log_posterior + self.occupancy_evidence_weight * evidence.log()
+        return torch.softmax(log_posterior, dim=-1)
 
     def forward(
         self,
@@ -282,9 +303,10 @@ class CandidateAssignmentHead(nn.Module):
         pi0 = torch.sigmoid(self.tau0 * torch.logit(p0) + comp_delta)
         if m == 0:
             return torch.ones((b, n, 1), dtype=z.dtype, device=z.device)
-        rel = (points_mm[:, :, None] - candidates["candidate_centers_mm"][:, None]) / candidates[
-            "candidate_support_scales_mm"
-        ][:, None, :, None].clamp_min(1e-6)
+        delta = points_mm[:, :, None] - candidates["candidate_centers_mm"][:, None]
+        rel = torch.einsum(
+            "bnmi,bmij->bnmj", delta, candidates["candidate_support_inverse_sqrt_mm"]
+        )
         cand_visible = router.get("candidate_geometric_visible")
         if cand_visible is None:
             cand_visible = lam[:, :, 1:] > 0.0
@@ -292,6 +314,13 @@ class CandidateAssignmentHead(nn.Module):
         support_gate = torch.sigmoid(
             (lam[:, :, 1:] - self.support_center) / max(self.support_temperature, 1e-6)
         )
+        if 0 < self.active_candidate_top_k < m:
+            activation_score = p_all[..., 1:] * support_gate
+            top_indices = activation_score.topk(self.active_candidate_top_k, dim=-1).indices
+            top_mask = torch.zeros_like(cand_active).scatter(
+                dim=-1, index=top_indices, value=True
+            )
+            cand_active = cand_active & top_mask
         cand_delta = torch.tanh(
             self.candidate_assignment_head(
                 torch.cat([z[:, :, 1:], rel, lam[:, :, 1:, None]], dim=-1)
@@ -302,6 +331,11 @@ class CandidateAssignmentHead(nn.Module):
             + self.support_logit_weight * torch.log(support_gate.clamp_min(self.p_min))
             + cand_delta
         )
+        if self.measurement_consistency_logit_weight != 0.0:
+            consistency = router["measurement_consistency"].clamp(self.p_min, 1.0)
+            cand_logits = cand_logits + self.measurement_consistency_logit_weight * torch.log(
+                consistency
+            )
         cand_pi = masked_softmax(cand_logits, cand_active, dim=-1)
         has_cand = cand_active.any(dim=-1, keepdim=True) & ~no_valid_views[..., None]
         pi0 = torch.where(has_cand, pi0, torch.ones_like(pi0))

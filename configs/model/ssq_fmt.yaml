@@ -21,16 +21,14 @@ ssq_fmt:
     normalization: per_view_max
 
   normalization:
+    mode: per_view_max
     percentile: 99.9
+    candidate_percentile: 99.9
     eps: 1.0e-6
 
   encoder:
     type: residual_unet_pyramid_fusion
-    stem_channels: 32
-    stage_channels: [48, 96, 192, 256]
-    stage_blocks: [2, 2, 3, 3]
-    pyramid_channels: 64
-    output_channels: 96
+    profile: base
     norm: group
     activation: silu
     skip_fusion: concat
@@ -95,20 +93,38 @@ ssq_fmt:
     support_logit_weight: 1.0
     tau0: 0.25
     tau_p: 1.0
+    measurement_consistency_temperature: 0.15
+    measurement_consistency_logit_weight: 0.0
+    active_candidate_top_k: 0
+    occupancy_evidence_weight: 0.0
+    occupancy_evidence_floor: 0.05
+    compensation_routing_mode: joint
     query_chunk_size: 4096
 
   representation:
-    hidden_dim: 128
+    hidden_dim: 96
     blocks: 3
-    expansion: 2
     dropout: 0.0
     query_chunk_size: 4096
 
   decoder:
     positive_ratio_init: 0.03
+    query_chunk_size: 4096
+
+  candidate_field:
+    mode: independent
+    support_envelope_power: 0.0
 
   fusion:
     mode: candidate_specific
+    query_chunk_size: 4096
+
+  memory:
+    checkpoint_encoder: true
+    checkpoint_routing: false
+    checkpoint_representation: false
+    checkpoint_fusion: false
+    checkpoint_decoder: false
 
   reliability:
     mode: evidence

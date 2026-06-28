@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_32gb
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_assignment
+description: Short Full SSQ-FMT gate with positive-query candidate responsibility
+
+loss:
+  candidate_assignment_weight: 0.25
+  candidate_assignment_min_prior: 0.05
+  candidate_branch_density_weight: 0.0
+  candidate_branch_dice_weight: 0.0
+
+optim:
+  lr: 0.00001
+  scheduler:
+    warmup_epochs: 0
+
+trainer:
+  max_epochs: 2
+  check_val_every_n_epoch: 1

@@ -7,6 +7,8 @@ from typing import Any
 import torch
 import torch.nn as nn
 
+from minr_fmt.network.ssq_geometry import sample_scalar_map
+
 
 class MeasurementDerivedCandidateBuilder(nn.Module):
     def __init__(
@@ -61,6 +63,21 @@ class MeasurementDerivedCandidateBuilder(nn.Module):
             valid[:, :m] = scores[:, :m] > self.threshold
 
         clipped = raw_scales.clamp(self.scale_min_mm, self.scale_max_mm)
+        covariance = torch.diag_embed(clipped.square()[..., None].expand(-1, -1, 3))
+        if batch is not None and "candidate_support_covariances_mm" in batch:
+            covariance[:, :m] = batch["candidate_support_covariances_mm"][:, :m].to(
+                device=device, dtype=dtype
+            )
+        eigenvalues, eigenvectors = torch.linalg.eigh(covariance.float())
+        eigenvalues = eigenvalues.clamp(self.scale_min_mm**2, self.scale_max_mm**2)
+        eigenvectors = eigenvectors.to(dtype=dtype)
+        eigenvalues = eigenvalues.to(dtype=dtype)
+        covariance = eigenvectors @ torch.diag_embed(eigenvalues) @ eigenvectors.transpose(-1, -2)
+        inverse_sqrt = (
+            eigenvectors
+            @ torch.diag_embed(eigenvalues.rsqrt())
+            @ eigenvectors.transpose(-1, -2)
+        )
         return {
             "candidate_centers_mm": centers,
             "candidate_scores": scores.clamp(0.0, 1.0),
@@ -68,6 +85,8 @@ class MeasurementDerivedCandidateBuilder(nn.Module):
             "candidate_support_scales_mm": clipped,
             "candidate_raw_scales_mm": raw_scales,
             "candidate_scales_mm": clipped,
+            "candidate_support_covariances_mm": covariance,
+            "candidate_support_inverse_sqrt_mm": inverse_sqrt,
             "candidate_valid_mask": valid,
             "candidate_support_scale_low_clip": raw_scales < self.scale_min_mm,
             "candidate_support_scale_high_clip": raw_scales > self.scale_max_mm,
@@ -81,6 +100,7 @@ def attach_candidate_detector_priors(
     cand_mapped: dict[str, torch.Tensor],
     detector_scale_min_px: float,
     detector_scale_max_px: float,
+    measurements: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     if candidates["candidate_centers_mm"].shape[1] == 0:
         return candidates
@@ -90,7 +110,20 @@ def attach_candidate_detector_priors(
         device=candidates["candidate_support_scales_mm"].device,
         dtype=candidates["candidate_support_scales_mm"].dtype,
     )
-    scale_px = candidates["candidate_support_scales_mm"][:, None, :] * pixels_per_mm[None, :, None]
+    covariance = candidates["candidate_support_covariances_mm"]
+    rays = cand_mapped["ray_directions"]
+    ray_variance = torch.einsum("bvmi,bmij,bvmj->bvm", rays, covariance, rays)
+    plane_variance = (covariance.diagonal(dim1=-2, dim2=-1).sum(dim=-1)[:, None] - ray_variance)
+    scale_mm = (0.5 * plane_variance.clamp_min(1.0e-8)).sqrt()
+    scale_px = scale_mm * pixels_per_mm[None, :, None]
     clipped = scale_px.clamp(float(detector_scale_min_px), float(detector_scale_max_px))
     candidates["candidate_detector_support_scales_px"] = clipped
+    if measurements is not None:
+        center_measurements = sample_scalar_map(measurements, cand_mapped["grid"])
+        center_measurements = torch.where(
+            cand_mapped["valid_mask"],
+            center_measurements.clamp_min(0.0),
+            torch.zeros_like(center_measurements),
+        )
+        candidates["candidate_center_measurements"] = center_measurements
     return candidates
