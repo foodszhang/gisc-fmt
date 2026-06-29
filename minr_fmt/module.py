@@ -1177,6 +1177,25 @@ class TrainingLightningModule(LightningModule):
             out = self._call_ssq_model(batch, return_diagnostics=False)
             pred_prob = out["density"].clamp(0.0, 1.0)
             diagnostics = out.get("diagnostics", out.get("aux_outputs", {}))
+            validation_loss = self.ssq_loss_func(
+                pred_prob,
+                point_densities.unsqueeze(-1),
+                diagnostics,
+                gt_voxels=batch.get("gt_voxels"),
+                points_ijk=batch.get("points_ijk"),
+                query_component_ids=batch.get("query_component_ids"),
+                gt_component_centers_mm=batch.get("gt_component_centers_mm"),
+                gt_component_valid_mask=batch.get("gt_component_valid_mask"),
+            )
+            self.log(
+                "val_formal_density_loss",
+                validation_loss["total_loss"],
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            if torch.is_tensor(diagnostics.get("candidate_centers_mm")):
+                self._log_view_candidate_metrics(diagnostics, batch)
             full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
             if full_grid:
                 density_gt = point_densities.reshape(voxel_shape_tuple)
@@ -1223,6 +1242,7 @@ class TrainingLightningModule(LightningModule):
                     on_epoch=True,
                     sync_dist=True,
                 )
+            if "proposal_gate" in diagnostics:
                 gate = diagnostics["proposal_gate"].detach().float().reshape(-1)
                 applicability = diagnostics["candidate_applicability"].detach().float()
                 dispersion = diagnostics["quotient_dispersion"].detach().float()
@@ -1382,7 +1402,142 @@ class TrainingLightningModule(LightningModule):
         per_tensor = torch._foreach_norm(gradients, 2.0)
         return torch.stack([value.float() for value in per_tensor]).norm(2.0)
 
+    def _log_view_candidate_metrics(self, diagnostics: dict, batch: dict) -> None:
+        gt_centers = batch.get("gt_component_centers_mm")
+        gt_valid = batch.get("gt_component_valid_mask")
+        if not torch.is_tensor(gt_centers) or not torch.is_tensor(gt_valid):
+            return
+        centers = diagnostics["candidate_centers_mm"].detach().float()
+        valid = diagnostics["candidate_valid_mask"].detach().bool()
+        scores: dict[str, list[torch.Tensor]] = {
+            "coverage_6mm": [],
+            "coverage_8mm": [],
+            "coverage_10mm": [],
+            "duplicate_rate": [],
+            "unmatched_rate": [],
+            "matched_center_error_mm": [],
+        }
+        for sample in range(centers.shape[0]):
+            predicted = centers[sample, valid[sample]]
+            target = gt_centers[sample, gt_valid[sample]].float()
+            if predicted.numel() == 0 or target.numel() == 0:
+                zero = centers.new_zeros(())
+                for radius in (6, 8, 10):
+                    scores[f"coverage_{radius}mm"].append(zero)
+                scores["duplicate_rate"].append(zero)
+                scores["unmatched_rate"].append(centers.new_ones(()))
+                scores["matched_center_error_mm"].append(centers.new_tensor(float("nan")))
+                continue
+            distance = torch.cdist(predicted, target)
+            nearest_target = distance.amin(dim=0)
+            nearest_candidate = distance.amin(dim=1)
+            for radius in (6, 8, 10):
+                scores[f"coverage_{radius}mm"].append(
+                    (nearest_target <= radius).float().mean()
+                )
+            assigned = distance.argmin(dim=1)
+            duplicate = torch.zeros(len(predicted), dtype=torch.bool, device=centers.device)
+            for target_index in range(len(target)):
+                members = torch.where((assigned == target_index) & (nearest_candidate <= 8.0))[0]
+                if len(members) > 1:
+                    duplicate[members] = True
+                    best = members[distance[members, target_index].argmin()]
+                    duplicate[best] = False
+            scores["duplicate_rate"].append(duplicate.float().mean())
+            scores["unmatched_rate"].append((nearest_candidate > 8.0).float().mean())
+            matched = nearest_candidate <= 8.0
+            scores["matched_center_error_mm"].append(
+                nearest_candidate[matched].mean()
+                if matched.any()
+                else centers.new_tensor(float("nan"))
+            )
+        for name, values in scores.items():
+            value = torch.stack(values)
+            finite = value[torch.isfinite(value)]
+            self.log(
+                f"val_candidate_{name}",
+                finite.mean() if finite.numel() else centers.new_zeros(()),
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+        count = valid.sum(dim=-1)
+        self.log("val_candidate_count_mean", count.float().mean(), on_epoch=True, sync_dist=True)
+        for number in range(1, centers.shape[1] + 1):
+            self.log(
+                f"val_candidate_count_{number}_ratio",
+                (count == number).float().mean(),
+                on_epoch=True,
+                sync_dist=True,
+            )
+        support = diagnostics["candidate_view_support"].detach()
+        support_count = ((support > 1.0e-4) & valid[:, :, None]).sum(dim=-1).float()
+        self.log(
+            "val_candidate_support_view_count",
+            support_count[valid].mean() if valid.any() else centers.new_zeros(()),
+            on_epoch=True,
+            sync_dist=True,
+        )
+        eigen = diagnostics["candidate_covariance_eigenvalues"].detach().float()[
+            valid[..., None].expand_as(diagnostics["candidate_covariance_eigenvalues"])
+        ]
+        if eigen.numel():
+            for quantile in (0.1, 0.5, 0.9):
+                self.log(
+                    f"val_covariance_eigenvalue_p{int(quantile * 100)}",
+                    torch.quantile(eigen, quantile),
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+        for name in ("lower", "upper"):
+            hit = diagnostics[f"covariance_{name}_bound_hit"].detach()
+            self.log(
+                f"val_covariance_{name}_bound_hit_ratio",
+                hit[valid[..., None].expand_as(hit)].float().mean()
+                if valid.any()
+                else centers.new_zeros(()),
+                on_epoch=True,
+                sync_dist=True,
+            )
+
     def on_after_backward(self) -> None:
+        if (
+            self._is_ssq_model()
+            and getattr(self.net, "composition_mode", None) == "view_complementary"
+        ):
+            modules = {
+                "2d_encoder": self.net.surface_encoder,
+                "view_evidence_head": self.net.view_candidate_evidence.evidence,
+                "offset_head": self.net.view_candidate_evidence.offset,
+                "descriptor_head": self.net.view_candidate_evidence.descriptor,
+                "cross_view_association": self.net.diverse_candidate_constructor,
+                "candidate_view_encoder": self.net.complementary_aggregation.candidate_projection,
+                "separability_correction": self.net.view_separability.correction,
+                "candidate_context": self.net.unified_density_decoder.candidate_context,
+                "shared_decoder": self.net.unified_density_decoder.decoder,
+            }
+            norms = {
+                name: self._module_gradient_norm(module) for name, module in modules.items()
+            }
+            for name, value in norms.items():
+                self.log(
+                    f"train_grad_norm_{name}", value, on_step=False, on_epoch=True, sync_dist=True
+                )
+            candidate_norm = torch.stack(
+                [
+                    value
+                    for name, value in norms.items()
+                    if name not in {"2d_encoder", "shared_decoder"}
+                ]
+            ).norm()
+            self.log(
+                "train_candidate_to_shared_gradient_ratio",
+                candidate_norm / norms["shared_decoder"].clamp_min(1.0e-12),
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            return
         if (
             not self._is_ssq_model()
             or getattr(self.net, "composition_mode", None) != "quotient_residual"
@@ -1420,6 +1575,72 @@ class TrainingLightningModule(LightningModule):
         # Get optimizer config
         optim_cfg = self.cfg.optim
 
+        view_phase = getattr(self.net, "view_training_phase", None)
+        if (
+            self._is_ssq_model()
+            and getattr(self.net, "composition_mode", None) == "view_complementary"
+            and view_phase in {"phase_b", "full"}
+        ):
+            multipliers = (
+                {
+                    "encoder": 1.0,
+                    "candidate_construction": 5.0,
+                    "candidate_modules": 10.0,
+                }
+                if view_phase == "phase_b"
+                else {
+                    "encoder": 1.0,
+                    "candidate_construction": 5.0,
+                    "candidate_modules": 8.0,
+                }
+            )
+            grouped_modules = {
+                "encoder": [self.net.surface_encoder, self.net.surface_sampler],
+                "candidate_construction": [
+                    self.net.view_candidate_evidence,
+                    self.net.diverse_candidate_constructor,
+                ],
+                "candidate_modules": [
+                    self.net.complementary_aggregation,
+                    self.net.view_separability,
+                    self.net.unified_density_decoder.candidate_context,
+                ],
+            }
+            optimizer_params = []
+            used: set[int] = set()
+            for name, modules in grouped_modules.items():
+                parameters = [
+                    parameter
+                    for module in modules
+                    for parameter in module.parameters()
+                    if parameter.requires_grad and id(parameter) not in used
+                ]
+                used.update(id(parameter) for parameter in parameters)
+                if parameters:
+                    optimizer_params.append(
+                        {
+                            "params": parameters,
+                            "lr": optim_cfg.lr * multipliers[name],
+                            "name": name,
+                        }
+                    )
+            remaining = [
+                parameter
+                for parameter in self.parameters()
+                if parameter.requires_grad and id(parameter) not in used
+            ]
+            if remaining:
+                shared_multiplier = 0.0 if view_phase == "phase_b" else 3.0
+                optimizer_params.append(
+                    {
+                        "params": remaining,
+                        "lr": optim_cfg.lr * shared_multiplier,
+                        "name": "shared_decoder",
+                    }
+                )
+        else:
+            optimizer_params = None
+
         # Mean-prior residual view correction is intentionally conservative; train its
         # gate with a smaller LR when configured, without changing older experiments.
         gate_lr_mult = float(getattr(self.net, "mean_prior_gate_lr_mult", 1.0))
@@ -1435,7 +1656,9 @@ class TrainingLightningModule(LightningModule):
             for param in self.parameters()
             if param.requires_grad and id(param) not in gate_param_ids
         ]
-        if gate_params:
+        if optimizer_params is not None:
+            pass
+        elif gate_params:
             optimizer_params = []
             if base_params:
                 optimizer_params.append({"params": base_params})

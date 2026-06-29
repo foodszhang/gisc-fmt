@@ -384,9 +384,10 @@ class FmtSimGenProjDataset(Dataset):
         gt: np.ndarray,
         points_mm: np.ndarray,
         point_densities: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         max_components = self.component_supervision_max_components
         centers = np.zeros((max_components, 3), dtype=np.float32)
+        covariances = np.tile(np.eye(3, dtype=np.float32), (max_components, 1, 1))
         valid = np.zeros(max_components, dtype=np.bool_)
         tumor_path = sample_dir / "tumor_params.json"
         foci = []
@@ -397,6 +398,12 @@ class FmtSimGenProjDataset(Dataset):
             if center is not None and len(center) == 3:
                 centers[component_index] = np.asarray(center, dtype=np.float32)
                 valid[component_index] = True
+                radius = float(focus.get("radius") or 1.0)
+                scales = np.asarray(
+                    [focus.get(axis) or radius for axis in ("rx", "ry", "rz")],
+                    dtype=np.float32,
+                )
+                covariances[component_index] = np.diag(np.maximum(scales, 0.2) ** 2)
         if not valid.any():
             labels, count = ndimage.label(
                 gt > 0.5, ndimage.generate_binary_structure(3, 1)
@@ -414,6 +421,12 @@ class FmtSimGenProjDataset(Dataset):
                     coordinates.mean(axis=0) + 0.5
                 ) * self.voxel_size_mm
                 valid[component_index] = True
+                centered = (coordinates.astype(np.float32) - coordinates.mean(axis=0))
+                covariance = centered.T @ centered / max(len(centered), 1)
+                covariances[component_index] = (
+                    covariance * self.voxel_size_mm**2
+                    + np.eye(3, dtype=np.float32) * self.voxel_size_mm**2
+                )
         query_ids = np.zeros(len(points_mm), dtype=np.int64)
         positive = point_densities > 0.0
         if positive.any() and valid.any():
@@ -422,7 +435,7 @@ class FmtSimGenProjDataset(Dataset):
                 points_mm[positive, None] - centers[valid_indices][None], axis=-1
             )
             query_ids[positive] = valid_indices[distance.argmin(axis=1)] + 1
-        return query_ids, centers, valid
+        return query_ids, centers, covariances, valid
 
     def _load_stage1_prior(self, sample_dir: Path, target_shape: tuple[int, ...]):
         for rel_path in self.stage1_prior_files:
@@ -728,15 +741,20 @@ class FmtSimGenProjDataset(Dataset):
             "projection_scales": projection_scales,
             "num_foci": num_foci,
         }
-        if self.component_supervision_enabled and self.is_training:
-            component_ids, component_centers, component_valid = self._component_supervision(
-                sample_dir, gt, points_mm, point_densities
+        if self.component_supervision_enabled:
+            component_ids, component_centers, component_covariances, component_valid = (
+                self._component_supervision(
+                    sample_dir, gt, points_mm, point_densities
+                )
             )
             item["query_component_ids"] = torch.tensor(
                 component_ids, dtype=torch.long, device=self.device
             )
             item["gt_component_centers_mm"] = torch.tensor(
                 component_centers, dtype=torch.float32, device=self.device
+            )
+            item["gt_component_covariances_mm"] = torch.tensor(
+                component_covariances, dtype=torch.float32, device=self.device
             )
             item["gt_component_valid_mask"] = torch.tensor(
                 component_valid, dtype=torch.bool, device=self.device

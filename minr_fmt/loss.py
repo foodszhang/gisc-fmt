@@ -571,6 +571,9 @@ class MorphologyAwareDensityLoss(nn.Module):
             if torch.is_tensor(residual_value):
                 residual_regularization_loss = residual_value
                 total = total + self.lambda_res * residual_regularization_loss
+            complementary_value = aux_outputs.get("view_complementary_aux_loss")
+            if torch.is_tensor(complementary_value):
+                total = total + complementary_value
         candidate_branch_density_loss = pred.sum() * 0.0
         candidate_branch_dice_loss = pred.sum() * 0.0
         candidate_assignment_loss = pred.sum() * 0.0

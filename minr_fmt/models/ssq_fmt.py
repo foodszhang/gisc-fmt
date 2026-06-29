@@ -16,6 +16,8 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 
 from minr_fmt.models.gisc_multisource import GISCFMT
+from minr_fmt.network.complementary_aggregation import ComplementaryAggregation
+from minr_fmt.network.diverse_candidate_constructor import DiverseCandidateConstructor
 from minr_fmt.network.ssq_candidates import (
     MeasurementDerivedCandidateBuilder,
     attach_candidate_detector_priors,
@@ -43,6 +45,9 @@ from minr_fmt.network.ssq_fusion import (
 )
 from minr_fmt.network.ssq_geometry import GeometryQueryMapper, infer_detector_margin_map
 from minr_fmt.network.ssq_sampler import QueryDependentSurfaceSampler, local_template
+from minr_fmt.network.unified_density_decoder import UnifiedDensityDecoder
+from minr_fmt.network.view_candidate_evidence import ViewCandidateEvidence
+from minr_fmt.network.view_separability import ViewSeparability
 
 
 def _to_container(cfg: Any) -> dict[str, Any]:
@@ -197,6 +202,16 @@ class SSQFMT(nn.Module):
         root = _to_container(config)
         model_cfg = root.get("model", root)
         ssq = model_cfg.get("ssq_fmt", {})
+        requested_composition_mode = str(
+            _cfg_get(ssq, "composition.mode", "legacy_branch_mixture")
+        )
+        requested_density_mode = str(
+            _cfg_get(ssq, "density_output_mode", "candidate_scalar_composition")
+        )
+        requested_view_complementary = (
+            requested_composition_mode == "view_complementary"
+            or requested_density_mode == "view_complementary"
+        )
         data = root.get("data", {})
         view_angles = [int(v) for v in data.get("view_angles", [-90, -60, -30, 0, 30, 60, 90])]
         in_channels = int(model_cfg.get("in_channels", ssq.get("in_channels", 1)))
@@ -383,9 +398,14 @@ class SSQFMT(nn.Module):
         )
         composition_cfg = ssq.get("composition", {})
         self.composition_mode = str(composition_cfg.get("mode", "legacy_branch_mixture"))
-        if self.composition_mode not in {"legacy_branch_mixture", "quotient_residual"}:
+        if self.composition_mode not in {
+            "legacy_branch_mixture",
+            "quotient_residual",
+            "view_complementary",
+        }:
             raise ValueError(
-                "composition.mode must be 'legacy_branch_mixture' or 'quotient_residual'"
+                "composition.mode must be 'legacy_branch_mixture', 'quotient_residual', "
+                "or 'view_complementary'"
             )
         quotient_cfg = ssq.get("quotient", {})
         self.quotient_aggregator = SourceHypothesisQuotientAggregator(
@@ -446,13 +466,67 @@ class SSQFMT(nn.Module):
             query_chunk_size=decoder_chunk_size,
             checkpoint_decoder=bool(memory_cfg.get("checkpoint_decoder", False)),
         )
-        self.source_hypothesis_residual_decoder = SourceHypothesisResidualDecoder(
-            representation_dim * 2 + 6,
+        self.source_hypothesis_residual_decoder = (
+            None
+            if requested_view_complementary
+            else SourceHypothesisResidualDecoder(
+                representation_dim * 2 + 6,
+                self.position_encoding.out_dim,
+                hidden_dim,
+                positive_ratio,
+                query_chunk_size=decoder_chunk_size,
+                checkpoint_decoder=bool(memory_cfg.get("checkpoint_decoder", False)),
+            )
+        )
+        view_cfg = ssq.get("view_complementary", {})
+        self.view_complementary_ablation = str(view_cfg.get("ablation", "full"))
+        self.view_candidate_loss_weights = {
+            "candidate_covariance_loss": float(view_cfg.get("lambda_cov", 0.1)),
+            "candidate_center_loss": float(view_cfg.get("lambda_center", 1.0)),
+            "candidate_existence_loss": float(view_cfg.get("lambda_exist", 0.5)),
+            "candidate_coverage_loss": float(view_cfg.get("lambda_cover", 0.5)),
+            "candidate_duplicate_loss": float(view_cfg.get("lambda_dup", 0.1)),
+        }
+        self.view_separability_mode = str(
+            view_cfg.get("separability_mode", "geometry_measurement")
+        )
+        self.view_training_phase = str(view_cfg.get("training_phase", "phase_a"))
+        self.view_training_epoch = 0
+        self.evidence_eta0 = float(view_cfg.get("evidence_eta0", 0.25))
+        self.evidence_sigma_mm = float(view_cfg.get("evidence_sigma_mm", 3.0))
+        self.lambda_separability_measurement = float(
+            view_cfg.get("lambda_separability_measurement", 0.05)
+        )
+        self.view_candidate_evidence = ViewCandidateEvidence(
+            sample_feature_dim,
+            hidden_dim=int(view_cfg.get("hidden_dim", hidden_dim)),
+            descriptor_dim=int(view_cfg.get("descriptor_dim", 32)),
+            delta_max_mm=float(view_cfg.get("delta_max_mm", 3.0)),
+            topk_per_view=int(view_cfg.get("topk_per_view", 8)),
+            nms_radius_mm=float(view_cfg.get("nms_radius_mm", 3.0)),
+        )
+        self.diverse_candidate_constructor = DiverseCandidateConstructor(
+            mmax=int(view_cfg.get("mmax", 5)),
+            score_threshold=float(view_cfg.get("score_threshold", 0.05)),
+            sigma_nms_mm=float(view_cfg.get("sigma_nms_mm", 4.0)),
+            sigma_assoc_mm=float(view_cfg.get("sigma_assoc_mm", 5.0)),
+            sigma_min_mm=float(view_cfg.get("sigma_min_mm", 1.0)),
+            sigma_max_mm=float(view_cfg.get("sigma_max_mm", 8.0)),
+        )
+        self.view_separability = ViewSeparability(
+            sample_feature_dim,
+            hidden_dim=int(view_cfg.get("separability_hidden_dim", 64)),
+            delta_max=float(view_cfg.get("delta_s", 0.25)),
+        )
+        self.complementary_aggregation = ComplementaryAggregation(
+            sample_feature_dim,
+            representation_dim,
+            epsilon_s=float(view_cfg.get("epsilon_s", 0.1)),
+        )
+        self.unified_density_decoder = UnifiedDensityDecoder(
+            representation_dim,
             self.position_encoding.out_dim,
-            hidden_dim,
-            positive_ratio,
-            query_chunk_size=decoder_chunk_size,
-            checkpoint_decoder=bool(memory_cfg.get("checkpoint_decoder", False)),
+            hidden_dim=hidden_dim,
         )
         candidate_field_mode = str(_cfg_get(ssq, "candidate_field.mode", "independent"))
         if candidate_field_mode not in {"independent", "shared_residual"}:
@@ -509,14 +583,32 @@ class SSQFMT(nn.Module):
             "candidate_scalar_composition",
             "compensation_direct_probe",
             "e15_backbone_baseline",
+            "view_complementary",
         }:
             raise ValueError(
                 "SSQ-FMT density_output_mode must be 'candidate_scalar_composition' "
-                "'compensation_direct_probe', or 'e15_backbone_baseline'."
+                "'compensation_direct_probe', 'e15_backbone_baseline', or "
+                "'view_complementary'."
             )
         self.query_density_backbone = (
             GISCFMT(config) if self.density_output_mode == "e15_backbone_baseline" else None
         )
+        if requested_view_complementary:
+            legacy_only = (
+                self.candidate_router,
+                self.view_encoder,
+                self.view_fusion,
+                self.quotient_aggregator,
+                self.assignment_head,
+                self.compensation_density_decoder,
+                self.shared_density_logit_decoder,
+                self.candidate_density_decoder,
+                self.compensation_morphology_decoder,
+                self.candidate_morphology_decoder,
+            )
+            for module in legacy_only:
+                for parameter in module.parameters():
+                    parameter.requires_grad = False
         data_cfg = _to_container(root.get("data", {}))
         default_angles = [-90, -60, -30, 0, 30, 60, 90]
         self.view_angles = [int(v) for v in data_cfg.get("view_angles", default_angles)]
@@ -546,6 +638,8 @@ class SSQFMT(nn.Module):
                 "tau_u": self.tau_u,
             }
         )
+        if requested_view_complementary:
+            self.set_view_training_phase(self.view_training_phase)
         total_params = sum(p.numel() for p in self.parameters())
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         rank_zero_info(
@@ -636,6 +730,22 @@ class SSQFMT(nn.Module):
             detector_valid_mask=detector_valid_mask,
             depth_maps=depth_maps,
         )
+        if (
+            self.density_output_mode == "view_complementary"
+            or self.composition_mode == "view_complementary"
+        ):
+            return self._forward_view_complementary(
+                features,
+                y_norm,
+                samples,
+                mapped,
+                query_coordinates_mm,
+                detector_valid_mask,
+                depth_maps,
+                norm_scale,
+                return_diagnostics,
+                batch,
+            )
         candidates = self.candidate_builder(candidate_y_norm, batch=batch)
         if candidates["candidate_centers_mm"].shape[1] > 0:
             cand_mapped = self.geometry_mapper(
@@ -963,6 +1073,295 @@ class SSQFMT(nn.Module):
                 "lightweight_density": density,
                 "density": density,
             }
+            out["diagnostics"] = diagnostics
+        return out
+
+    def set_training_epoch(self, epoch: int) -> None:
+        self.view_training_epoch = int(epoch)
+
+    def set_view_training_phase(self, phase: str) -> None:
+        if phase not in {"phase_a", "phase_b", "full"}:
+            raise ValueError(f"unknown view-complementary training phase: {phase}")
+        self.view_training_phase = phase
+        decoder_trainable = phase != "phase_b"
+        for parameter in self.unified_density_decoder.decoder.parameters():
+            parameter.requires_grad = decoder_trainable
+
+    def _view_evidence_heatmap_loss(
+        self,
+        evidence: torch.Tensor,
+        points_mm: torch.Tensor,
+        query_valid: torch.Tensor,
+        gt_centers: torch.Tensor,
+        gt_covariances: torch.Tensor,
+        gt_valid: torch.Tensor,
+        depth_maps: torch.Tensor | None,
+        detector_valid_mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        gt_mapped = self.geometry_mapper(
+            gt_centers,
+            depth_maps=depth_maps,
+            detector_valid_mask=detector_valid_mask,
+        )
+        detector_delta = gt_mapped["grid"][:, :, :, None] - gt_mapped["grid"][:, :, None]
+        collision = torch.exp(-detector_delta.square().sum(dim=-1) / 0.02)
+        pair_valid = gt_valid[:, None, :, None] & gt_valid[:, None, None, :]
+        collision = torch.where(pair_valid, collision, torch.zeros_like(collision))
+        eye = torch.eye(gt_valid.shape[1], device=evidence.device, dtype=torch.bool)[None, None]
+        max_collision = collision.masked_fill(eye, 0.0).amax(dim=-1)
+        separability = 1.0 - max_collision
+        amplitude = self.evidence_eta0 + (1.0 - self.evidence_eta0) * separability
+        amplitude = amplitude * gt_mapped["valid_mask"].to(amplitude.dtype)
+        delta = points_mm[:, None, :, None] - gt_centers[:, None, None]
+        inverse = torch.linalg.inv(gt_covariances.float()).to(delta.dtype)
+        mahal = torch.einsum("bvnci,bcij,bvncj->bvnc", delta, inverse, delta)
+        target = torch.exp(-0.5 * mahal) * amplitude[:, :, None]
+        target = target.masked_fill(~gt_valid[:, None, None], 0.0).amax(dim=-1)
+        mask = query_valid.to(evidence.dtype)
+        prediction = evidence.float().clamp(1.0e-6, 1.0 - 1.0e-6)
+        target = target.float()
+        positive_weight = 1.0 + 9.0 * target
+        loss = -(
+            target * prediction.log() + (1.0 - target) * (1.0 - prediction).log()
+        ) * positive_weight * mask.float()
+        return loss.sum() / (positive_weight * mask).sum().clamp_min(1.0)
+
+    def _forward_view_complementary(
+        self,
+        features: torch.Tensor,
+        measurements: torch.Tensor,
+        samples: dict[str, torch.Tensor],
+        mapped: dict[str, torch.Tensor],
+        points_mm: torch.Tensor,
+        detector_valid_mask: torch.Tensor | None,
+        depth_maps: torch.Tensor | None,
+        norm_scale: torch.Tensor,
+        return_diagnostics: bool,
+        batch: dict[str, Any] | None,
+    ) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
+        """Execute the independent-view source-hypothesis information path."""
+        query_per_view = (
+            samples["sample_features"] * samples["A"][..., None]
+        ).sum(dim=3)
+        geometry = torch.stack(
+            [
+                mapped["detector_side_path_proxy"],
+                mapped["boundary_distance"].div(
+                    max(self.surface_sampler.boundary_margin_radius_px, 1.0e-6)
+                ).clamp(0.0, 1.0),
+                samples["sigma_f"].div(max(self.surface_sampler.sigma_max_px, 1.0e-6)),
+                mapped["grid"].square().sum(dim=-1).sqrt().div(2.0**0.5),
+            ],
+            dim=-1,
+        )
+        proposal = self.view_candidate_evidence(
+            query_per_view,
+            geometry,
+            points_mm,
+            samples["query_view_valid"],
+        )
+        candidates = self.diverse_candidate_constructor(proposal)
+        centers = candidates["candidate_centers_mm"]
+        candidate_mapped = self.geometry_mapper(
+            centers,
+            depth_maps=depth_maps,
+            detector_valid_mask=detector_valid_mask,
+        )
+        candidate_samples = self.surface_sampler(
+            features,
+            measurements,
+            candidate_mapped,
+            detector_valid_mask=detector_valid_mask,
+            depth_maps=depth_maps,
+        )
+        candidate_per_view = (
+            candidate_samples["sample_features"] * candidate_samples["A"][..., None]
+        ).sum(dim=3)
+        eigen_scale = (
+            torch.linalg.eigvalsh(candidates["candidate_covariances_mm"].float())
+            .clamp_min(1.0e-8)
+            .sqrt()
+            .mean(dim=-1)
+            .to(candidate_per_view.dtype)
+        )
+        px_per_mm = candidate_mapped["view_pixels_per_mm"].to(candidate_per_view.dtype)
+        detector_scale = (
+            eigen_scale[:, None] * px_per_mm[None, :, None]
+            + candidate_samples["sigma_f"]
+        )
+        separability = self.view_separability(
+            candidate_per_view,
+            candidate_mapped["grid"],
+            detector_scale,
+            candidates["candidate_valid_mask"],
+            mode=self.view_separability_mode,
+        )
+        candidate_valid_by_view = (
+            candidate_mapped["valid_mask"]
+            & candidates["candidate_valid_mask"][:, None]
+        )
+        support = candidates["candidate_view_support"].transpose(1, 2)
+        support = support * candidate_valid_by_view.to(support.dtype)
+        aggregation = self.complementary_aggregation(
+            query_per_view,
+            candidate_per_view,
+            samples["query_view_valid"],
+            support,
+            separability["separability"],
+            candidates["candidate_valid_mask"],
+            candidate_view_valid=candidate_valid_by_view,
+            uniform_views=self.view_complementary_ablation in {"a2", "uniform_views"},
+        )
+        active_phase = self.view_training_phase
+        if active_phase == "phase_b":
+            aggregation["shared"] = aggregation["shared"].detach()
+        decoder_ablation = self.view_complementary_ablation
+        if active_phase == "phase_a":
+            decoder_ablation = "shared_only"
+        trunk = torch.tensor(self.trunk_size_mm, device=points_mm.device, dtype=points_mm.dtype)
+        encoded_points = self.position_encoding(
+            (points_mm / trunk.clamp_min(1.0e-6)).mul(2.0).sub(1.0)
+        )
+        decoded = self.unified_density_decoder(
+            aggregation["shared"],
+            aggregation["candidate"],
+            points_mm,
+            encoded_points,
+            centers,
+            candidates["candidate_covariances_mm"],
+            candidates["candidate_scores"],
+            candidates["candidate_valid_mask"],
+            ablation=decoder_ablation,
+        )
+        shared_decoded = self.unified_density_decoder(
+            aggregation["shared"],
+            aggregation["candidate"].detach() * 0.0,
+            points_mm,
+            encoded_points,
+            centers,
+            candidates["candidate_covariances_mm"],
+            candidates["candidate_scores"] * 0.0,
+            candidates["candidate_valid_mask"] & False,
+            ablation="shared_only",
+        )
+        aux_outputs: dict[str, torch.Tensor] = {
+            "shared_density": shared_decoded["density"],
+            "candidate_centers_mm": centers,
+            "candidate_covariances_mm": candidates["candidate_covariances_mm"],
+            "candidate_covariance_eigenvalues": candidates[
+                "candidate_covariance_eigenvalues"
+            ],
+            "covariance_lower_bound_hit": candidates["covariance_lower_bound_hit"],
+            "covariance_upper_bound_hit": candidates["covariance_upper_bound_hit"],
+            "candidate_scores": candidates["candidate_scores"],
+            "candidate_valid_mask": candidates["candidate_valid_mask"],
+            "candidate_view_support": candidates["candidate_view_support"],
+            "proposal_assignment": candidates["proposal_assignment"],
+            "per_view_evidence": proposal["evidence"],
+            "proposal_points_mm": proposal["proposal_points_mm"],
+            "proposal_valid_mask": proposal["proposal_valid_mask"],
+            "candidate_view_features": candidate_per_view,
+            "candidate_quotients": aggregation["candidate"],
+            "shared_quotient": aggregation["shared"],
+            "view_weights": aggregation["view_weights"],
+            "separability": separability["separability"],
+            "pair_separability": separability["pair_separability"],
+            "geometry_separability": separability["geometry"],
+            "measurement_separability_correction": separability["correction"],
+            "candidate_context": decoded["candidate_context"],
+            "candidate_alpha": decoded["alpha"],
+            "measurement_supported": samples["query_view_valid"].any(dim=1),
+            "view_complementary_mode": torch.ones((), device=points_mm.device),
+        }
+        normalized_candidate_features = torch.nn.functional.normalize(
+            candidate_per_view.float(), dim=-1
+        )
+        feature_cosine = torch.einsum(
+            "bvmd,bvnd->bvmn",
+            normalized_candidate_features,
+            normalized_candidate_features,
+        )
+        measurement_correction_target = (
+            self.view_separability.delta_max
+            * 0.5
+            * (1.0 - feature_cosine.detach())
+        )
+        pair_valid = (
+            candidates["candidate_valid_mask"][:, None, :, None]
+            & candidates["candidate_valid_mask"][:, None, None, :]
+        )
+        pair_eye = torch.eye(
+            centers.shape[1], device=points_mm.device, dtype=torch.bool
+        )[None, None]
+        pair_train = (pair_valid & ~pair_eye).expand_as(
+            separability["pair_separability"]
+        )
+        separability_measurement_loss = (
+            torch.nn.functional.smooth_l1_loss(
+                separability["correction"],
+                measurement_correction_target,
+                reduction="none",
+            )[pair_train].mean()
+            if pair_train.any()
+            else decoded["density"].sum() * 0.0
+        )
+        aux_outputs["separability_measurement_loss"] = separability_measurement_loss
+        if (
+            self.training
+            and batch is not None
+            and torch.is_tensor(batch.get("gt_component_centers_mm"))
+            and torch.is_tensor(batch.get("gt_component_valid_mask"))
+        ):
+            gt_covariances = batch.get("gt_component_covariances_mm")
+            if not torch.is_tensor(gt_covariances):
+                gt_covariances = torch.eye(3, device=points_mm.device)[None, None].expand(
+                    points_mm.shape[0], batch["gt_component_centers_mm"].shape[1], -1, -1
+                )
+            evidence_loss = self._view_evidence_heatmap_loss(
+                proposal["evidence"],
+                points_mm,
+                samples["query_view_valid"],
+                batch["gt_component_centers_mm"].to(device=points_mm.device),
+                gt_covariances.to(device=points_mm.device),
+                batch["gt_component_valid_mask"].to(device=points_mm.device),
+                depth_maps,
+                detector_valid_mask,
+            )
+            aux_outputs["view_evidence_heatmap_loss"] = evidence_loss
+            candidate_losses = self.diverse_candidate_constructor.supervision_losses(
+                candidates,
+                batch["gt_component_centers_mm"].to(device=points_mm.device),
+                batch["gt_component_valid_mask"].to(device=points_mm.device),
+                gt_covariances.to(device=points_mm.device),
+            )
+            aux_outputs.update(candidate_losses)
+            if active_phase == "phase_a" and self.view_training_epoch == 0:
+                aux_outputs["view_complementary_aux_loss"] = evidence_loss
+            else:
+                aux_outputs["view_complementary_aux_loss"] = evidence_loss + sum(
+                    self.view_candidate_loss_weights[key] * value
+                    for key, value in candidate_losses.items()
+                )
+                if active_phase in {"phase_b", "full"}:
+                    aux_outputs["view_complementary_aux_loss"] = (
+                        aux_outputs["view_complementary_aux_loss"]
+                        + self.lambda_separability_measurement
+                        * separability_measurement_loss
+                    )
+        out: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {
+            "density": decoded["density"],
+            "aux_outputs": aux_outputs,
+        }
+        if return_diagnostics:
+            diagnostics = dict(aux_outputs)
+            diagnostics.update(
+                {
+                    "normalization_scale": norm_scale,
+                    "candidate_sample_coordinates": candidate_samples["sample_coordinates"],
+                    "candidate_detector_centers": candidate_mapped["grid"],
+                    "candidate_detector_scales": detector_scale,
+                }
+            )
             out["diagnostics"] = diagnostics
         return out
 
