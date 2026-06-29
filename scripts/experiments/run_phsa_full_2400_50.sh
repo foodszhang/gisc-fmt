@@ -100,7 +100,7 @@ LAST_CKPT="${RUN_DIR}/checkpoints/last.ckpt"
 log "PHSA full training"
 log "Implementation: ablation=a3_geometry_only, separability=geometry_only"
 log "Direct view reliability: valid_view * (epsilon + geometry_separability); no support multiplier"
-log "Support remains only through measurement-derived hypothesis construction/existence scoring"
+log "Support remains through measurement-derived hypothesis construction and existence scoring"
 log "Train samples=${TRAIN_SAMPLES}, val samples=${VAL_SAMPLES}, epochs=${MAX_EPOCHS}"
 log "Initialization checkpoint: ${INIT_CKPT_RESOLVED}"
 log "Run directory: ${RUN_DIR}"
@@ -142,11 +142,11 @@ else
     model.ssq_fmt.view_complementary.training_phase=full
     model.ssq_fmt.view_complementary.ablation=a3_geometry_only
     model.ssq_fmt.view_complementary.separability_mode=geometry_only
-    model.ssq_fmt.view_complementary.hypothesis_grid.enabled=false
-    model.ssq_fmt.view_complementary.routing.enabled=false
-    model.ssq_fmt.view_complementary.continuous_applicability=false
-    model.ssq_fmt.view_complementary.candidate_hidden_injection=true
-    model.ssq_fmt.view_complementary.context_warmup_enabled=false
+    "++model.ssq_fmt.view_complementary.hypothesis_grid.enabled=false"
+    "++model.ssq_fmt.view_complementary.routing.enabled=false"
+    "++model.ssq_fmt.view_complementary.continuous_applicability=false"
+    "++model.ssq_fmt.view_complementary.candidate_hidden_injection=true"
+    "++model.ssq_fmt.view_complementary.context_warmup_enabled=false"
     model.ssq_fmt.view_complementary.lambda_separability_measurement=0.0
     model.ssq_fmt.view_complementary.lr.encoder=0.000005
     model.ssq_fmt.view_complementary.lr.constructor=0.00001
