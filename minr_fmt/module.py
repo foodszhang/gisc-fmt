@@ -474,6 +474,10 @@ class TrainingLightningModule(LightningModule):
         return str(getattr(self.cfg.model, "name", "")).lower() == "ssq_fmt"
 
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        routing_key = "net.bounded_view_routing.routing_gain_raw"
+        if routing_key in self.state_dict() and routing_key not in state_dict:
+            state_dict = dict(state_dict)
+            state_dict[routing_key] = self.state_dict()[routing_key]
         if self._is_ssq_model() and not strict:
             missing = sorted(set(self.state_dict().keys()) - set(state_dict.keys()))
             unexpected = sorted(set(state_dict.keys()) - set(self.state_dict().keys()))
@@ -1449,7 +1453,11 @@ class TrainingLightningModule(LightningModule):
         if not torch.is_tensor(gt_centers) or not torch.is_tensor(gt_valid):
             return
         centers = diagnostics["candidate_centers_mm"].detach().float()
-        valid = diagnostics["candidate_valid_mask"].detach().bool()
+        valid = (
+            diagnostics.get("candidate_analysis_valid_mask", diagnostics["candidate_valid_mask"])
+            .detach()
+            .bool()
+        )
         scores: dict[str, list[torch.Tensor]] = {
             "coverage_6mm": [],
             "coverage_8mm": [],
@@ -1473,9 +1481,7 @@ class TrainingLightningModule(LightningModule):
             nearest_target = distance.amin(dim=0)
             nearest_candidate = distance.amin(dim=1)
             for radius in (6, 8, 10):
-                scores[f"coverage_{radius}mm"].append(
-                    (nearest_target <= radius).float().mean()
-                )
+                scores[f"coverage_{radius}mm"].append((nearest_target <= radius).float().mean())
             assigned = distance.argmin(dim=1)
             duplicate = torch.zeros(len(predicted), dtype=torch.bool, device=centers.device)
             for target_index in range(len(target)):
@@ -1519,9 +1525,37 @@ class TrainingLightningModule(LightningModule):
             on_epoch=True,
             sync_dist=True,
         )
-        eigen = diagnostics["candidate_covariance_eigenvalues"].detach().float()[
-            valid[..., None].expand_as(diagnostics["candidate_covariance_eigenvalues"])
-        ]
+        if torch.is_tensor(diagnostics.get("routing_residual")):
+            residual = diagnostics["routing_residual"].detach().float().abs().flatten()
+            gate = diagnostics["hypothesis_gate"].detach().float().flatten()
+            self.log(
+                "val_routing_residual_abs_mean", residual.mean(), on_epoch=True, sync_dist=True
+            )
+            self.log(
+                "val_routing_residual_abs_p90",
+                torch.quantile(residual, 0.9),
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log("val_hypothesis_gate_mean", gate.mean(), on_epoch=True, sync_dist=True)
+            for q in (0.1, 0.5, 0.9):
+                self.log(
+                    f"val_hypothesis_gate_p{int(q * 100)}",
+                    torch.quantile(gate, q),
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+            self.log(
+                "val_routing_gain",
+                self.net.bounded_view_routing.routing_gain_raw.detach(),
+                on_epoch=True,
+                sync_dist=True,
+            )
+        eigen = (
+            diagnostics["candidate_covariance_eigenvalues"]
+            .detach()
+            .float()[valid[..., None].expand_as(diagnostics["candidate_covariance_eigenvalues"])]
+        )
         if eigen.numel():
             for quantile in (0.1, 0.5, 0.9):
                 self.log(
@@ -1557,9 +1591,7 @@ class TrainingLightningModule(LightningModule):
                 "candidate_context": self.net.unified_density_decoder.candidate_context,
                 "shared_decoder": self.net.unified_density_decoder.head,
             }
-            norms = {
-                name: self._module_gradient_norm(module) for name, module in modules.items()
-            }
+            norms = {name: self._module_gradient_norm(module) for name, module in modules.items()}
             for name, value in norms.items():
                 self.log(
                     f"train_grad_norm_{name}", value, on_step=False, on_epoch=True, sync_dist=True
@@ -1576,14 +1608,13 @@ class TrainingLightningModule(LightningModule):
                 candidate_norm / norms["shared_decoder"].clamp_min(1.0e-12),
                 on_step=False,
                 on_epoch=True,
-                    sync_dist=True,
-                )
+                sync_dist=True,
+            )
             nonfinite_gradients = [
                 name
                 for name, module in modules.items()
                 if any(
-                    parameter.grad is not None
-                    and not torch.isfinite(parameter.grad).all()
+                    parameter.grad is not None and not torch.isfinite(parameter.grad).all()
                     for parameter in module.parameters()
                 )
             ]
@@ -1675,6 +1706,9 @@ class TrainingLightningModule(LightningModule):
                     self.net.unified_density_decoder.head,
                 ],
                 "separability": [self.net.view_separability],
+                "routing": [self.net.bounded_view_routing]
+                if self.net.bounded_view_routing is not None
+                else [],
             }
             optimizer_params = []
             used: set[int] = set()

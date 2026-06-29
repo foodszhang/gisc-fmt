@@ -1,0 +1,69 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_view_complementary
+  - _self_
+
+name: fmt_simgen_v2_a3v2_fast
+seed: 42
+
+data:
+  sample_num: 8192
+  num_queries: 8192
+  eval_sample_num: 4096
+  train_max_samples: 1000
+  val_max_samples: 64
+  batch_size: 1
+  eval_batch_size: 1
+
+model:
+  ssq_fmt:
+    view_complementary:
+      training_phase: phase_b
+      ablation: a3_v2_bounded_routing
+      separability_mode: geometry_only
+      continuous_applicability: true
+      candidate_hidden_injection: true
+      hypothesis_grid:
+        enabled: true
+        spacing_mm: 3.0
+        chunk_size: 4096
+        use_reconstruction_bounds: true
+      routing:
+        enabled: true
+        delta_logit_max: 1.0
+        zero_init: true
+      lr:
+        encoder: 0.0
+        constructor: 0.0
+        candidate_encoder: 0.00003
+        candidate_context: 0.00003
+        decoder: 0.000005
+        separability: 0.0
+        routing: 0.00003
+        shared: 0.0
+  finetune:
+    train_modules_only:
+      - bounded_view_routing
+      - complementary_aggregation.candidate_projection
+      - unified_density_decoder.candidate_context
+      - unified_density_decoder.candidate_norm
+      - unified_density_decoder.candidate_input
+      - unified_density_decoder.head
+
+trainer:
+  max_epochs: 3
+  val_check_interval: 0.5
+  num_sanity_val_steps: 0
+
+callbacks:
+  checkpoint:
+    save_top_k: 1
+    save_last: true
+    every_n_epochs: null
+    every_n_train_steps: null
+    save_on_train_epoch_end: false
+  early_stopping: null
+
+test_after_training: false
+ckpt_weights_only: true

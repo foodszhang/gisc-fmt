@@ -65,9 +65,7 @@ class DiverseCandidateConstructor(nn.Module):
             anchors[:, m] = center
             anchor_valid[:, m] = chosen
             distance2 = (points - center[:, None]).square().sum(dim=-1)
-            suppression = 1.0 - torch.exp(
-                -distance2 / (2.0 * self.sigma_nms_mm**2)
-            )
+            suppression = 1.0 - torch.exp(-distance2 / (2.0 * self.sigma_nms_mm**2))
             diverse = diverse * torch.where(chosen[:, None], suppression, torch.ones_like(diverse))
             diverse = diverse.masked_fill(~valid, -1.0)
         return anchors, anchor_valid
@@ -111,9 +109,7 @@ class DiverseCandidateConstructor(nn.Module):
         variance = points.new_full((b, self.mmax, 3), self.sigma_min_mm**2)
         for _ in range(self.refinement_steps):
             distance2 = (anchors[:, :, None] - points[:, None]).square().sum(dim=-1)
-            cosine = torch.einsum(
-                "bmd,bpd->bmp", F.normalize(anchor_desc, dim=-1), descriptors
-            )
+            cosine = torch.einsum("bmd,bpd->bmp", F.normalize(anchor_desc, dim=-1), descriptors)
             compatibility = (
                 -distance2 / (2.0 * self.sigma_assoc_mm**2)
                 + self.beta_descriptor * cosine
@@ -157,13 +153,18 @@ class DiverseCandidateConstructor(nn.Module):
             ],
             dim=-1,
         )
+        expected = self.existence_head[0].in_features
+        if existence_input.shape[-1] < expected:
+            existence_input = F.pad(existence_input, (0, expected - existence_input.shape[-1]))
+        elif existence_input.shape[-1] > expected:
+            existence_input = existence_input[..., :expected]
         existence_logits = self.existence_head(existence_input).squeeze(-1)
         existence_probability = torch.sigmoid(existence_logits)
         existence_probability = existence_probability * anchor_valid.to(existence_probability.dtype)
-        effective_valid = anchor_valid & (
+        analysis_valid = anchor_valid & (
             existence_probability.detach() >= self.candidate_conf_threshold
         )
-        candidate_valid = anchor_valid if self.training else effective_valid
+        candidate_valid = anchor_valid if self.training else analysis_valid
         covariance = torch.diag_embed(variance)
         return {
             "candidate_centers_mm": anchors,
@@ -174,7 +175,9 @@ class DiverseCandidateConstructor(nn.Module):
             "candidate_support_confidence": support_confidence,
             "candidate_valid_mask": candidate_valid,
             "candidate_slot_valid_mask": anchor_valid,
-            "effective_candidate_valid_mask": effective_valid,
+            "candidate_reconstruction_valid_mask": anchor_valid,
+            "candidate_analysis_valid_mask": analysis_valid,
+            "effective_candidate_valid_mask": analysis_valid,
             "candidate_view_support": support,
             "proposal_assignment": assignment_v,
             "proposal_compatibility": compatibility.reshape(b, self.mmax, v, k),
@@ -195,6 +198,7 @@ class DiverseCandidateConstructor(nn.Module):
         """Hungarian-style set supervision used only when GT is explicitly supplied."""
         centers = candidates["candidate_centers_mm"]
         scores = candidates["candidate_existence_probability"].clamp(1.0e-6, 1.0 - 1.0e-6)
+        existence_logits = candidates["candidate_existence_logits"]
         valid = candidates.get("candidate_slot_valid_mask", candidates["candidate_valid_mask"])
         center_loss = centers.sum() * 0.0
         existence_loss = centers.sum() * 0.0
@@ -227,7 +231,9 @@ class DiverseCandidateConstructor(nn.Module):
                 )
                 if gt_covariances_mm is not None:
                     predicted_eigen = torch.diagonal(
-                        candidates["candidate_covariances_mm"][batch_index, matched_candidates].float(),
+                        candidates["candidate_covariances_mm"][
+                            batch_index, matched_candidates
+                        ].float(),
                         dim1=-2,
                         dim2=-1,
                     ).clamp_min(1.0e-8)
@@ -252,7 +258,15 @@ class DiverseCandidateConstructor(nn.Module):
                 coverage_loss = coverage_loss + finite.mean() / max(
                     duplicate_distance_mm**2, 1.0e-6
                 )
-        existence_loss = F.binary_cross_entropy(scores.float(), existence_targets.float())
+        existence_loss_per_slot = F.binary_cross_entropy_with_logits(
+            existence_logits.float(),
+            existence_targets.float(),
+            reduction="none",
+        )
+        valid_float = valid.to(existence_loss_per_slot.dtype)
+        existence_loss = (
+            existence_loss_per_slot * valid_float
+        ).sum() / valid_float.sum().clamp_min(1.0)
         center_loss = center_loss / max(match_count, 1)
         covariance_loss = covariance_loss / max(match_count, 1)
         coverage_loss = coverage_loss / max(centers.shape[0], 1)

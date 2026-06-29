@@ -16,6 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 
 from minr_fmt.models.gisc_multisource import GISCFMT
+from minr_fmt.network.a3v2_routing import BoundedHypothesisViewRouting
 from minr_fmt.network.complementary_aggregation import ComplementaryAggregation
 from minr_fmt.network.diverse_candidate_constructor import DiverseCandidateConstructor
 from minr_fmt.network.ssq_candidates import (
@@ -126,9 +127,7 @@ def compose_quotient_residual_density(
     applicability_sum = applicability.sum(dim=-1, keepdim=True)
     alpha = applicability / applicability_sum.clamp_min(1.0e-8)
     proposal_gate = 1.0 - torch.exp(-applicability_sum.squeeze(-1))
-    residual_correction = proposal_gate[..., None] * (
-        alpha[..., None] * delta_logit
-    ).sum(dim=2)
+    residual_correction = proposal_gate[..., None] * (alpha[..., None] * delta_logit).sum(dim=2)
     return {
         "density": torch.sigmoid(shared_logit + residual_correction),
         "residual_correction": residual_correction,
@@ -184,9 +183,7 @@ class SurfaceMeasurementNormalizer(nn.Module):
             q = max(0.0, min(1.0, self.percentile / 100.0))
             for idx in range(b):
                 vals = flat_y[idx][flat_m[idx]]
-                scale[idx] = (
-                    torch.quantile(vals, q).clamp_min(self.eps) if vals.numel() else 1.0
-                )
+                scale[idx] = torch.quantile(vals, q).clamp_min(self.eps) if vals.numel() else 1.0
             y_norm = (y / scale[:, None, None, None, None]).clamp(0.0, 1.0)
         y_norm = torch.where(mask[:, :, None], y_norm, torch.zeros_like(y_norm))
         return y_norm, scale
@@ -202,9 +199,7 @@ class SSQFMT(nn.Module):
         root = _to_container(config)
         model_cfg = root.get("model", root)
         ssq = model_cfg.get("ssq_fmt", {})
-        requested_composition_mode = str(
-            _cfg_get(ssq, "composition.mode", "legacy_branch_mixture")
-        )
+        requested_composition_mode = str(_cfg_get(ssq, "composition.mode", "legacy_branch_mixture"))
         requested_density_mode = str(
             _cfg_get(ssq, "density_output_mode", "candidate_scalar_composition")
         )
@@ -369,9 +364,7 @@ class SSQFMT(nn.Module):
                 _cfg_get(ssq, "routing.compensation_routing_mode", "joint")
             ),
             sample_embedding_dim=int(_cfg_get(ssq, "routing.sample_embedding_dim", 64)),
-            candidate_embedding_dim=int(
-                _cfg_get(ssq, "routing.candidate_embedding_dim", 16)
-            ),
+            candidate_embedding_dim=int(_cfg_get(ssq, "routing.candidate_embedding_dim", 16)),
             query_coordinate_scale_mm=float(
                 _cfg_get(ssq, "routing.query_coordinate_scale_mm", 40.0)
             ),
@@ -423,9 +416,7 @@ class SSQFMT(nn.Module):
         consistency_cfg = quotient_cfg.get("subset_consistency", {})
         self.quotient_consistency_enabled = bool(consistency_cfg.get("enabled", False))
         self.quotient_consistency_seed = int(consistency_cfg.get("seed", 20260628))
-        self.quotient_consistency_min_support = float(
-            consistency_cfg.get("min_support", 1.0e-4)
-        )
+        self.quotient_consistency_min_support = float(consistency_cfg.get("min_support", 1.0e-4))
         self.assignment_head = CandidateAssignmentHead(
             representation_dim,
             hidden_dim,
@@ -438,15 +429,11 @@ class SSQFMT(nn.Module):
             measurement_consistency_logit_weight=float(
                 _cfg_get(ssq, "routing.measurement_consistency_logit_weight", 0.0)
             ),
-            active_candidate_top_k=int(
-                _cfg_get(ssq, "routing.active_candidate_top_k", 0)
-            ),
+            active_candidate_top_k=int(_cfg_get(ssq, "routing.active_candidate_top_k", 0)),
             occupancy_evidence_weight=float(
                 _cfg_get(ssq, "routing.occupancy_evidence_weight", 0.0)
             ),
-            occupancy_evidence_floor=float(
-                _cfg_get(ssq, "routing.occupancy_evidence_floor", 0.05)
-            ),
+            occupancy_evidence_floor=float(_cfg_get(ssq, "routing.occupancy_evidence_floor", 0.05)),
         )
         positive_ratio = float(_cfg_get(ssq, "decoder.positive_ratio_init", 0.03))
         decoder_chunk_size = int(_cfg_get(ssq, "decoder.query_chunk_size", 4096))
@@ -487,13 +474,37 @@ class SSQFMT(nn.Module):
             "candidate_coverage_loss": float(view_cfg.get("lambda_cover", 0.5)),
             "candidate_duplicate_loss": float(view_cfg.get("lambda_dup", 0.1)),
         }
-        self.view_separability_mode = str(
-            view_cfg.get("separability_mode", "geometry_measurement")
-        )
+        self.view_separability_mode = str(view_cfg.get("separability_mode", "geometry_measurement"))
         self.view_training_phase = str(view_cfg.get("training_phase", "phase_a"))
         self.view_training_epoch = 0
         self.view_training_step = 0
         self.context_warmup_steps = int(view_cfg.get("context_warmup_steps", 50))
+        grid_cfg = view_cfg.get("hypothesis_grid", {})
+        self.hypothesis_grid_enabled = bool(grid_cfg.get("enabled", False))
+        self.hypothesis_grid_spacing_mm = float(grid_cfg.get("spacing_mm", 3.0))
+        self.hypothesis_grid_chunk_size = int(grid_cfg.get("chunk_size", 4096))
+        grid_axes = [
+            torch.arange(0.0, size, self.hypothesis_grid_spacing_mm) for size in self.trunk_size_mm
+        ]
+        grid = torch.stack(torch.meshgrid(*grid_axes, indexing="ij"), dim=-1)
+        self.hypothesis_grid_shape = tuple(int(x) for x in grid.shape[:3])
+        self.register_buffer("hypothesis_grid_points_mm", grid.reshape(-1, 3), persistent=False)
+        routing_cfg = view_cfg.get("routing", {})
+        self.a3v2_routing_enabled = bool(routing_cfg.get("enabled", False))
+        self.continuous_applicability_enabled = bool(
+            view_cfg.get("continuous_applicability", False)
+        )
+        self.candidate_hidden_injection_enabled = bool(
+            view_cfg.get("candidate_hidden_injection", True)
+        )
+        self.bounded_view_routing = (
+            BoundedHypothesisViewRouting(
+                delta_logit_max=float(routing_cfg.get("delta_logit_max", 1.0)),
+                zero_init=bool(routing_cfg.get("zero_init", True)),
+            )
+            if self.a3v2_routing_enabled
+            else None
+        )
         self.evidence_eta0 = float(view_cfg.get("evidence_eta0", 0.25))
         self.evidence_sigma_mm = float(view_cfg.get("evidence_sigma_mm", 3.0))
         self.lambda_separability_measurement = float(
@@ -796,9 +807,7 @@ class SSQFMT(nn.Module):
         candidate_context = None
         if self.candidate_context_enabled and candidates["candidate_centers_mm"].shape[1] > 0:
             covariance = candidates["candidate_support_covariances_mm"]
-            eigen_scales = (
-                torch.linalg.eigvalsh(covariance.float()).clamp_min(1.0e-8).sqrt()
-            )
+            eigen_scales = torch.linalg.eigvalsh(covariance.float()).clamp_min(1.0e-8).sqrt()
             eigen_scales = eigen_scales.to(dtype=z.dtype) / max(
                 self._candidate_cfg.get("scale_max_mm", 12.0), 1.0e-6
             )
@@ -814,9 +823,7 @@ class SSQFMT(nn.Module):
             valid_count = valid_float.sum(dim=1).clamp_min(1.0)
             measurement_mean = (center_measurements * valid_float).sum(dim=1) / valid_count
             centered = center_measurements - measurement_mean[:, None]
-            measurement_std = (
-                (centered.square() * valid_float).sum(dim=1) / valid_count
-            ).sqrt()
+            measurement_std = ((centered.square() * valid_float).sum(dim=1) / valid_count).sqrt()
             measurement_max = center_measurements.masked_fill(~center_valid, 0.0).amax(dim=1)
             visibility = valid_float.mean(dim=1)
             context_input = torch.cat(
@@ -832,9 +839,7 @@ class SSQFMT(nn.Module):
                 dim=-1,
             )
             candidate_context = self.candidate_context_encoder(context_input)
-            z = torch.cat(
-                [z[:, :, :1], z[:, :, 1:] + candidate_context[:, None]], dim=2
-            )
+            z = torch.cat([z[:, :, :1], z[:, :, 1:] + candidate_context[:, None]], dim=2)
         router["Lambda"] = Lambda
         router["valid_view_count"] = mapped["valid_mask"].sum(dim=1)
         if candidates["candidate_centers_mm"].shape[1] > 0:
@@ -854,9 +859,7 @@ class SSQFMT(nn.Module):
         d0 = self.compensation_density_decoder(z[:, :, 0], encoded_query)
         m = z.shape[2] - 1
         if m > 0:
-            delta = (
-                query_coordinates_mm[:, :, None] - candidates["candidate_centers_mm"][:, None]
-            )
+            delta = query_coordinates_mm[:, :, None] - candidates["candidate_centers_mm"][:, None]
             rel = torch.einsum(
                 "bnmi,bmij->bnmj",
                 delta,
@@ -872,17 +875,17 @@ class SSQFMT(nn.Module):
             else:
                 dm = candidate_field
             if candidate_context is not None and self.candidate_field_calibrator is not None:
-                context_expanded = candidate_context[:, None].expand(
-                    -1, rel.shape[1], -1, -1
-                )
+                context_expanded = candidate_context[:, None].expand(-1, rel.shape[1], -1, -1)
                 field_residual = self.candidate_field_calibrator(context_expanded, rel)
                 dm_dtype = dm.dtype
                 dm_logit = torch.logit(dm.float().clamp(1.0e-5, 1.0 - 1.0e-5))
                 dm = torch.sigmoid(dm_logit + field_residual.float()).to(dtype=dm_dtype)
             candidate_density_pre_envelope = dm
             if self.candidate_support_envelope_power > 0.0:
-                support_envelope = router["p_all"][..., 1:].clamp(0.0, 1.0).pow(
-                    self.candidate_support_envelope_power
+                support_envelope = (
+                    router["p_all"][..., 1:]
+                    .clamp(0.0, 1.0)
+                    .pow(self.candidate_support_envelope_power)
                 )
                 dm = dm * support_envelope[..., None]
             dm = torch.where(
@@ -917,9 +920,7 @@ class SSQFMT(nn.Module):
         valid_branch = torch.ones_like(per_sample_branch_mass, dtype=torch.bool)
         if m > 0:
             valid_branch[:, 1:] = candidates["candidate_valid_mask"]
-        utilized = (
-            per_sample_branch_mass / per_sample_total_mass[:, None] > 0.01
-        ) & valid_branch
+        utilized = (per_sample_branch_mass / per_sample_total_mass[:, None] > 0.01) & valid_branch
         comp_ratio = (
             (comp_contrib.squeeze(-1) * support_f).sum(dim=1) / per_sample_total_mass
         ).mean()
@@ -943,9 +944,9 @@ class SSQFMT(nn.Module):
             else torch.zeros((), device=density.device, dtype=density.dtype),
             "branch_density_mean": branch_density.mean().detach(),
             "branch_density_std": branch_density.std(unbiased=False).detach(),
-            "measurement_supported_positive_ratio": measurement_supported.to(
-                dtype=density.dtype
-            ).mean().detach(),
+            "measurement_supported_positive_ratio": measurement_supported.to(dtype=density.dtype)
+            .mean()
+            .detach(),
             "density_output_mode": torch.tensor(0, device=density.device),
         }
         if self.training:
@@ -978,9 +979,7 @@ class SSQFMT(nn.Module):
         }
         if return_diagnostics:
             pi_entropy = -(pi.clamp_min(1e-8) * pi.clamp_min(1e-8).log()).sum(dim=-1)
-            z_norm = (
-                torch.nn.functional.normalize(z[:, :, 1:], dim=-1) if m > 0 else z[:, :, 1:]
-            )
+            z_norm = torch.nn.functional.normalize(z[:, :, 1:], dim=-1) if m > 0 else z[:, :, 1:]
             pairwise_z_cosine = (
                 torch.matmul(z_norm, z_norm.transpose(-1, -2))
                 if m > 0
@@ -1017,9 +1016,7 @@ class SSQFMT(nn.Module):
                 "candidate_scores": candidates["candidate_scores"],
                 "candidate_raw_support_scales_mm": candidates["candidate_raw_support_scales_mm"],
                 "candidate_support_scales_mm": candidates["candidate_support_scales_mm"],
-                "candidate_support_covariances_mm": candidates[
-                    "candidate_support_covariances_mm"
-                ],
+                "candidate_support_covariances_mm": candidates["candidate_support_covariances_mm"],
                 "candidate_raw_scales_mm": candidates["candidate_raw_support_scales_mm"],
                 "candidate_scales_mm": candidates["candidate_support_scales_mm"],
                 "candidate_valid_mask": candidates["candidate_valid_mask"],
@@ -1116,9 +1113,7 @@ class SSQFMT(nn.Module):
         amplitude = self.evidence_eta0 + (1.0 - self.evidence_eta0) * separability
         amplitude = amplitude * gt_mapped["valid_mask"].to(amplitude.dtype)
         delta = points_mm[:, None, :, None] - gt_centers[:, None, None]
-        variance = torch.diagonal(
-            gt_covariances.float(), dim1=-2, dim2=-1
-        ).clamp_min(1.0e-4)
+        variance = torch.diagonal(gt_covariances.float(), dim1=-2, dim2=-1).clamp_min(1.0e-4)
         mahal = (delta.float().square() / variance[:, None, None]).sum(dim=-1)
         target = torch.exp(-0.5 * mahal) * amplitude[:, :, None]
         target = target.masked_fill(~gt_valid[:, None, None], 0.0).amax(dim=-1)
@@ -1126,9 +1121,11 @@ class SSQFMT(nn.Module):
         prediction = evidence.float().clamp(1.0e-6, 1.0 - 1.0e-6)
         target = target.float()
         positive_weight = 1.0 + 9.0 * target
-        loss = -(
-            target * prediction.log() + (1.0 - target) * (1.0 - prediction).log()
-        ) * positive_weight * mask.float()
+        loss = (
+            -(target * prediction.log() + (1.0 - target) * (1.0 - prediction).log())
+            * positive_weight
+            * mask.float()
+        )
         return loss.sum() / (positive_weight * mask).sum().clamp_min(1.0)
 
     def _forward_view_complementary(
@@ -1145,27 +1142,68 @@ class SSQFMT(nn.Module):
         batch: dict[str, Any] | None,
     ) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
         """Execute the independent-view source-hypothesis information path."""
-        query_per_view = (
-            samples["sample_features"] * samples["A"][..., None]
-        ).sum(dim=3)
+        query_per_view = (samples["sample_features"] * samples["A"][..., None]).sum(dim=3)
         geometry = torch.stack(
             [
                 mapped["detector_side_path_proxy"],
-                mapped["boundary_distance"].div(
-                    max(self.surface_sampler.boundary_margin_radius_px, 1.0e-6)
-                ).clamp(0.0, 1.0),
+                mapped["boundary_distance"]
+                .div(max(self.surface_sampler.boundary_margin_radius_px, 1.0e-6))
+                .clamp(0.0, 1.0),
                 samples["sigma_f"].div(max(self.surface_sampler.sigma_max_px, 1.0e-6)),
                 mapped["grid"].square().sum(dim=-1).sqrt().div(2.0**0.5),
             ],
             dim=-1,
         )
+        evidence_points = points_mm
+        evidence_per_view = query_per_view
+        evidence_geometry = geometry
+        evidence_valid = samples["query_view_valid"]
+        evidence_grid_shape = None
+        if self.hypothesis_grid_enabled:
+            evidence_points = self.hypothesis_grid_points_mm.to(
+                device=points_mm.device, dtype=points_mm.dtype
+            )[None].expand(points_mm.shape[0], -1, -1)
+            evidence_mapped = self.geometry_mapper(
+                evidence_points,
+                depth_maps=depth_maps,
+                detector_valid_mask=detector_valid_mask,
+            )
+            evidence_samples = self.surface_sampler(
+                features,
+                measurements,
+                evidence_mapped,
+                detector_valid_mask=detector_valid_mask,
+                depth_maps=depth_maps,
+            )
+            evidence_per_view = (
+                evidence_samples["sample_features"] * evidence_samples["A"][..., None]
+            ).sum(dim=3)
+            evidence_geometry = torch.stack(
+                [
+                    evidence_mapped["detector_side_path_proxy"],
+                    evidence_mapped["boundary_distance"]
+                    .div(max(self.surface_sampler.boundary_margin_radius_px, 1.0e-6))
+                    .clamp(0.0, 1.0),
+                    evidence_samples["sigma_f"].div(max(self.surface_sampler.sigma_max_px, 1.0e-6)),
+                    evidence_mapped["grid"].square().sum(dim=-1).sqrt().div(2.0**0.5),
+                ],
+                dim=-1,
+            )
+            evidence_valid = evidence_samples["query_view_valid"]
+            evidence_grid_shape = self.hypothesis_grid_shape
         proposal = self.view_candidate_evidence(
-            query_per_view,
-            geometry,
-            points_mm,
-            samples["query_view_valid"],
+            evidence_per_view,
+            evidence_geometry,
+            evidence_points,
+            evidence_valid,
+            grid_shape=evidence_grid_shape,
         )
         candidates = self.diverse_candidate_constructor(proposal)
+        reconstruction_valid = (
+            candidates["candidate_slot_valid_mask"]
+            if self.view_complementary_ablation == "a3_v2_bounded_routing"
+            else candidates["candidate_valid_mask"]
+        )
         centers = candidates["candidate_centers_mm"]
         candidate_mapped = self.geometry_mapper(
             centers,
@@ -1182,25 +1220,25 @@ class SSQFMT(nn.Module):
         candidate_per_view = (
             candidate_samples["sample_features"] * candidate_samples["A"][..., None]
         ).sum(dim=3)
-        eigen_scale = torch.diagonal(
-            candidates["candidate_covariances_mm"].float(), dim1=-2, dim2=-1
-        ).clamp_min(1.0e-8).sqrt().mean(dim=-1).to(candidate_per_view.dtype)
+        eigen_scale = (
+            torch.diagonal(candidates["candidate_covariances_mm"].float(), dim1=-2, dim2=-1)
+            .clamp_min(1.0e-8)
+            .sqrt()
+            .mean(dim=-1)
+            .to(candidate_per_view.dtype)
+        )
         px_per_mm = candidate_mapped["view_pixels_per_mm"].to(candidate_per_view.dtype)
         detector_scale = (
-            eigen_scale[:, None] * px_per_mm[None, :, None]
-            + candidate_samples["sigma_f"]
+            eigen_scale[:, None] * px_per_mm[None, :, None] + candidate_samples["sigma_f"]
         )
         separability = self.view_separability(
             candidate_per_view,
             candidate_mapped["uv_px"].to(candidate_per_view.dtype),
             detector_scale,
-            candidates["candidate_valid_mask"],
+            reconstruction_valid,
             mode=self.view_separability_mode,
         )
-        candidate_valid_by_view = (
-            candidate_mapped["valid_mask"]
-            & candidates["candidate_valid_mask"][:, None]
-        )
+        candidate_valid_by_view = candidate_mapped["valid_mask"] & reconstruction_valid[:, None]
         support = candidates["candidate_view_support"].transpose(1, 2)
         support = support * candidate_valid_by_view.to(support.dtype)
         aggregation = self.complementary_aggregation(
@@ -1209,19 +1247,60 @@ class SSQFMT(nn.Module):
             samples["query_view_valid"],
             support,
             separability["separability"],
-            candidates["candidate_valid_mask"],
+            reconstruction_valid,
             candidate_view_valid=candidate_valid_by_view,
             uniform_views=self.view_complementary_ablation in {"a2", "uniform_views"},
+            geometry_only=self.view_complementary_ablation == "a3_geometry_only",
         )
+        routing_diagnostics = None
+        if self.view_complementary_ablation == "a3_v2_bounded_routing":
+            if self.bounded_view_routing is None:
+                raise RuntimeError("a3_v2_bounded_routing requires routing.enabled=true")
+            # Candidate representation remains an A2-U valid-view mean.
+            aggregation = self.complementary_aggregation(
+                query_per_view,
+                candidate_per_view,
+                samples["query_view_valid"],
+                support,
+                separability["separability"],
+                candidates["candidate_slot_valid_mask"],
+                candidate_view_valid=candidate_valid_by_view,
+                uniform_views=True,
+            )
+            routing_diagnostics = self.bounded_view_routing(
+                points_mm,
+                centers,
+                candidates["candidate_covariances_mm"],
+                candidates["candidate_existence_probability"],
+                candidates["candidate_slot_valid_mask"],
+                candidates["candidate_view_support"],
+                separability["separability"],
+                samples["query_view_valid"],
+            )
+            routed_weight = routing_diagnostics["view_weights"]
+            if hasattr(self.complementary_aggregation, "common_projection"):
+                per_view_encoded = self.complementary_aggregation.common_projection(
+                    self.complementary_aggregation.feature_norm(query_per_view)
+                )
+                routed_shared = (per_view_encoded * routed_weight[..., None]).sum(dim=1)
+                aggregation["shared"] = self.complementary_aggregation.output_norm(routed_shared)
+            else:
+                aggregation["shared"] = self.complementary_aggregation.shared_projection(
+                    (query_per_view * routed_weight[..., None]).sum(dim=1)
+                )
+            aggregation["query_view_weights"] = routed_weight
         active_phase = self.view_training_phase
-        if active_phase == "phase_b":
+        if (
+            active_phase == "phase_b"
+            and self.view_complementary_ablation != "a3_v2_bounded_routing"
+        ):
             aggregation["shared"] = aggregation["shared"].detach()
         decoder_ablation = self.view_complementary_ablation
         context_scale = 1.0
         if active_phase == "phase_a":
             decoder_ablation = "shared_only"
             context_scale = 0.0
-        elif active_phase == "phase_b":
+        elif active_phase == "phase_b" and self.training:
             context_scale = min(
                 1.0,
                 self.view_training_step / max(self.context_warmup_steps, 1),
@@ -1238,9 +1317,10 @@ class SSQFMT(nn.Module):
             centers,
             candidates["candidate_covariances_mm"],
             candidates["candidate_scores"],
-            candidates["candidate_valid_mask"],
+            reconstruction_valid,
             ablation=decoder_ablation,
             context_scale=context_scale,
+            continuous_applicability=self.continuous_applicability_enabled,
         )
         shared_decoded = self.unified_density_decoder(
             aggregation["shared"],
@@ -1250,7 +1330,7 @@ class SSQFMT(nn.Module):
             centers,
             candidates["candidate_covariances_mm"],
             candidates["candidate_scores"] * 0.0,
-            candidates["candidate_valid_mask"] & False,
+            reconstruction_valid & False,
             ablation="shared_only",
             context_scale=0.0,
         )
@@ -1258,13 +1338,14 @@ class SSQFMT(nn.Module):
             "shared_density": shared_decoded["density"],
             "candidate_centers_mm": centers,
             "candidate_covariances_mm": candidates["candidate_covariances_mm"],
-            "candidate_covariance_eigenvalues": candidates[
-                "candidate_covariance_eigenvalues"
-            ],
+            "candidate_covariance_eigenvalues": candidates["candidate_covariance_eigenvalues"],
             "covariance_lower_bound_hit": candidates["covariance_lower_bound_hit"],
             "covariance_upper_bound_hit": candidates["covariance_upper_bound_hit"],
             "candidate_scores": candidates["candidate_scores"],
-            "candidate_valid_mask": candidates["candidate_valid_mask"],
+            "candidate_valid_mask": reconstruction_valid,
+            "candidate_slot_valid_mask": candidates["candidate_slot_valid_mask"],
+            "candidate_analysis_valid_mask": candidates["candidate_analysis_valid_mask"],
+            "candidate_existence_probability": candidates["candidate_existence_probability"],
             "candidate_view_support": candidates["candidate_view_support"],
             "proposal_assignment": candidates["proposal_assignment"],
             "proposal_compatibility": candidates["proposal_compatibility"],
@@ -1288,6 +1369,23 @@ class SSQFMT(nn.Module):
             "measurement_supported": samples["query_view_valid"].any(dim=1),
             "view_complementary_mode": torch.ones((), device=points_mm.device),
         }
+        if not self.candidate_hidden_injection_enabled:
+            decoded = self.unified_density_decoder(
+                aggregation["shared"],
+                aggregation["candidate"],
+                points_mm,
+                encoded_points,
+                centers,
+                candidates["candidate_covariances_mm"],
+                candidates["candidate_scores"],
+                reconstruction_valid,
+                ablation="shared_only",
+                context_scale=0.0,
+            )
+            aux_outputs["candidate_context_scale"] = decoded["density"].new_tensor(0.0)
+        if routing_diagnostics is not None:
+            aux_outputs.update(routing_diagnostics)
+            aux_outputs["view_weights"] = routing_diagnostics["view_weights"]
         normalized_candidate_features = torch.nn.functional.normalize(
             candidate_per_view.float(), dim=-1
         )
@@ -1297,20 +1395,13 @@ class SSQFMT(nn.Module):
             normalized_candidate_features,
         )
         measurement_correction_target = (
-            self.view_separability.delta_max
-            * 0.5
-            * (1.0 - feature_cosine.detach())
+            self.view_separability.delta_max * 0.5 * (1.0 - feature_cosine.detach())
         )
-        pair_valid = (
-            candidates["candidate_valid_mask"][:, None, :, None]
-            & candidates["candidate_valid_mask"][:, None, None, :]
-        )
-        pair_eye = torch.eye(
-            centers.shape[1], device=points_mm.device, dtype=torch.bool
-        )[None, None]
-        pair_train = (pair_valid & ~pair_eye).expand_as(
-            separability["pair_separability"]
-        )
+        pair_valid = reconstruction_valid[:, None, :, None] & reconstruction_valid[:, None, None, :]
+        pair_eye = torch.eye(centers.shape[1], device=points_mm.device, dtype=torch.bool)[
+            None, None
+        ]
+        pair_train = (pair_valid & ~pair_eye).expand_as(separability["pair_separability"])
         separability_measurement_loss = (
             torch.nn.functional.smooth_l1_loss(
                 separability["correction"],
@@ -1334,8 +1425,8 @@ class SSQFMT(nn.Module):
                 )
             evidence_loss = self._view_evidence_heatmap_loss(
                 proposal["evidence"],
-                points_mm,
-                samples["query_view_valid"],
+                evidence_points,
+                evidence_valid,
                 batch["gt_component_centers_mm"].to(device=points_mm.device),
                 gt_covariances.to(device=points_mm.device),
                 batch["gt_component_valid_mask"].to(device=points_mm.device),
@@ -1360,8 +1451,7 @@ class SSQFMT(nn.Module):
                 if active_phase in {"phase_b", "full"}:
                     aux_outputs["view_complementary_aux_loss"] = (
                         aux_outputs["view_complementary_aux_loss"]
-                        + self.lambda_separability_measurement
-                        * separability_measurement_loss
+                        + self.lambda_separability_measurement * separability_measurement_loss
                     )
         out: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {
             "density": decoded["density"],
@@ -1508,8 +1598,7 @@ class SSQFMT(nn.Module):
                 per_view, geometry, support, subset_a, subset_b, candidate_valid
             )
         residual_loss = (
-            proposal_gate[..., None]
-            * (alpha[..., None] * delta_logit.abs()).sum(dim=2)
+            proposal_gate[..., None] * (alpha[..., None] * delta_logit.abs()).sum(dim=2)
         ).mean()
         no_candidate = applicability.sum(dim=-1) <= 1.0e-8
         aux_outputs: dict[str, torch.Tensor] = {

@@ -59,6 +59,7 @@ class Patch2ComplementaryAggregation(nn.Module):
         candidate_valid: torch.Tensor,
         candidate_view_valid: torch.Tensor | None = None,
         uniform_views: bool = False,
+        geometry_only: bool = False,
     ) -> dict[str, torch.Tensor]:
         shared, shared_weight = self.aggregate_shared(shared_per_view, view_valid)
         if candidate_view_valid is None:
@@ -77,6 +78,8 @@ class Patch2ComplementaryAggregation(nn.Module):
 
         if uniform_views:
             reliability = valid_float
+        elif geometry_only:
+            reliability = (self.epsilon_s + separability) * valid_float
         else:
             # With separability_mode=none, separability is one everywhere and this
             # reduces to support-only weighting after normalization (A2-S).

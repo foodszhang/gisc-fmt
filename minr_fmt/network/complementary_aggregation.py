@@ -23,14 +23,18 @@ class ComplementaryAggregation(nn.Module):
         candidate_valid: torch.Tensor,
         candidate_view_valid: torch.Tensor | None = None,
         uniform_views: bool = False,
+        geometry_only: bool = False,
     ) -> dict[str, torch.Tensor]:
         shared_weight = view_valid.to(shared_per_view.dtype)
         shared_weight = shared_weight / shared_weight.sum(dim=1, keepdim=True).clamp_min(1.0e-8)
         shared = self.shared_projection((shared_per_view * shared_weight[..., None]).sum(dim=1))
         if candidate_view_valid is None:
             candidate_view_valid = candidate_valid[:, None].expand_as(candidate_support)
-        reliability = candidate_support * candidate_view_valid.to(candidate_support.dtype)
-        if not uniform_views:
+        reliability = candidate_view_valid.to(candidate_support.dtype)
+        if geometry_only:
+            reliability = reliability * (self.epsilon_s + separability)
+        elif not uniform_views:
+            reliability = reliability * candidate_support
             reliability = reliability * (self.epsilon_s + separability)
         weight = reliability / reliability.sum(dim=1, keepdim=True).clamp_min(1.0e-8)
         weight = weight * candidate_valid[:, None].to(weight.dtype)

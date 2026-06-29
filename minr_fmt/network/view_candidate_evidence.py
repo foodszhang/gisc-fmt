@@ -46,12 +46,30 @@ class ViewCandidateEvidence(nn.Module):
         )
         return ~((better | tied_later) & neighbor[:, None]).any(dim=-1)
 
+    @staticmethod
+    def _grid_local_maxima(scores: torch.Tensor, grid_shape: tuple[int, int, int]) -> torch.Tensor:
+        """O(N) local NMS for a structured fixed hypothesis grid."""
+        b, v, n = scores.shape
+        if n != grid_shape[0] * grid_shape[1] * grid_shape[2]:
+            raise ValueError(f"grid shape {grid_shape} does not match {n} points")
+        volume = scores.reshape(b * v, 1, *grid_shape)
+        pooled = F.max_pool3d(volume, kernel_size=3, stride=1, padding=1)
+        # Stable index tie break for flat maxima.
+        maxima = volume == pooled
+        flat = maxima.reshape(b, v, n)
+        index = torch.arange(n, device=scores.device)
+        adjusted = scores - index.to(scores.dtype)[None, None] * torch.finfo(scores.dtype).eps
+        adjusted_volume = adjusted.reshape(b * v, 1, *grid_shape)
+        adjusted_pool = F.max_pool3d(adjusted_volume, 3, stride=1, padding=1)
+        return flat & (adjusted_volume == adjusted_pool).reshape(b, v, n)
+
     def forward(
         self,
         query_features: torch.Tensor,
         geometry_features: torch.Tensor,
         points_mm: torch.Tensor,
         valid_mask: torch.Tensor,
+        grid_shape: tuple[int, int, int] | None = None,
     ) -> dict[str, torch.Tensor]:
         """Inputs are [B,V,N,D], [B,V,N,4], [B,N,3], and [B,V,N]."""
         b, v, n, _ = query_features.shape
@@ -63,7 +81,11 @@ class ViewCandidateEvidence(nn.Module):
         offset = self.delta_max_mm * torch.tanh(self.offset(hidden))
         proposals = points_mm[:, None] + offset
 
-        local = self._local_maxima(evidence, points_mm, self.nms_radius_mm) & valid_mask
+        local = (
+            self._grid_local_maxima(evidence, grid_shape)
+            if grid_shape is not None
+            else self._local_maxima(evidence, points_mm, self.nms_radius_mm)
+        ) & valid_mask
         masked = evidence.masked_fill(~local, -1.0)
         k = min(self.topk_per_view, n)
         score, index = masked.topk(k, dim=-1)

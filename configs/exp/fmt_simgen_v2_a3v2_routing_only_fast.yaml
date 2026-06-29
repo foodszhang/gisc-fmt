@@ -1,0 +1,14 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_a3v2_fast
+  - _self_
+
+name: fmt_simgen_v2_a3v2_routing_only_fast
+model:
+  ssq_fmt:
+    view_complementary:
+      candidate_hidden_injection: false
+
+trainer:
+  max_epochs: 2

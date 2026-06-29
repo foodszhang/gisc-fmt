@@ -42,6 +42,7 @@ class UnifiedDensityDecoder(nn.Module):
         valid: torch.Tensor,
         ablation: str = "full",
         context_scale: float = 1.0,
+        continuous_applicability: bool = False,
     ) -> dict[str, torch.Tensor]:
         b, n, _ = points_mm.shape
         m = centers_mm.shape[1]
@@ -60,6 +61,7 @@ class UnifiedDensityDecoder(nn.Module):
             applicability = torch.exp(-0.5 * mahal) * scores[:, None]
             applicability = applicability * valid[:, None].to(applicability.dtype)
             alpha = applicability / applicability.sum(dim=-1, keepdim=True).clamp_min(1.0e-8)
+            hypothesis_gate = -torch.expm1(-applicability.sum(dim=-1, keepdim=True))
             scales = variance.sqrt().to(delta.dtype)
             candidate_input = torch.cat(
                 [
@@ -72,6 +74,8 @@ class UnifiedDensityDecoder(nn.Module):
             )
             encoded = self.candidate_context(candidate_input)
             context = (alpha[..., None] * encoded).sum(dim=2)
+            if continuous_applicability:
+                context = context * hypothesis_gate.to(context.dtype)
         shared_hidden = self.shared_input(
             torch.cat([self.shared_norm(shared), encoded_points], dim=-1)
         )
