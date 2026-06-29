@@ -14,6 +14,7 @@ class DiverseCandidateConstructor(nn.Module):
         self,
         mmax: int = 5,
         score_threshold: float = 0.05,
+        candidate_conf_threshold: float = 0.4,
         sigma_nms_mm: float = 4.0,
         sigma_assoc_mm: float = 5.0,
         sigma_min_mm: float = 1.0,
@@ -25,6 +26,7 @@ class DiverseCandidateConstructor(nn.Module):
         super().__init__()
         self.mmax = int(mmax)
         self.score_threshold = float(score_threshold)
+        self.candidate_conf_threshold = float(candidate_conf_threshold)
         self.sigma_nms_mm = float(sigma_nms_mm)
         self.sigma_assoc_mm = float(sigma_assoc_mm)
         self.sigma_min_mm = float(sigma_min_mm)
@@ -67,9 +69,8 @@ class DiverseCandidateConstructor(nn.Module):
         anchors, anchor_valid = self._initialize(points, scores, valid)
         anchor_desc = descriptors.new_zeros((b, self.mmax, d))
         assignment = scores.new_zeros((b, self.mmax, v * k))
-        covariance = torch.eye(3, device=points.device, dtype=points.dtype)[None, None].repeat(
-            b, self.mmax, 1, 1
-        ) * self.sigma_min_mm**2
+        compatibility = scores.new_zeros((b, self.mmax, v * k))
+        variance = points.new_full((b, self.mmax, 3), self.sigma_min_mm**2)
         for _ in range(self.refinement_steps):
             distance2 = (anchors[:, :, None] - points[:, None]).square().sum(dim=-1)
             cosine = torch.einsum(
@@ -82,44 +83,51 @@ class DiverseCandidateConstructor(nn.Module):
             )
             compatibility = compatibility.masked_fill(~anchor_valid[:, :, None], -1.0e4)
             assignment = torch.softmax(compatibility, dim=1)
+            assignment = assignment * anchor_valid[:, :, None].to(assignment.dtype)
             assignment = assignment * valid[:, None].to(assignment.dtype)
+            assignment = assignment / assignment.sum(dim=1, keepdim=True).clamp_min(1.0e-8)
+            assignment = torch.where(
+                anchor_valid.any(dim=1)[:, None, None],
+                assignment,
+                torch.zeros_like(assignment),
+            )
             weight = assignment * scores[:, None]
             denom = weight.sum(dim=-1).clamp_min(1.0e-8)
             updated = torch.einsum("bmp,bpd->bmd", weight, points) / denom[..., None]
             anchors = torch.where(anchor_valid[..., None], updated, anchors)
             delta = points[:, None] - anchors[:, :, None]
-            covariance = torch.einsum("bmp,bmpi,bmpj->bmij", weight, delta, delta)
-            covariance = covariance / denom[..., None, None]
-            eye = torch.eye(3, device=points.device, dtype=points.dtype)
-            covariance = covariance + self.sigma_min_mm**2 * eye
-            eigenvalues, eigenvectors = torch.linalg.eigh(covariance.float())
-            lower = self.sigma_min_mm**2
-            upper = self.sigma_max_mm**2
-            clamped = eigenvalues.clamp(lower, upper).to(covariance.dtype)
-            covariance = torch.einsum(
-                "bmik,bmk,bmjk->bmij",
-                eigenvectors.to(covariance.dtype),
-                clamped,
-                eigenvectors.to(covariance.dtype),
+            variance = torch.einsum("bmp,bmpi->bmi", weight, delta.square())
+            variance = (variance / denom[..., None]).clamp(
+                self.sigma_min_mm**2,
+                self.sigma_max_mm**2,
             )
             anchor_desc = torch.einsum("bmp,bpd->bmd", weight, descriptors) / denom[..., None]
             anchor_desc = F.normalize(anchor_desc, dim=-1)
         assignment_v = assignment.reshape(b, self.mmax, v, k)
-        support = (assignment_v * scores_v[:, None]).sum(dim=-1)
+        weighted_score = assignment_v * scores_v[:, None]
+        assignment_mass = assignment_v.sum(dim=-1).clamp_min(1.0e-6)
+        support = (weighted_score.sum(dim=-1) / assignment_mass).clamp(0.0, 1.0)
         confidence = 1.0 - (1.0 - support.clamp(0.0, 1.0)).prod(dim=-1)
         confidence = confidence * anchor_valid.to(confidence.dtype)
-        covariance_eigenvalues = torch.linalg.eigvalsh(covariance.float()).to(points.dtype)
+        effective_valid = anchor_valid & (
+            confidence.detach() >= self.candidate_conf_threshold
+        )
+        candidate_valid = anchor_valid if self.training else effective_valid
+        covariance = torch.diag_embed(variance)
         return {
             "candidate_centers_mm": anchors,
             "candidate_covariances_mm": covariance,
             "candidate_scores": confidence,
-            "candidate_valid_mask": anchor_valid,
+            "candidate_valid_mask": candidate_valid,
+            "candidate_slot_valid_mask": anchor_valid,
+            "effective_candidate_valid_mask": effective_valid,
             "candidate_view_support": support,
             "proposal_assignment": assignment_v,
+            "proposal_compatibility": compatibility.reshape(b, self.mmax, v, k),
             "candidate_descriptors": anchor_desc,
-            "candidate_covariance_eigenvalues": covariance_eigenvalues,
-            "covariance_lower_bound_hit": covariance_eigenvalues <= self.sigma_min_mm**2 * 1.001,
-            "covariance_upper_bound_hit": covariance_eigenvalues >= self.sigma_max_mm**2 * 0.999,
+            "candidate_covariance_eigenvalues": variance,
+            "covariance_lower_bound_hit": variance <= self.sigma_min_mm**2 * 1.001,
+            "covariance_upper_bound_hit": variance >= self.sigma_max_mm**2 * 0.999,
         }
 
     @staticmethod
@@ -164,13 +172,17 @@ class DiverseCandidateConstructor(nn.Module):
                     reduction="mean",
                 )
                 if gt_covariances_mm is not None:
-                    predicted_eigen = torch.linalg.eigvalsh(
+                    predicted_eigen = torch.diagonal(
                         candidates["candidate_covariances_mm"][
                             batch_index, matched_candidates
-                        ].float()
+                        ].float(),
+                        dim1=-2,
+                        dim2=-1,
                     ).clamp_min(1.0e-8)
-                    target_eigen = torch.linalg.eigvalsh(
-                        gt_covariances_mm[batch_index, matched_components].float()
+                    target_eigen = torch.diagonal(
+                        gt_covariances_mm[batch_index, matched_components].float(),
+                        dim1=-2,
+                        dim2=-1,
                     ).clamp_min(1.0e-8)
                     covariance_loss = covariance_loss + torch.nn.functional.l1_loss(
                         predicted_eigen.log(), target_eigen.log(), reduction="sum"

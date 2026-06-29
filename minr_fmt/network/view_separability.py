@@ -20,16 +20,22 @@ class ViewSeparability(nn.Module):
     def forward(
         self,
         features: torch.Tensor,
-        detector_centers: torch.Tensor,
-        detector_scales: torch.Tensor,
+        detector_centers_px: torch.Tensor,
+        detector_scales_px: torch.Tensor,
         candidate_valid: torch.Tensor,
         mode: str = "geometry_measurement",
     ) -> dict[str, torch.Tensor]:
         """Use [B,V,M,D], [B,V,M,2], [B,V,M], and [B,M]."""
         if mode not in {"none", "geometry_only", "geometry_measurement"}:
             raise ValueError(f"unknown separability mode: {mode}")
-        delta = detector_centers[:, :, :, None] - detector_centers[:, :, None, :]
-        variance = detector_scales[:, :, :, None].square() + detector_scales[:, :, None, :].square()
+        delta = (
+            detector_centers_px[:, :, :, None]
+            - detector_centers_px[:, :, None, :]
+        )
+        variance = (
+            detector_scales_px[:, :, :, None].square()
+            + detector_scales_px[:, :, None, :].square()
+        )
         collision = torch.exp(-0.5 * delta.square().sum(dim=-1) / variance.clamp_min(1.0e-6))
         geometry = 1.0 - collision
         pair_valid = (

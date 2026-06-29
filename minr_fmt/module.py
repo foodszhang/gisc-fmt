@@ -528,6 +528,8 @@ class TrainingLightningModule(LightningModule):
     def _call_ssq_model(self, batch, return_diagnostics: bool = False):
         if hasattr(self.net, "set_training_epoch"):
             self.net.set_training_epoch(int(self.current_epoch))
+        if hasattr(self.net, "set_training_step"):
+            self.net.set_training_step(int(self.global_step))
         surface = batch.get("surface_measurements_packed", batch.get("projections_packed"))
         if surface is None:
             raise KeyError(
@@ -978,6 +980,12 @@ class TrainingLightningModule(LightningModule):
                 )
             total_loss = loss_dict["total_loss"]
             if not torch.isfinite(total_loss.detach()):
+                if getattr(self.net, "composition_mode", None) == "view_complementary":
+                    self._dump_view_nonfinite(batch, aux_outputs, loss_dict)
+                    raise FloatingPointError(
+                        "view_complementary produced a nonfinite training loss; "
+                        "diagnostics were dumped before optimizer.step"
+                    )
                 self.log(
                     "train_nonfinite_loss_skip",
                     torch.ones((), dtype=total_loss.dtype, device=total_loss.device),
@@ -1402,6 +1410,39 @@ class TrainingLightningModule(LightningModule):
         per_tensor = torch._foreach_norm(gradients, 2.0)
         return torch.stack([value.float() for value in per_tensor]).norm(2.0)
 
+    def _dump_view_nonfinite(self, batch: dict, diagnostics: dict, losses: dict) -> None:
+        output_dir = Path(str(self.cfg.paths.output_dir)) / "nonfinite_diagnostics"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        keys = (
+            "per_view_evidence",
+            "proposal_offsets_mm",
+            "proposal_points_mm",
+            "proposal_compatibility",
+            "proposal_assignment",
+            "candidate_centers_mm",
+            "candidate_covariance_eigenvalues",
+            "candidate_view_support",
+            "candidate_detector_scales",
+            "separability",
+            "candidate_context",
+            "decoder_pre_activation",
+        )
+        payload = {
+            "global_step": int(self.global_step),
+            "sample_id": batch.get("sample_id"),
+            "diagnostics": {
+                key: diagnostics[key].detach().float().cpu()
+                for key in keys
+                if torch.is_tensor(diagnostics.get(key))
+            },
+            "losses": {
+                key: value.detach().float().cpu()
+                for key, value in losses.items()
+                if torch.is_tensor(value)
+            },
+        }
+        torch.save(payload, output_dir / f"step_{int(self.global_step):08d}.pt")
+
     def _log_view_candidate_metrics(self, diagnostics: dict, batch: dict) -> None:
         gt_centers = batch.get("gt_component_centers_mm")
         gt_valid = batch.get("gt_component_valid_mask")
@@ -1514,7 +1555,7 @@ class TrainingLightningModule(LightningModule):
                 "candidate_view_encoder": self.net.complementary_aggregation.candidate_projection,
                 "separability_correction": self.net.view_separability.correction,
                 "candidate_context": self.net.unified_density_decoder.candidate_context,
-                "shared_decoder": self.net.unified_density_decoder.decoder,
+                "shared_decoder": self.net.unified_density_decoder.head,
             }
             norms = {
                 name: self._module_gradient_norm(module) for name, module in modules.items()
@@ -1535,8 +1576,43 @@ class TrainingLightningModule(LightningModule):
                 candidate_norm / norms["shared_decoder"].clamp_min(1.0e-12),
                 on_step=False,
                 on_epoch=True,
-                sync_dist=True,
-            )
+                    sync_dist=True,
+                )
+            nonfinite_gradients = [
+                name
+                for name, module in modules.items()
+                if any(
+                    parameter.grad is not None
+                    and not torch.isfinite(parameter.grad).all()
+                    for parameter in module.parameters()
+                )
+            ]
+            if nonfinite_gradients:
+                output_dir = Path(str(self.cfg.paths.output_dir)) / "nonfinite_diagnostics"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                gradient_stats = {}
+                for name, module in modules.items():
+                    gradients = [
+                        parameter.grad.detach().float()
+                        for parameter in module.parameters()
+                        if parameter.grad is not None
+                    ]
+                    total = sum(gradient.numel() for gradient in gradients)
+                    finite = sum(
+                        int(torch.isfinite(gradient).sum().item()) for gradient in gradients
+                    )
+                    gradient_stats[name] = {
+                        "norm": float(norms[name].detach().cpu()),
+                        "finite_ratio": finite / max(total, 1),
+                    }
+                torch.save(
+                    gradient_stats,
+                    output_dir / f"step_{int(self.global_step):08d}_gradients.pt",
+                )
+                raise FloatingPointError(
+                    "view_complementary produced nonfinite gradients before optimizer.step: "
+                    + ", ".join(nonfinite_gradients)
+                )
             return
         if (
             not self._is_ssq_model()
@@ -1581,30 +1657,24 @@ class TrainingLightningModule(LightningModule):
             and getattr(self.net, "composition_mode", None) == "view_complementary"
             and view_phase in {"phase_b", "full"}
         ):
-            multipliers = (
-                {
-                    "encoder": 1.0,
-                    "candidate_construction": 5.0,
-                    "candidate_modules": 10.0,
-                }
-                if view_phase == "phase_b"
-                else {
-                    "encoder": 1.0,
-                    "candidate_construction": 5.0,
-                    "candidate_modules": 8.0,
-                }
-            )
+            lr_cfg = self.cfg.model.ssq_fmt.view_complementary.lr
             grouped_modules = {
                 "encoder": [self.net.surface_encoder, self.net.surface_sampler],
-                "candidate_construction": [
+                "constructor": [
                     self.net.view_candidate_evidence,
                     self.net.diverse_candidate_constructor,
                 ],
-                "candidate_modules": [
+                "candidate_encoder": [
                     self.net.complementary_aggregation,
-                    self.net.view_separability,
+                ],
+                "candidate_context": [
                     self.net.unified_density_decoder.candidate_context,
                 ],
+                "decoder": [
+                    self.net.unified_density_decoder.candidate_input,
+                    self.net.unified_density_decoder.head,
+                ],
+                "separability": [self.net.view_separability],
             }
             optimizer_params = []
             used: set[int] = set()
@@ -1620,7 +1690,7 @@ class TrainingLightningModule(LightningModule):
                     optimizer_params.append(
                         {
                             "params": parameters,
-                            "lr": optim_cfg.lr * multipliers[name],
+                            "lr": float(lr_cfg[name]),
                             "name": name,
                         }
                     )
@@ -1630,11 +1700,10 @@ class TrainingLightningModule(LightningModule):
                 if parameter.requires_grad and id(parameter) not in used
             ]
             if remaining:
-                shared_multiplier = 0.0 if view_phase == "phase_b" else 3.0
                 optimizer_params.append(
                     {
                         "params": remaining,
-                        "lr": optim_cfg.lr * shared_multiplier,
+                        "lr": float(lr_cfg.get("shared", 0.0)),
                         "name": "shared_decoder",
                     }
                 )

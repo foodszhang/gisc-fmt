@@ -45,66 +45,35 @@ model:
       sigma_min_mm: 1.0
       sigma_max_mm: 8.0
       score_threshold: 0.05
+      candidate_conf_threshold: 0.4
       delta_s: 0.25
       epsilon_s: 0.1
       evidence_eta0: 0.25
-      lambda_separability_measurement: 0.05
+      context_warmup_steps: 50
+      lambda_separability_measurement: 0.0
       lambda_center: 1.0
       lambda_cov: 0.1
       lambda_exist: 0.5
       lambda_cover: 0.5
       lambda_dup: 0.1
+      lr:
+        encoder: 0.000005
+        constructor: 0.00001
+        candidate_encoder: 0.00003
+        candidate_context: 0.00003
+        decoder: 0.00002
+        separability: 0.0
+        shared: 0.0
     memory:
       checkpoint_encoder: true
       checkpoint_decoder: true
-
-# Phase changes are explicit and resume only checkpoints produced by this experiment.
-view_complementary_training:
-  phase: A
-  from_scratch: true
-  init_from_ckpt: null
-  phase_a:
-    min_epochs: 4
-    max_epochs: 6
-    coverage_8mm_threshold: 0.70
-    duplicate_rate_threshold: 0.35
-    candidate_context_enabled: false
-    loss_weights:
-      heat: 1.0
-      center: 1.0
-      covariance: 0.1
-      existence: 0.5
-      coverage: 0.5
-      duplicate: 0.1
-  phase_b:
-    epochs: 3
-    stop_gradient_shared: true
-    lr_multipliers:
-      encoder: 1
-      shared_path: 0
-      candidate_construction: 5
-      candidate_view_encoder: 10
-      separability: 10
-      candidate_context: 10
-    loss_weights:
-      consistency: 0.05
-      inter_candidate: 0.05
-  phase_c:
-    restart_optimizer: true
-    lr_multipliers:
-      encoder: 1
-      shared_decoder: 3
-      candidate_construction: 5
-      candidate_view_encoder: 8
-      separability: 8
-      candidate_context: 8
 
 loss:
   light_weight: 1.0
   pos_weight: 50.0
   sparse_weight: 0.1
   dice_weight: 0.5
-  lambda_shared: 1.0
+  lambda_shared: 0.0
 
 optim:
   lr: 0.0001

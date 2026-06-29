@@ -492,6 +492,8 @@ class SSQFMT(nn.Module):
         )
         self.view_training_phase = str(view_cfg.get("training_phase", "phase_a"))
         self.view_training_epoch = 0
+        self.view_training_step = 0
+        self.context_warmup_steps = int(view_cfg.get("context_warmup_steps", 50))
         self.evidence_eta0 = float(view_cfg.get("evidence_eta0", 0.25))
         self.evidence_sigma_mm = float(view_cfg.get("evidence_sigma_mm", 3.0))
         self.lambda_separability_measurement = float(
@@ -508,6 +510,7 @@ class SSQFMT(nn.Module):
         self.diverse_candidate_constructor = DiverseCandidateConstructor(
             mmax=int(view_cfg.get("mmax", 5)),
             score_threshold=float(view_cfg.get("score_threshold", 0.05)),
+            candidate_conf_threshold=float(view_cfg.get("candidate_conf_threshold", 0.4)),
             sigma_nms_mm=float(view_cfg.get("sigma_nms_mm", 4.0)),
             sigma_assoc_mm=float(view_cfg.get("sigma_assoc_mm", 5.0)),
             sigma_min_mm=float(view_cfg.get("sigma_min_mm", 1.0)),
@@ -1079,13 +1082,13 @@ class SSQFMT(nn.Module):
     def set_training_epoch(self, epoch: int) -> None:
         self.view_training_epoch = int(epoch)
 
+    def set_training_step(self, step: int) -> None:
+        self.view_training_step = int(step)
+
     def set_view_training_phase(self, phase: str) -> None:
         if phase not in {"phase_a", "phase_b", "full"}:
             raise ValueError(f"unknown view-complementary training phase: {phase}")
         self.view_training_phase = phase
-        decoder_trainable = phase != "phase_b"
-        for parameter in self.unified_density_decoder.decoder.parameters():
-            parameter.requires_grad = decoder_trainable
 
     def _view_evidence_heatmap_loss(
         self,
@@ -1113,8 +1116,10 @@ class SSQFMT(nn.Module):
         amplitude = self.evidence_eta0 + (1.0 - self.evidence_eta0) * separability
         amplitude = amplitude * gt_mapped["valid_mask"].to(amplitude.dtype)
         delta = points_mm[:, None, :, None] - gt_centers[:, None, None]
-        inverse = torch.linalg.inv(gt_covariances.float()).to(delta.dtype)
-        mahal = torch.einsum("bvnci,bcij,bvncj->bvnc", delta, inverse, delta)
+        variance = torch.diagonal(
+            gt_covariances.float(), dim1=-2, dim2=-1
+        ).clamp_min(1.0e-4)
+        mahal = (delta.float().square() / variance[:, None, None]).sum(dim=-1)
         target = torch.exp(-0.5 * mahal) * amplitude[:, :, None]
         target = target.masked_fill(~gt_valid[:, None, None], 0.0).amax(dim=-1)
         mask = query_valid.to(evidence.dtype)
@@ -1177,13 +1182,9 @@ class SSQFMT(nn.Module):
         candidate_per_view = (
             candidate_samples["sample_features"] * candidate_samples["A"][..., None]
         ).sum(dim=3)
-        eigen_scale = (
-            torch.linalg.eigvalsh(candidates["candidate_covariances_mm"].float())
-            .clamp_min(1.0e-8)
-            .sqrt()
-            .mean(dim=-1)
-            .to(candidate_per_view.dtype)
-        )
+        eigen_scale = torch.diagonal(
+            candidates["candidate_covariances_mm"].float(), dim1=-2, dim2=-1
+        ).clamp_min(1.0e-8).sqrt().mean(dim=-1).to(candidate_per_view.dtype)
         px_per_mm = candidate_mapped["view_pixels_per_mm"].to(candidate_per_view.dtype)
         detector_scale = (
             eigen_scale[:, None] * px_per_mm[None, :, None]
@@ -1191,7 +1192,7 @@ class SSQFMT(nn.Module):
         )
         separability = self.view_separability(
             candidate_per_view,
-            candidate_mapped["grid"],
+            candidate_mapped["uv_px"].to(candidate_per_view.dtype),
             detector_scale,
             candidates["candidate_valid_mask"],
             mode=self.view_separability_mode,
@@ -1216,8 +1217,15 @@ class SSQFMT(nn.Module):
         if active_phase == "phase_b":
             aggregation["shared"] = aggregation["shared"].detach()
         decoder_ablation = self.view_complementary_ablation
+        context_scale = 1.0
         if active_phase == "phase_a":
             decoder_ablation = "shared_only"
+            context_scale = 0.0
+        elif active_phase == "phase_b":
+            context_scale = min(
+                1.0,
+                self.view_training_step / max(self.context_warmup_steps, 1),
+            )
         trunk = torch.tensor(self.trunk_size_mm, device=points_mm.device, dtype=points_mm.dtype)
         encoded_points = self.position_encoding(
             (points_mm / trunk.clamp_min(1.0e-6)).mul(2.0).sub(1.0)
@@ -1232,6 +1240,7 @@ class SSQFMT(nn.Module):
             candidates["candidate_scores"],
             candidates["candidate_valid_mask"],
             ablation=decoder_ablation,
+            context_scale=context_scale,
         )
         shared_decoded = self.unified_density_decoder(
             aggregation["shared"],
@@ -1243,6 +1252,7 @@ class SSQFMT(nn.Module):
             candidates["candidate_scores"] * 0.0,
             candidates["candidate_valid_mask"] & False,
             ablation="shared_only",
+            context_scale=0.0,
         )
         aux_outputs: dict[str, torch.Tensor] = {
             "shared_density": shared_decoded["density"],
@@ -1257,7 +1267,9 @@ class SSQFMT(nn.Module):
             "candidate_valid_mask": candidates["candidate_valid_mask"],
             "candidate_view_support": candidates["candidate_view_support"],
             "proposal_assignment": candidates["proposal_assignment"],
+            "proposal_compatibility": candidates["proposal_compatibility"],
             "per_view_evidence": proposal["evidence"],
+            "proposal_offsets_mm": proposal["offsets_mm"],
             "proposal_points_mm": proposal["proposal_points_mm"],
             "proposal_valid_mask": proposal["proposal_valid_mask"],
             "candidate_view_features": candidate_per_view,
@@ -1268,7 +1280,10 @@ class SSQFMT(nn.Module):
             "pair_separability": separability["pair_separability"],
             "geometry_separability": separability["geometry"],
             "measurement_separability_correction": separability["correction"],
+            "candidate_detector_scales": detector_scale,
             "candidate_context": decoded["candidate_context"],
+            "decoder_pre_activation": decoded["decoder_pre_activation"],
+            "candidate_context_scale": decoded["density"].new_tensor(context_scale),
             "candidate_alpha": decoded["alpha"],
             "measurement_supported": samples["query_view_valid"].any(dim=1),
             "view_complementary_mode": torch.ones((), device=points_mm.device),

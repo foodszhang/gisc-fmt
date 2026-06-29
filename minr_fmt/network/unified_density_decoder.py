@@ -18,8 +18,12 @@ class UnifiedDensityDecoder(nn.Module):
             nn.SiLU(),
             nn.Linear(hidden_dim, representation_dim),
         )
-        self.decoder = nn.Sequential(
-            nn.Linear(representation_dim * 2 + position_dim, hidden_dim),
+        self.shared_norm = nn.LayerNorm(representation_dim)
+        self.candidate_norm = nn.LayerNorm(representation_dim)
+        self.shared_input = nn.Linear(representation_dim + position_dim, hidden_dim)
+        self.candidate_input = nn.Linear(representation_dim, hidden_dim, bias=False)
+        nn.init.normal_(self.candidate_input.weight, std=1.0e-3)
+        self.head = nn.Sequential(
             nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(),
@@ -37,6 +41,7 @@ class UnifiedDensityDecoder(nn.Module):
         scores: torch.Tensor,
         valid: torch.Tensor,
         ablation: str = "full",
+        context_scale: float = 1.0,
     ) -> dict[str, torch.Tensor]:
         b, n, _ = points_mm.shape
         m = centers_mm.shape[1]
@@ -46,27 +51,36 @@ class UnifiedDensityDecoder(nn.Module):
             context = self.control_context(torch.cat([shared, encoded_points], dim=-1))
         elif ablation not in {"shared_only", "a0"} and m:
             delta = points_mm[:, :, None] - centers_mm[:, None]
-            inverse = torch.linalg.inv(covariance.float()).to(delta.dtype)
-            mahal = torch.einsum("bnmi,bmij,bnmj->bnm", delta, inverse, delta)
+            variance = torch.diagonal(
+                covariance.float(), dim1=-2, dim2=-1
+            ).clamp_min(1.0e-4)
+            mahal = (
+                delta.float().square() / variance[:, None]
+            ).sum(dim=-1)
             applicability = torch.exp(-0.5 * mahal) * scores[:, None]
             applicability = applicability * valid[:, None].to(applicability.dtype)
             alpha = applicability / applicability.sum(dim=-1, keepdim=True).clamp_min(1.0e-8)
-            eigen = (
-                torch.linalg.eigvalsh(covariance.float())
-                .clamp_min(1.0e-8)
-                .sqrt()
-                .to(delta.dtype)
-            )
+            scales = variance.sqrt().to(delta.dtype)
             candidate_input = torch.cat(
                 [
                     candidate[:, None].expand(-1, n, -1, -1),
                     delta,
-                    eigen[:, None].expand(-1, n, -1, -1),
+                    scales[:, None].expand(-1, n, -1, -1),
                     scores[:, None, :, None].expand(-1, n, -1, -1),
                 ],
                 dim=-1,
             )
             encoded = self.candidate_context(candidate_input)
             context = (alpha[..., None] * encoded).sum(dim=2)
-        density = torch.sigmoid(self.decoder(torch.cat([shared, context, encoded_points], dim=-1)))
-        return {"density": density, "candidate_context": context, "alpha": alpha}
+        shared_hidden = self.shared_input(
+            torch.cat([self.shared_norm(shared), encoded_points], dim=-1)
+        )
+        candidate_hidden = self.candidate_input(self.candidate_norm(context))
+        pre_activation = shared_hidden + float(context_scale) * candidate_hidden
+        density = torch.sigmoid(self.head(pre_activation))
+        return {
+            "density": density,
+            "candidate_context": context,
+            "alpha": alpha,
+            "decoder_pre_activation": pre_activation,
+        }
