@@ -16,6 +16,7 @@ MAX_SAMPLES="${MAX_SAMPLES:-}"
 BOOTSTRAP_SAMPLES="${BOOTSTRAP_SAMPLES:-10000}"
 SKIP_SMOKE="${SKIP_SMOKE:-0}"
 SMOKE_ONLY="${SMOKE_ONLY:-0}"
+EVALUATOR="scripts/eval_view_complementary_full_volume_paired_safe.py"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -35,7 +36,7 @@ fi
 
 if [[ "$SKIP_SMOKE" != "1" ]]; then
   printf '\n[%s] Smoke test: 1 full-volume sample, 1024 proposal points\n' "$(date '+%F %T')"
-  uv run python scripts/eval_view_complementary_full_volume_paired.py \
+  uv run python "$EVALUATOR" \
     --output_dir "${OUTPUT_DIR}/smoke" \
     --proposal_count 1024 \
     --proposal_seed "$PROPOSAL_SEED" \
@@ -51,7 +52,7 @@ if [[ "$SMOKE_ONLY" == "1" ]]; then
 fi
 
 printf '\n[%s] Formal paired full-volume evaluation\n' "$(date '+%F %T')"
-uv run python scripts/eval_view_complementary_full_volume_paired.py \
+uv run python "$EVALUATOR" \
   --output_dir "$OUTPUT_DIR" \
   "${COMMON[@]}"
 
