@@ -3,12 +3,18 @@
 
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
 
-from scripts import eval_view_complementary_full_volume_paired as base
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts import eval_view_complementary_full_volume_paired as base  # noqa: E402
 
 
 def predict_full_volume_low_memory(
