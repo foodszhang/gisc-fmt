@@ -13,8 +13,8 @@ VAL_SAMPLES="${VAL_SAMPLES:-300}"
 TRAIN_QUERIES="${TRAIN_QUERIES:-8192}"
 EVAL_QUERIES="${EVAL_QUERIES:-8192}"
 MAX_EPOCHS="${MAX_EPOCHS:-50}"
-NUM_WORKERS="${NUM_WORKERS:-4}"
-PREFETCH_FACTOR="${PREFETCH_FACTOR:-2}"
+NUM_WORKERS="${NUM_WORKERS:-8}"
+PREFETCH_FACTOR="${PREFETCH_FACTOR:-4}"
 VAL_INTERVAL="${VAL_INTERVAL:-1.0}"
 BATCH_SIZE="${BATCH_SIZE:-2}"
 
@@ -102,6 +102,7 @@ log "Implementation: ablation=a3_geometry_only, separability=geometry_only"
 log "Direct view reliability: valid_view * (epsilon + geometry_separability); no support multiplier"
 log "Support remains through measurement-derived hypothesis construction and existence scoring"
 log "Train samples=${TRAIN_SAMPLES}, val samples=${VAL_SAMPLES}, epochs=${MAX_EPOCHS}"
+log "Data workers=${NUM_WORKERS}, prefetch=${PREFETCH_FACTOR}; unused Stage-1/descatter IO disabled"
 log "Initialization checkpoint: ${INIT_CKPT_RESOLVED}"
 log "Run directory: ${RUN_DIR}"
 
@@ -129,6 +130,9 @@ else
     data.persistent_workers=true
     "data.prefetch_factor=${PREFETCH_FACTOR}"
     data.resample_queries_each_epoch=true
+    "data.descatter_target_files=[]"
+    "++data.load_stage1_prior=false"
+    "++data.load_stage1_mesh=false"
     trainer.check_val_every_n_epoch=1
     "+trainer.val_check_interval=${VAL_INTERVAL}"
     trainer.num_sanity_val_steps=0
