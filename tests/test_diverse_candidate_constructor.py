@@ -28,6 +28,10 @@ def test_diverse_initialization_suppresses_near_duplicates_and_assignment_compet
     assert torch.all(distance > 4.0)
     assignment = out["proposal_assignment"]
     assert torch.allclose(assignment.sum(dim=1), torch.ones_like(assignment[:, 0]), atol=1e-6)
+    covariance = out["candidate_covariances_mm"]
+    diagonal = torch.diagonal(covariance, dim1=-2, dim2=-1)
+    assert torch.count_nonzero(covariance - torch.diag_embed(diagonal)) == 0
+    assert torch.all((out["candidate_view_support"] >= 0) & (out["candidate_view_support"] <= 1))
 
 
 def test_proposal_order_does_not_change_constructed_candidate_set():

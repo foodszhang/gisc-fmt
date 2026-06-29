@@ -48,6 +48,7 @@ class UnifiedDensityDecoder(nn.Module):
         m = centers_mm.shape[1]
         context = shared.new_zeros((b, n, shared.shape[-1]))
         alpha = shared.new_zeros((b, n, m))
+        hypothesis_gate = shared.new_ones((b, n, 1))
         if ablation == "shared_capacity":
             context = self.control_context(torch.cat([shared, encoded_points], dim=-1))
         elif ablation not in {"shared_only", "a0"} and m:
@@ -74,12 +75,14 @@ class UnifiedDensityDecoder(nn.Module):
             )
             encoded = self.candidate_context(candidate_input)
             context = (alpha[..., None] * encoded).sum(dim=2)
-            if continuous_applicability:
-                context = context * hypothesis_gate.to(context.dtype)
         shared_hidden = self.shared_input(
             torch.cat([self.shared_norm(shared), encoded_points], dim=-1)
         )
         candidate_hidden = self.candidate_input(self.candidate_norm(context))
+        # LayerNorm largely cancels a pre-normalization amplitude gate.  Apply
+        # continuous existence/applicability after normalization instead.
+        if continuous_applicability:
+            candidate_hidden = candidate_hidden * hypothesis_gate.to(candidate_hidden.dtype)
         pre_activation = shared_hidden + float(context_scale) * candidate_hidden
         density = torch.sigmoid(self.head(pre_activation))
         return {

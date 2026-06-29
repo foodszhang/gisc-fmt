@@ -1,7 +1,8 @@
 # SSQ-FMT Evidence Audit
 
-- generator_git_commit: `9262081`
-- generator_sha256: `cdd4095730b2fbb5ba131dc263131cfe010805fca650a179922daa8cb3b62c14`
+- generator_repo_head_at_generation: `92496da`
+- generator_script_git_blob_sha: `666e59823bdb47aa70f0c886145e83dc2bb641fe`
+- generator_script_sha256: `ff22009048099b6f805fa3328200a35ffd1173713b5f88bf89678cc5676e6657`
 - generation_command: `uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py`
 
 ## fig_source_separation_profiles

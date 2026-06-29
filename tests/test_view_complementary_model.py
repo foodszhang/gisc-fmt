@@ -29,12 +29,37 @@ def test_geometry_and_measurement_separability_are_symmetric_and_bounded():
     scales = torch.ones(2, 3, 4)
     valid = torch.ones(2, 4, dtype=torch.bool)
     geometry = module(features, centers, scales, valid, mode="geometry_only")
+    with torch.no_grad():
+        module.correction[-1].bias.fill_(0.1)
     full = module(features, centers, scales, valid, mode="geometry_measurement")
     for out in (geometry, full):
         pair = out["pair_separability"]
         assert torch.allclose(pair, pair.transpose(-1, -2), atol=1e-6)
         assert torch.all((pair >= 0.0) & (pair <= 1.0))
     assert not torch.allclose(geometry["pair_separability"], full["pair_separability"])
+
+
+def test_geometry_separability_uses_consistent_pixel_units():
+    module = ViewSeparability(4)
+    features = torch.zeros(1, 1, 2, 4)
+    centers = torch.tensor([[[[0.0, 0.0], [10.0, 0.0]]]])
+    valid = torch.ones(1, 2, dtype=torch.bool)
+    narrow = module(
+        features, centers, torch.full((1, 1, 2), 2.0), valid, mode="geometry_only"
+    )["pair_separability"][0, 0, 0, 1]
+    broad = module(
+        features, centers, torch.full((1, 1, 2), 20.0), valid, mode="geometry_only"
+    )["pair_separability"][0, 0, 0, 1]
+    scaled = module(
+        features,
+        centers * 2.0,
+        torch.full((1, 1, 2), 4.0),
+        valid,
+        mode="geometry_only",
+    )["pair_separability"][0, 0, 0, 1]
+    assert narrow > 0.99
+    assert broad < 0.2
+    assert torch.allclose(narrow, scaled, atol=1.0e-6)
 
 
 def test_unified_decoder_has_exact_shared_fallback_and_candidate_permutation_invariance():

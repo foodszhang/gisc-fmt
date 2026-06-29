@@ -6,7 +6,7 @@
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-    <dc:date>2026-06-17T22:37:11.858666</dc:date>
+    <dc:date>2026-06-19T15:10:08.334649</dc:date>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
@@ -37,9 +37,9 @@ L 7.2 19.27875
 z
 " style="fill: #ffffff"/>
    </g>
-   <g clip-path="url(#p0a7c1c4359)">
+   <g clip-path="url(#p8d93fdc89c)">
     <image xlink:href="data:image/png;base64,
-iVBORw0KGgoAAAANSUhEUgAAAK8AAACvCAYAAACLko51AAACDUlEQVR4nO3UsQ3CQAAEQUCukZBmyCjHEXW4CmeOIYEekNBrXzMVXLC687rtnxN/cb3dR0+Y2mX0APiVeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGStRyv9+gN09qej9ETpuZ5yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZL1BX21Cvg45s5wAAAAAElFTkSuQmCC" id="image86dec9435f" transform="scale(1 -1) translate(0 -126)" x="7.2" y="-18.586364" width="126" height="126"/>
+iVBORw0KGgoAAAANSUhEUgAAAK8AAACvCAYAAACLko51AAACDUlEQVR4nO3UsQ3CQAAEQUCukZBmyCjHEXW4CmeOIYEekNBrXzMVXLC687rtnxN/cb3dR0+Y2mX0APiVeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGStRyv9+gN09qej9ETpuZ5yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZIlXrLES5Z4yRIvWeIlS7xkiZcs8ZL1BX21Cvg45s5wAAAAAElFTkSuQmCC" id="image7184392f22" transform="scale(1 -1) translate(0 -126)" x="7.2" y="-18.586364" width="126" height="126"/>
    </g>
    <g id="matplotlib.axis_1">
     <g id="text_1">
@@ -89,9 +89,9 @@ L 179.04 19.27875
 z
 " style="fill: #ffffff"/>
    </g>
-   <g clip-path="url(#pb1b651ed84)">
+   <g clip-path="url(#p4dc9153aaf)">
     <image xlink:href="data:image/png;base64,
-iVBORw0KGgoAAAANSUhEUgAAAK8AAACvCAYAAACLko51AAACDklEQVR4nO3UsQnCUABFUSMZzwXcxtaB0jmDVcAhUjqA7iDI537OmeAVl7c8XsfnxF9crrfRE6Z2Hj0AfiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSt+/EevWFaz+0+esLUPC9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVesr6BcgrAouHsAAAAAABJRU5ErkJggg==" id="image8e026ee319" transform="scale(1 -1) translate(0 -126)" x="179.04" y="-18.586364" width="126" height="126"/>
+iVBORw0KGgoAAAANSUhEUgAAAK8AAACvCAYAAACLko51AAACDklEQVR4nO3UsQnCUABFUSMZzwXcxtaB0jmDVcAhUjqA7iDI537OmeAVl7c8XsfnxF9crrfRE6Z2Hj0AfiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSt+/EevWFaz+0+esLUPC9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVesr6BcgrAouHsAAAAAABJRU5ErkJggg==" id="image46fa0eb78e" transform="scale(1 -1) translate(0 -126)" x="179.04" y="-18.586364" width="126" height="126"/>
    </g>
    <g id="matplotlib.axis_3">
     <g id="text_7">
@@ -141,9 +141,9 @@ L 350.88 19.27875
 z
 " style="fill: #ffffff"/>
    </g>
-   <g clip-path="url(#pe7496b4c1f)">
+   <g clip-path="url(#pd5f1ea5da2)">
     <image xlink:href="data:image/png;base64,
-iVBORw0KGgoAAAANSUhEUgAAAK8AAACvCAYAAACLko51AAACEElEQVR4nO3UMQ0CUQAFQY6cLUxgBwWouQoVJNRU9HQ4AA8kl5/9mVHwis1b7q/P98AuTufL6AlTO44eAP8SL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6y1u35Hr1hWo/bdfSEqXlessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGT9ADfGCn6qyijXAAAAAElFTkSuQmCC" id="imagead01dabb43" transform="scale(1 -1) translate(0 -126)" x="350.88" y="-18.586364" width="126" height="126"/>
+iVBORw0KGgoAAAANSUhEUgAAAK8AAACvCAYAAACLko51AAACEElEQVR4nO3UMQ0CUQAFQY6cLUxgBwWouQoVJNRU9HQ4AA8kl5/9mVHwis1b7q/P98AuTufL6AlTO44eAP8SL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6yxEuWeMkSL1niJUu8ZImXLPGSJV6y1u35Hr1hWo/bdfSEqXlessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGSJlyzxkiVessRLlnjJEi9Z4iVLvGT9ADfGCn6qyijXAAAAAElFTkSuQmCC" id="image367899a008" transform="scale(1 -1) translate(0 -126)" x="350.88" y="-18.586364" width="126" height="126"/>
    </g>
    <g id="matplotlib.axis_5">
     <g id="text_13">
@@ -186,13 +186,13 @@ L 476.187614 144.586364
   </g>
  </g>
  <defs>
-  <clipPath id="p0a7c1c4359">
+  <clipPath id="p8d93fdc89c">
    <rect x="7.2" y="19.27875" width="125.307614" height="125.307614"/>
   </clipPath>
-  <clipPath id="pb1b651ed84">
+  <clipPath id="p4dc9153aaf">
    <rect x="179.04" y="19.27875" width="125.307614" height="125.307614"/>
   </clipPath>
-  <clipPath id="pe7496b4c1f">
+  <clipPath id="pd5f1ea5da2">
    <rect x="350.88" y="19.27875" width="125.307614" height="125.307614"/>
   </clipPath>
  </defs>

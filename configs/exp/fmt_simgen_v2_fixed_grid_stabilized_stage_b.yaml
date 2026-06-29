@@ -1,0 +1,25 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_fixed_grid_stabilized_stage_a
+  - _self_
+
+name: fmt_simgen_v2_fixed_grid_stabilized_stage_b
+
+model:
+  ssq_fmt:
+    view_complementary:
+      lr:
+        constructor: 0.0
+        candidate_context: 0.00003
+        decoder: 0.000005
+  finetune:
+    train_modules_only:
+      - unified_density_decoder.candidate_context
+      - unified_density_decoder.candidate_norm
+      - unified_density_decoder.candidate_input
+      - unified_density_decoder.head
+
+trainer:
+  max_epochs: 1
+

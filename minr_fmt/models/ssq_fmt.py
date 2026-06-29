@@ -479,6 +479,7 @@ class SSQFMT(nn.Module):
         self.view_training_epoch = 0
         self.view_training_step = 0
         self.context_warmup_steps = int(view_cfg.get("context_warmup_steps", 50))
+        self.context_warmup_enabled = bool(view_cfg.get("context_warmup_enabled", True))
         grid_cfg = view_cfg.get("hypothesis_grid", {})
         self.hypothesis_grid_enabled = bool(grid_cfg.get("enabled", False))
         self.hypothesis_grid_spacing_mm = float(grid_cfg.get("spacing_mm", 3.0))
@@ -1199,9 +1200,13 @@ class SSQFMT(nn.Module):
             grid_shape=evidence_grid_shape,
         )
         candidates = self.diverse_candidate_constructor(proposal)
+        continuous_hypothesis_modes = {
+            "a3_v2_bounded_routing",
+            "fixed_grid_stabilized",
+        }
         reconstruction_valid = (
             candidates["candidate_slot_valid_mask"]
-            if self.view_complementary_ablation == "a3_v2_bounded_routing"
+            if self.view_complementary_ablation in continuous_hypothesis_modes
             else candidates["candidate_valid_mask"]
         )
         centers = candidates["candidate_centers_mm"]
@@ -1249,11 +1254,13 @@ class SSQFMT(nn.Module):
             separability["separability"],
             reconstruction_valid,
             candidate_view_valid=candidate_valid_by_view,
-            uniform_views=self.view_complementary_ablation in {"a2", "uniform_views"},
+            uniform_views=self.view_complementary_ablation
+            in {"a2", "uniform_views", "isolated_bounded_routing", "fixed_grid_stabilized"},
             geometry_only=self.view_complementary_ablation == "a3_geometry_only",
         )
         routing_diagnostics = None
-        if self.view_complementary_ablation == "a3_v2_bounded_routing":
+        routing_modes = {"a3_v2_bounded_routing", "isolated_bounded_routing"}
+        if self.view_complementary_ablation in routing_modes:
             if self.bounded_view_routing is None:
                 raise RuntimeError("a3_v2_bounded_routing requires routing.enabled=true")
             # Candidate representation remains an A2-U valid-view mean.
@@ -1263,7 +1270,7 @@ class SSQFMT(nn.Module):
                 samples["query_view_valid"],
                 support,
                 separability["separability"],
-                candidates["candidate_slot_valid_mask"],
+                reconstruction_valid,
                 candidate_view_valid=candidate_valid_by_view,
                 uniform_views=True,
             )
@@ -1272,7 +1279,7 @@ class SSQFMT(nn.Module):
                 centers,
                 candidates["candidate_covariances_mm"],
                 candidates["candidate_existence_probability"],
-                candidates["candidate_slot_valid_mask"],
+                reconstruction_valid,
                 candidates["candidate_view_support"],
                 separability["separability"],
                 samples["query_view_valid"],
@@ -1292,7 +1299,7 @@ class SSQFMT(nn.Module):
         active_phase = self.view_training_phase
         if (
             active_phase == "phase_b"
-            and self.view_complementary_ablation != "a3_v2_bounded_routing"
+            and self.view_complementary_ablation not in routing_modes
         ):
             aggregation["shared"] = aggregation["shared"].detach()
         decoder_ablation = self.view_complementary_ablation
@@ -1300,7 +1307,7 @@ class SSQFMT(nn.Module):
         if active_phase == "phase_a":
             decoder_ablation = "shared_only"
             context_scale = 0.0
-        elif active_phase == "phase_b" and self.training:
+        elif active_phase == "phase_b" and self.training and self.context_warmup_enabled:
             context_scale = min(
                 1.0,
                 self.view_training_step / max(self.context_warmup_steps, 1),

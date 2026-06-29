@@ -67,7 +67,20 @@ def test_continuous_context_gate_vanishes_for_weak_hypotheses():
         valid,
         continuous_applicability=True,
     )
-    assert torch.count_nonzero(out["candidate_context"]) == 0
+    shared_hidden = decoder.shared_input(
+        torch.cat([decoder.shared_norm(shared), encoded], dim=-1)
+    )
+    assert torch.allclose(out["decoder_pre_activation"], shared_hidden, atol=1e-6)
+
+
+def test_grid_nms_accepts_bfloat16_scores():
+    from minr_fmt.network.view_candidate_evidence import ViewCandidateEvidence
+
+    scores = torch.zeros(1, 1, 27, dtype=torch.bfloat16)
+    scores[..., 13] = 1
+    maxima = ViewCandidateEvidence._grid_local_maxima(scores, (3, 3, 3))
+    assert maxima.dtype == torch.bool
+    assert maxima[..., 13].all()
 
 
 def test_analysis_threshold_changes_mask_not_reconstruction_slots():

@@ -1507,15 +1507,23 @@ class TrainingLightningModule(LightningModule):
                 on_step=False,
                 on_epoch=True,
                 sync_dist=True,
+                batch_size=centers.shape[0],
             )
         count = valid.sum(dim=-1)
-        self.log("val_candidate_count_mean", count.float().mean(), on_epoch=True, sync_dist=True)
+        self.log(
+            "val_candidate_count_mean",
+            count.float().mean(),
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=centers.shape[0],
+        )
         for number in range(1, centers.shape[1] + 1):
             self.log(
                 f"val_candidate_count_{number}_ratio",
                 (count == number).float().mean(),
                 on_epoch=True,
                 sync_dist=True,
+                batch_size=centers.shape[0],
             )
         support = diagnostics["candidate_view_support"].detach()
         support_count = ((support > 1.0e-4) & valid[:, :, None]).sum(dim=-1).float()
@@ -1524,6 +1532,7 @@ class TrainingLightningModule(LightningModule):
             support_count[valid].mean() if valid.any() else centers.new_zeros(()),
             on_epoch=True,
             sync_dist=True,
+            batch_size=centers.shape[0],
         )
         if torch.is_tensor(diagnostics.get("routing_residual")):
             residual = diagnostics["routing_residual"].detach().float().abs().flatten()

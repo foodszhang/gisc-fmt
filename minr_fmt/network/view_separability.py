@@ -16,6 +16,8 @@ class ViewSeparability(nn.Module):
             nn.SiLU(),
             nn.Linear(hidden_dim, 1),
         )
+        nn.init.zeros_(self.correction[-1].weight)
+        nn.init.zeros_(self.correction[-1].bias)
 
     def forward(
         self,
