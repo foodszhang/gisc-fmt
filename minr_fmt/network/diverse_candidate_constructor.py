@@ -10,6 +10,14 @@ import torch.nn.functional as F
 
 
 class DiverseCandidateConstructor(nn.Module):
+    """Associate view-conditioned proposals into diverse multi-view hypotheses.
+
+    Measurement support and source-hypothesis existence are intentionally kept
+    separate. Support describes how strongly each view contributes evidence;
+    existence estimates whether a candidate slot corresponds to an independent
+    source component rather than an extra/decoy slot.
+    """
+
     def __init__(
         self,
         mmax: int = 5,
@@ -22,6 +30,8 @@ class DiverseCandidateConstructor(nn.Module):
         beta_descriptor: float = 0.5,
         beta_evidence: float = 0.25,
         refinement_steps: int = 2,
+        descriptor_dim: int = 32,
+        existence_hidden_dim: int = 64,
     ) -> None:
         super().__init__()
         self.mmax = int(mmax)
@@ -34,11 +44,17 @@ class DiverseCandidateConstructor(nn.Module):
         self.beta_descriptor = nn.Parameter(torch.tensor(float(beta_descriptor)))
         self.beta_evidence = nn.Parameter(torch.tensor(float(beta_evidence)))
         self.refinement_steps = int(refinement_steps)
+        existence_input_dim = int(descriptor_dim) + 7
+        self.existence_head = nn.Sequential(
+            nn.Linear(existence_input_dim, int(existence_hidden_dim)),
+            nn.SiLU(),
+            nn.Linear(int(existence_hidden_dim), 1),
+        )
 
     def _initialize(
         self, points: torch.Tensor, scores: torch.Tensor, valid: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        b, p, _ = points.shape
+        b, _, _ = points.shape
         anchors = points.new_zeros((b, self.mmax, 3))
         anchor_valid = torch.zeros((b, self.mmax), dtype=torch.bool, device=points.device)
         diverse = scores.masked_fill(~valid, -1.0)
@@ -55,6 +71,28 @@ class DiverseCandidateConstructor(nn.Module):
             diverse = diverse * torch.where(chosen[:, None], suppression, torch.ones_like(diverse))
             diverse = diverse.masked_fill(~valid, -1.0)
         return anchors, anchor_valid
+
+    @staticmethod
+    def _support_statistics(support: torch.Tensor) -> torch.Tensor:
+        support_safe = support.clamp_min(1.0e-8)
+        normalized = support_safe / support_safe.sum(dim=-1, keepdim=True).clamp_min(1.0e-8)
+        entropy = -(normalized * normalized.log()).sum(dim=-1)
+        entropy = entropy / max(float(support.shape[-1]), 2.0).__class__(
+            torch.log(torch.tensor(float(max(support.shape[-1], 2)), device=support.device))
+        )
+        # Avoid the awkward scalar construction above influencing autograd/dtype.
+        entropy = -(normalized * normalized.log()).sum(dim=-1) / torch.log(
+            support.new_tensor(float(max(support.shape[-1], 2)))
+        )
+        return torch.stack(
+            [
+                support.mean(dim=-1),
+                support.amax(dim=-1),
+                support.std(dim=-1, unbiased=False),
+                entropy,
+            ],
+            dim=-1,
+        )
 
     def forward(self, proposals: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         points_v = proposals["proposal_points_mm"]
@@ -103,21 +141,37 @@ class DiverseCandidateConstructor(nn.Module):
             )
             anchor_desc = torch.einsum("bmp,bpd->bmd", weight, descriptors) / denom[..., None]
             anchor_desc = F.normalize(anchor_desc, dim=-1)
+
         assignment_v = assignment.reshape(b, self.mmax, v, k)
         weighted_score = assignment_v * scores_v[:, None]
         assignment_mass = assignment_v.sum(dim=-1).clamp_min(1.0e-6)
         support = (weighted_score.sum(dim=-1) / assignment_mass).clamp(0.0, 1.0)
-        confidence = 1.0 - (1.0 - support.clamp(0.0, 1.0)).prod(dim=-1)
-        confidence = confidence * anchor_valid.to(confidence.dtype)
+        support_confidence = 1.0 - (1.0 - support).prod(dim=-1)
+        support_confidence = support_confidence * anchor_valid.to(support_confidence.dtype)
+
+        existence_input = torch.cat(
+            [
+                anchor_desc,
+                self._support_statistics(support),
+                variance.clamp_min(1.0e-6).log(),
+            ],
+            dim=-1,
+        )
+        existence_logits = self.existence_head(existence_input).squeeze(-1)
+        existence_probability = torch.sigmoid(existence_logits)
+        existence_probability = existence_probability * anchor_valid.to(existence_probability.dtype)
         effective_valid = anchor_valid & (
-            confidence.detach() >= self.candidate_conf_threshold
+            existence_probability.detach() >= self.candidate_conf_threshold
         )
         candidate_valid = anchor_valid if self.training else effective_valid
         covariance = torch.diag_embed(variance)
         return {
             "candidate_centers_mm": anchors,
             "candidate_covariances_mm": covariance,
-            "candidate_scores": confidence,
+            "candidate_scores": existence_probability,
+            "candidate_existence_logits": existence_logits,
+            "candidate_existence_probability": existence_probability,
+            "candidate_support_confidence": support_confidence,
             "candidate_valid_mask": candidate_valid,
             "candidate_slot_valid_mask": anchor_valid,
             "effective_candidate_valid_mask": effective_valid,
@@ -140,8 +194,8 @@ class DiverseCandidateConstructor(nn.Module):
     ) -> dict[str, torch.Tensor]:
         """Hungarian-style set supervision used only when GT is explicitly supplied."""
         centers = candidates["candidate_centers_mm"]
-        scores = candidates["candidate_scores"].clamp(1.0e-6, 1.0 - 1.0e-6)
-        valid = candidates["candidate_valid_mask"]
+        scores = candidates["candidate_existence_probability"].clamp(1.0e-6, 1.0 - 1.0e-6)
+        valid = candidates.get("candidate_slot_valid_mask", candidates["candidate_valid_mask"])
         center_loss = centers.sum() * 0.0
         existence_loss = centers.sum() * 0.0
         coverage_loss = centers.sum() * 0.0
@@ -166,16 +220,14 @@ class DiverseCandidateConstructor(nn.Module):
                 selected = permutations[cost[permutations, columns].sum(dim=1).argmin()]
                 matched_candidates = candidate_index[selected]
                 matched_components = component_index[:count]
-                center_loss = center_loss + torch.nn.functional.l1_loss(
+                center_loss = center_loss + F.l1_loss(
                     centers[batch_index, matched_candidates],
                     gt_centers_mm[batch_index, matched_components].to(centers.dtype),
                     reduction="mean",
                 )
                 if gt_covariances_mm is not None:
                     predicted_eigen = torch.diagonal(
-                        candidates["candidate_covariances_mm"][
-                            batch_index, matched_candidates
-                        ].float(),
+                        candidates["candidate_covariances_mm"][batch_index, matched_candidates].float(),
                         dim1=-2,
                         dim2=-1,
                     ).clamp_min(1.0e-8)
@@ -184,7 +236,7 @@ class DiverseCandidateConstructor(nn.Module):
                         dim1=-2,
                         dim2=-1,
                     ).clamp_min(1.0e-8)
-                    covariance_loss = covariance_loss + torch.nn.functional.l1_loss(
+                    covariance_loss = covariance_loss + F.l1_loss(
                         predicted_eigen.log(), target_eigen.log(), reduction="sum"
                     )
                 existence_targets[batch_index, matched_candidates] = 1.0
@@ -200,12 +252,7 @@ class DiverseCandidateConstructor(nn.Module):
                 coverage_loss = coverage_loss + finite.mean() / max(
                     duplicate_distance_mm**2, 1.0e-6
                 )
-        score_float = scores.float().clamp(1.0e-6, 1.0 - 1.0e-6)
-        target_float = existence_targets.float()
-        existence_loss = -(
-            target_float * score_float.log()
-            + (1.0 - target_float) * (1.0 - score_float).log()
-        ).mean()
+        existence_loss = F.binary_cross_entropy(scores.float(), existence_targets.float())
         center_loss = center_loss / max(match_count, 1)
         covariance_loss = covariance_loss / max(match_count, 1)
         coverage_loss = coverage_loss / max(centers.shape[0], 1)
@@ -226,4 +273,5 @@ class DiverseCandidateConstructor(nn.Module):
             "candidate_existence_loss": existence_loss,
             "candidate_coverage_loss": coverage_loss,
             "candidate_duplicate_loss": duplicate_loss,
+            "candidate_existence_target": existence_targets.detach(),
         }
