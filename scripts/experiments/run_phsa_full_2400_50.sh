@@ -66,44 +66,15 @@ print(max(files, key=score).resolve())
 PY
 }
 
-resolve_init_checkpoint() {
-  if [[ -n "${INIT_CKPT:-}" ]]; then
-    [[ -f "$INIT_CKPT" ]] || die "Missing INIT_CKPT: $INIT_CKPT"
-    realpath "$INIT_CKPT"
-    return
-  fi
-
-  local phase_a
-  phase_a="$({
-    find outputs/view_complementary \
-      -type f \
-      -path "*phase_a_seed${SEED}/checkpoints/last.ckpt" \
-      -printf '%T@ %p\n' 2>/dev/null || true
-  } | sort -nr | head -n 1 | cut -d' ' -f2-)"
-  if [[ -n "$phase_a" ]]; then
-    realpath "$phase_a"
-    return
-  fi
-
-  local warmup="outputs/view_complementary/long_1k_continue_candidate_warmup_seed${SEED}/checkpoints/last.ckpt"
-  if [[ -f "$warmup" ]]; then
-    realpath "$warmup"
-    return
-  fi
-
-  die "No initialization checkpoint found. Set INIT_CKPT=/absolute/path/to/checkpoint.ckpt"
-}
-
-INIT_CKPT_RESOLVED="$(resolve_init_checkpoint)"
 LAST_CKPT="${RUN_DIR}/checkpoints/last.ckpt"
 
 log "PHSA full training"
+log "Initialization: random from-scratch initialization"
 log "Implementation: ablation=a3_geometry_only, separability=geometry_only"
 log "Direct view reliability: valid_view * (epsilon + geometry_separability); no support multiplier"
 log "Support remains through measurement-derived hypothesis construction and existence scoring"
 log "Train samples=${TRAIN_SAMPLES}, val samples=${VAL_SAMPLES}, epochs=${MAX_EPOCHS}"
 log "Data workers=${NUM_WORKERS}, prefetch=${PREFETCH_FACTOR}; unused Stage-1/descatter IO disabled"
-log "Initialization checkpoint: ${INIT_CKPT_RESOLVED}"
 log "Run directory: ${RUN_DIR}"
 
 if [[ -f "$LAST_CKPT" ]] && [[ "$(checkpoint_epoch "$LAST_CKPT")" -ge $((MAX_EPOCHS - 1)) ]]; then
@@ -162,11 +133,10 @@ else
   )
 
   if [[ -f "$LAST_CKPT" ]]; then
-    log "Resuming full trainer state from ${LAST_CKPT}"
+    log "Resuming the same from-scratch run from ${LAST_CKPT}"
     CMD+=("ckpt_path=$(realpath "$LAST_CKPT")" ckpt_weights_only=false)
   else
-    log "Initializing weights from ${INIT_CKPT_RESOLVED}"
-    CMD+=("ckpt_path=${INIT_CKPT_RESOLVED}" ckpt_weights_only=true)
+    log "No run-local checkpoint found; starting with newly initialized model weights"
   fi
 
   "${CMD[@]}"
