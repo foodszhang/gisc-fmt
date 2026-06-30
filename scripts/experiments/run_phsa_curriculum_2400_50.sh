@@ -10,6 +10,7 @@ export PYTHONUNBUFFERED=1
 SEED="${SEED:-42}"
 TRAIN_SAMPLES="${TRAIN_SAMPLES:-2400}"
 VAL_SAMPLES="${VAL_SAMPLES:-128}"
+TEST_SAMPLES="${TEST_SAMPLES:-300}"
 TRAIN_QUERIES="${TRAIN_QUERIES:-4096}"
 EVAL_QUERIES="${EVAL_QUERIES:-4096}"
 HYPOTHESIS_POINTS="${HYPOTHESIS_POINTS:-4096}"
@@ -21,11 +22,13 @@ PHASE_A_EPOCHS="${PHASE_A_EPOCHS:-20}"
 PHASE_B_EPOCHS="${PHASE_B_EPOCHS:-14}"
 FULL_EPOCHS="${FULL_EPOCHS:-16}"
 VAL_EVERY="${VAL_EVERY:-2}"
+SELECTION_SAMPLES="${SELECTION_SAMPLES:-16}"
 
 RUN_ROOT="${RUN_ROOT:-outputs/view_complementary/phsa_curriculum_2400_seed${SEED}}"
 PHASE_A_DIR="${RUN_ROOT}_phase_a_e${PHASE_A_EPOCHS}"
 PHASE_B_DIR="${RUN_ROOT}_phase_b_e${PHASE_B_EPOCHS}"
 FULL_DIR="${RUN_ROOT}_full_e${FULL_EPOCHS}"
+SELECTION_DIR="${RUN_ROOT}_checkpoint_selection"
 OLD_EVAL_DIR="${OLD_EVAL_DIR:-outputs/view_complementary/phsa_full_volume_paired_20260629}"
 FINAL_EVAL_DIR="${FINAL_EVAL_DIR:-${RUN_ROOT}_full_volume}"
 RUN_FULL_EVAL="${RUN_FULL_EVAL:-1}"
@@ -34,30 +37,22 @@ PROPOSAL_COUNT="${PROPOSAL_COUNT:-${HYPOTHESIS_POINTS}}"
 PROPOSAL_SEED="${PROPOSAL_SEED:-${HYPOTHESIS_SEED}}"
 THRESHOLD="${THRESHOLD:-0.5}"
 
-TOTAL_EPOCHS=$((PHASE_A_EPOCHS + PHASE_B_EPOCHS + FULL_EPOCHS))
-[[ "$TOTAL_EPOCHS" -eq 50 ]] || {
-  echo "ERROR: PHASE_A_EPOCHS + PHASE_B_EPOCHS + FULL_EPOCHS must equal 50" >&2
-  exit 1
-}
-for stage_epochs in "$PHASE_A_EPOCHS" "$PHASE_B_EPOCHS" "$FULL_EPOCHS"; do
-  (( stage_epochs % VAL_EVERY == 0 )) || {
-    echo "ERROR: each stage length must be divisible by VAL_EVERY so the final epoch is validated" >&2
-    exit 1
-  }
-done
-[[ "$PROPOSAL_COUNT" -eq "$HYPOTHESIS_POINTS" ]] || {
-  echo "ERROR: PROPOSAL_COUNT must equal HYPOTHESIS_POINTS for train/test hypothesis consistency" >&2
-  exit 1
-}
-[[ "$PROPOSAL_SEED" -eq "$HYPOTHESIS_SEED" ]] || {
-  echo "ERROR: PROPOSAL_SEED must equal HYPOTHESIS_SEED for train/test hypothesis consistency" >&2
-  exit 1
-}
-
-mkdir -p "$PHASE_A_DIR" "$PHASE_B_DIR" "$FULL_DIR" "$FINAL_EVAL_DIR/predictions"
-
 log() { printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+TOTAL_EPOCHS=$((PHASE_A_EPOCHS + PHASE_B_EPOCHS + FULL_EPOCHS))
+[[ "$TOTAL_EPOCHS" -eq 50 ]] || die "Phase lengths must total 50 epochs"
+for stage_epochs in "$PHASE_A_EPOCHS" "$PHASE_B_EPOCHS" "$FULL_EPOCHS"; do
+  (( stage_epochs % VAL_EVERY == 0 )) || die "Each stage length must be divisible by VAL_EVERY"
+done
+[[ "$PROPOSAL_COUNT" -eq "$HYPOTHESIS_POINTS" ]] || \
+  die "PROPOSAL_COUNT must equal HYPOTHESIS_POINTS"
+[[ "$PROPOSAL_SEED" -eq "$HYPOTHESIS_SEED" ]] || \
+  die "PROPOSAL_SEED must equal HYPOTHESIS_SEED"
+[[ "$SELECTION_SAMPLES" -gt 0 ]] || die "SELECTION_SAMPLES must be positive"
+
+mkdir -p "$PHASE_A_DIR" "$PHASE_B_DIR" "$FULL_DIR" "$SELECTION_DIR" \
+  "$FINAL_EVAL_DIR/predictions"
 
 checkpoint_epoch() {
   uv run python - "$1" <<'PY'
@@ -74,7 +69,7 @@ stage_finished() {
   [[ "$(checkpoint_epoch "$last")" -ge $((target - 1)) ]]
 }
 
-best_checkpoint() {
+best_sampled_checkpoint() {
   uv run python - "$1" <<'PY'
 from pathlib import Path
 import re
@@ -148,9 +143,7 @@ run_phase_a() {
     log "Phase A already complete"
     return
   fi
-
-  log "Phase A: from-scratch shared reconstruction and sample-level source-hypothesis learning"
-  log "Epochs=${PHASE_A_EPOCHS}; base LR=1e-4"
+  log "Phase A: shared reconstruction and sample-level source-hypothesis learning"
   local cmd=(
     uv run python scripts/train_phsa_sample_level.py fit
     "${COMMON_ARGS[@]}"
@@ -166,7 +159,8 @@ run_phase_a() {
   "${cmd[@]}"
 }
 
-TRAIN_MODULES_CANDIDATE='[complementary_aggregation.candidate_projection,unified_density_decoder.candidate_context,unified_density_decoder.candidate_norm,unified_density_decoder.candidate_input,unified_density_decoder.head]'
+# The shared common projection and density head remain frozen in Phase B.
+TRAIN_MODULES_CANDIDATE='[complementary_aggregation.candidate_projection,unified_density_decoder.candidate_context,unified_density_decoder.candidate_norm,unified_density_decoder.candidate_input]'
 
 run_phase_b() {
   local init_ckpt="$1" last="${PHASE_B_DIR}/checkpoints/last.ckpt"
@@ -174,9 +168,7 @@ run_phase_b() {
     log "Phase B already complete"
     return
   fi
-
-  log "Phase B: candidate-conditioned PHSA decoder warm-up"
-  log "Epochs=${PHASE_B_EPOCHS}; frozen shared evidence path"
+  log "Phase B: candidate-specific PHSA warm-up with shared path frozen"
   local cmd=(
     uv run python scripts/train_phsa_sample_level.py fit
     "${COMMON_ARGS[@]}"
@@ -205,12 +197,10 @@ run_phase_b() {
 run_full() {
   local init_ckpt="$1" last="${FULL_DIR}/checkpoints/last.ckpt"
   if stage_finished "$FULL_DIR" "$FULL_EPOCHS"; then
-    log "Joint full fine-tuning already complete"
+    log "Phase C already complete"
     return
   fi
-
   log "Phase C: joint end-to-end fine-tuning of the active PHSA path"
-  log "Epochs=${FULL_EPOCHS}; lower discriminative learning rates"
   local cmd=(
     uv run python scripts/train_phsa_sample_level.py fit
     "${COMMON_ARGS[@]}"
@@ -235,14 +225,14 @@ run_full() {
 }
 
 log "Audited PHSA curriculum: ${PHASE_A_EPOCHS}+${PHASE_B_EPOCHS}+${FULL_EPOCHS}=50 epochs"
-log "Train samples=${TRAIN_SAMPLES}, density queries=${TRAIN_QUERIES}, fixed hypothesis points=${HYPOTHESIS_POINTS}"
-log "Validation samples=${VAL_SAMPLES}; every ${VAL_EVERY} epochs"
-log "The entire curriculum starts from random initialization in Phase A"
-log "Dataset projection normalization is raw; network owns the per-view normalization"
+log "Train=${TRAIN_SAMPLES}, val=${VAL_SAMPLES}, test=${TEST_SAMPLES} samples"
+log "Density queries=${TRAIN_QUERIES}; sample-level hypothesis points=${HYPOTHESIS_POINTS}"
+log "Dataset supplies raw measurements; the network owns normalization"
 
 uv run python scripts/preflight_phsa_curriculum.py \
   --train-samples "$TRAIN_SAMPLES" \
   --val-samples "$VAL_SAMPLES" \
+  --test-samples "$TEST_SAMPLES" \
   --train-queries "$TRAIN_QUERIES" \
   --eval-queries "$EVAL_QUERIES" \
   --hypothesis-points "$HYPOTHESIS_POINTS" \
@@ -251,25 +241,41 @@ uv run python scripts/preflight_phsa_curriculum.py \
   --phase-a-epochs "$PHASE_A_EPOCHS" \
   --phase-b-epochs "$PHASE_B_EPOCHS" \
   --full-epochs "$FULL_EPOCHS" \
-  --val-every "$VAL_EVERY"
+  --val-every "$VAL_EVERY" \
+  --seed "$SEED"
 
 run_phase_a
-PHASE_A_BEST="$(best_checkpoint "$PHASE_A_DIR")"
+PHASE_A_BEST="$(best_sampled_checkpoint "$PHASE_A_DIR")"
 printf '%s\n' "$PHASE_A_BEST" > "${PHASE_A_DIR}/BEST_CHECKPOINT.txt"
 
 run_phase_b "$PHASE_A_BEST"
-PHASE_B_BEST="$(best_checkpoint "$PHASE_B_DIR")"
+PHASE_B_BEST="$(best_sampled_checkpoint "$PHASE_B_DIR")"
 printf '%s\n' "$PHASE_B_BEST" > "${PHASE_B_DIR}/BEST_CHECKPOINT.txt"
 
 run_full "$PHASE_B_BEST"
-FULL_BEST="$(best_checkpoint "$FULL_DIR")"
-printf '%s\n' "$FULL_BEST" > "${FULL_DIR}/BEST_CHECKPOINT.txt"
-log "Final PHSA checkpoint selected by sampled-query validation: ${FULL_BEST}"
+SAMPLED_BEST="$(best_sampled_checkpoint "$FULL_DIR")"
+printf '%s\n' "$SAMPLED_BEST" > "${FULL_DIR}/BEST_SAMPLED_QUERY_CHECKPOINT.txt"
 
 if [[ "$RUN_FULL_EVAL" != "1" ]]; then
-  log "RUN_FULL_EVAL=${RUN_FULL_EVAL}; curriculum complete without test evaluation"
+  log "RUN_FULL_EVAL=${RUN_FULL_EVAL}; curriculum complete without checkpoint selection/test"
   exit 0
 fi
+
+log "Selecting among top-k and last checkpoints on validation-only full volumes"
+uv run python scripts/select_phsa_checkpoint_full_volume.py \
+  --run-dir "$FULL_DIR" \
+  --output-dir "$SELECTION_DIR" \
+  --max-samples "$SELECTION_SAMPLES" \
+  --proposal-count "$PROPOSAL_COUNT" \
+  --proposal-seed "$PROPOSAL_SEED" \
+  --chunk-size "$CHUNK_SIZE" \
+  --threshold "$THRESHOLD" \
+  --device cuda
+
+SELECTED_RUN="$(cat "${SELECTION_DIR}/SELECTED_RUN.txt")"
+SELECTED_CHECKPOINT="$(cat "${SELECTION_DIR}/SELECTED_CHECKPOINT.txt")"
+printf '%s\n' "$SELECTED_CHECKPOINT" > "${FULL_DIR}/BEST_CHECKPOINT.txt"
+log "Selected PHSA checkpoint: ${SELECTED_CHECKPOINT}"
 
 [[ -d "${OLD_EVAL_DIR}/predictions/a2u" ]] || die "Missing prior A2-U predictions"
 [[ -d "${OLD_EVAL_DIR}/predictions/a3_old" ]] || die "Missing prior A3-old predictions"
@@ -277,17 +283,18 @@ ln -sfn "$(realpath "${OLD_EVAL_DIR}/predictions/a2u")" "${FINAL_EVAL_DIR}/predi
 ln -sfn "$(realpath "${OLD_EVAL_DIR}/predictions/a3_old")" "${FINAL_EVAL_DIR}/predictions/a3_old"
 
 MANIFEST="${FINAL_EVAL_DIR}/PHSA_CHECKPOINT.txt"
-if [[ -f "$MANIFEST" ]] && [[ "$(cat "$MANIFEST")" != "$FULL_BEST" ]]; then
+if [[ -f "$MANIFEST" ]] && [[ "$(cat "$MANIFEST")" != "$SELECTED_CHECKPOINT" ]]; then
   rm -rf "${FINAL_EVAL_DIR}/predictions/phsa"
 fi
-printf '%s\n' "$FULL_BEST" > "$MANIFEST"
+printf '%s\n' "$SELECTED_CHECKPOINT" > "$MANIFEST"
 
-log "Running aligned 300-sample full-volume evaluation"
+log "Running aligned ${TEST_SAMPLES}-sample full-volume test evaluation"
 uv run python scripts/eval_view_complementary_full_volume_paired_safe.py \
   --output_dir "$FINAL_EVAL_DIR" \
   --models a2u a3_old phsa \
-  --phsa_run "$FULL_DIR" \
+  --phsa_run "$SELECTED_RUN" \
   --split test \
+  --max_samples "$TEST_SAMPLES" \
   --proposal_count "$PROPOSAL_COUNT" \
   --proposal_seed "$PROPOSAL_SEED" \
   --chunk_size "$CHUNK_SIZE" \
