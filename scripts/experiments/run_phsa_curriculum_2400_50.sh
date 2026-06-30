@@ -112,7 +112,7 @@ COMMON_ARGS=(
   "data.batch_size=${BATCH_SIZE}"
   data.eval_batch_size=1
   data.pin_memory=true
-  data.persistent_workers=true
+  data.persistent_workers=false
   "data.prefetch_factor=${PREFETCH_FACTOR}"
   data.resample_queries_each_epoch=true
   "data.descatter_target_files=[]"
@@ -228,6 +228,7 @@ log "Audited PHSA curriculum: ${PHASE_A_EPOCHS}+${PHASE_B_EPOCHS}+${FULL_EPOCHS}
 log "Train=${TRAIN_SAMPLES}, val=${VAL_SAMPLES}, test=${TEST_SAMPLES} samples"
 log "Density queries=${TRAIN_QUERIES}; sample-level hypothesis points=${HYPOTHESIS_POINTS}"
 log "Dataset supplies raw measurements; the network owns normalization"
+log "Persistent workers are disabled so epoch-wise query resampling is effective"
 
 uv run python scripts/preflight_phsa_curriculum.py \
   --train-samples "$TRAIN_SAMPLES" \
@@ -276,6 +277,16 @@ SELECTED_RUN="$(cat "${SELECTION_DIR}/SELECTED_RUN.txt")"
 SELECTED_CHECKPOINT="$(cat "${SELECTION_DIR}/SELECTED_CHECKPOINT.txt")"
 printf '%s\n' "$SELECTED_CHECKPOINT" > "${FULL_DIR}/BEST_CHECKPOINT.txt"
 log "Selected PHSA checkpoint: ${SELECTED_CHECKPOINT}"
+
+log "Auditing reusable A2-U/A3-old prediction caches"
+uv run python scripts/audit_phsa_reused_predictions.py \
+  --output-dir "$OLD_EVAL_DIR" \
+  --models a2u a3_old \
+  --proposal-count "$PROPOSAL_COUNT" \
+  --proposal-seed "$PROPOSAL_SEED" \
+  --threshold "$THRESHOLD" \
+  --expected-samples "$TEST_SAMPLES" \
+  --volume-shape 190 200 104
 
 [[ -d "${OLD_EVAL_DIR}/predictions/a2u" ]] || die "Missing prior A2-U predictions"
 [[ -d "${OLD_EVAL_DIR}/predictions/a3_old" ]] || die "Missing prior A3-old predictions"
