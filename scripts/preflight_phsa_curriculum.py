@@ -139,6 +139,7 @@ def make_cfg(
                 "model.ssq_fmt.view_complementary.lr.separability=0.00001",
                 "model.ssq_fmt.view_complementary.lr.shared=0.000005",
                 "+model.finetune.freeze_modules=[surface_encoder]",
+                "++model.ssq_fmt.memory.checkpoint_encoder=false",
                 f"trainer.max_epochs={args.phase_b_epochs}",
             ]
         )
