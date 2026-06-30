@@ -80,6 +80,7 @@ def common_overrides(args: argparse.Namespace, *, smoke: bool = False) -> list[s
         "data.num_workers=0",
         f"data.batch_size={1 if smoke else args.batch_size}",
         "data.eval_batch_size=1",
+        "trainer.accumulate_grad_batches=1",
         "data.pin_memory=false",
         "data.persistent_workers=false",
         "data.prefetch_factor=1",
