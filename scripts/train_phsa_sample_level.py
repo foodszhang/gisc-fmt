@@ -6,7 +6,7 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from torch.utils.data._utils.collate import default_collate
+from torch.utils.data import default_collate
 
 from minr_fmt.datamodule import TrainingDataModule
 from minr_fmt.phsa_sample_level import activate_phsa_sample_level_hypotheses
@@ -26,22 +26,28 @@ def _phsa_collate(items: list[dict[str, Any]]) -> dict[str, Any]:
     return batch
 
 
-def _activate_phsa_collate() -> None:
+def _activate_phsa_loader_contract() -> None:
     original = TrainingDataModule._loader_kwargs
-    if getattr(TrainingDataModule, "_phsa_collate_patch", False):
+    if getattr(TrainingDataModule, "_phsa_loader_patch", False):
         return
 
     def patched(self, shuffle: bool, batch_size: int) -> dict[str, Any]:
         kwargs = original(self, shuffle=shuffle, batch_size=batch_size)
         kwargs["collate_fn"] = _phsa_collate
+        if int(kwargs.get("num_workers", 0)) > 0:
+            # ``FmtSimGenProjDataset.current_epoch`` is ordinary process-local state.
+            # Recreating workers each epoch propagates ``set_epoch`` and therefore
+            # makes resample_queries_each_epoch effective. Persistent workers would
+            # otherwise keep their epoch-0 dataset copies for the whole run.
+            kwargs["persistent_workers"] = False
         return kwargs
 
     TrainingDataModule._loader_kwargs = patched  # type: ignore[method-assign]
-    TrainingDataModule._phsa_collate_patch = True
+    TrainingDataModule._phsa_loader_patch = True
 
 
 activate_phsa_sample_level_hypotheses()
-_activate_phsa_collate()
+_activate_phsa_loader_contract()
 
 from train import _rewrite_positional_task, hydra_main  # noqa: E402
 
