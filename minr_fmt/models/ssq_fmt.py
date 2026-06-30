@@ -511,6 +511,7 @@ class SSQFMT(nn.Module):
         self.lambda_separability_measurement = float(
             view_cfg.get("lambda_separability_measurement", 0.05)
         )
+        self.phase_a_aux_loss_scale = float(view_cfg.get("phase_a_aux_loss_scale", 1.0))
         self.view_candidate_evidence = ViewCandidateEvidence(
             sample_feature_dim,
             hidden_dim=int(view_cfg.get("hidden_dim", hidden_dim)),
@@ -1304,11 +1305,16 @@ class SSQFMT(nn.Module):
                     gt_covariances.to(device=points_mm.device),
                 )
                 aux_outputs.update(candidate_losses)
-                aux_outputs["view_complementary_aux_loss"] = evidence_loss
+                aux_outputs["view_complementary_aux_loss"] = (
+                    self.phase_a_aux_loss_scale * evidence_loss
+                )
                 if self.view_training_epoch != 0:
-                    aux_outputs["view_complementary_aux_loss"] = evidence_loss + sum(
-                        self.view_candidate_loss_weights[key] * value
-                        for key, value in candidate_losses.items()
+                    aux_outputs["view_complementary_aux_loss"] = self.phase_a_aux_loss_scale * (
+                        evidence_loss
+                        + sum(
+                            self.view_candidate_loss_weights[key] * value
+                            for key, value in candidate_losses.items()
+                        )
                     )
             out: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {
                 "density": decoded["density"],
@@ -1562,12 +1568,19 @@ class SSQFMT(nn.Module):
             )
             aux_outputs.update(candidate_losses)
             if active_phase == "phase_a" and self.view_training_epoch == 0:
-                aux_outputs["view_complementary_aux_loss"] = evidence_loss
+                aux_outputs["view_complementary_aux_loss"] = (
+                    self.phase_a_aux_loss_scale * evidence_loss
+                )
             else:
                 aux_outputs["view_complementary_aux_loss"] = evidence_loss + sum(
                     self.view_candidate_loss_weights[key] * value
                     for key, value in candidate_losses.items()
                 )
+                if active_phase == "phase_a":
+                    aux_outputs["view_complementary_aux_loss"] = (
+                        self.phase_a_aux_loss_scale
+                        * aux_outputs["view_complementary_aux_loss"]
+                    )
                 if active_phase in {"phase_b", "full"}:
                     aux_outputs["view_complementary_aux_loss"] = (
                         aux_outputs["view_complementary_aux_loss"]

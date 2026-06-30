@@ -140,6 +140,7 @@ COMMON_ARGS=(
   "++model.ssq_fmt.view_complementary.continuous_applicability=true"
   "++model.ssq_fmt.view_complementary.candidate_hidden_injection=true"
   model.ssq_fmt.view_complementary.lambda_separability_measurement=0.05
+  "++model.ssq_fmt.view_complementary.phase_a_aux_loss_scale=0.25"
   "++model.ssq_fmt.memory.checkpoint_encoder=true"
 )
 

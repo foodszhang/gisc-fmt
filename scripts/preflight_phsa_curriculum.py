@@ -101,6 +101,7 @@ def common_overrides(args: argparse.Namespace, *, smoke: bool = False) -> list[s
         "++model.ssq_fmt.view_complementary.continuous_applicability=true",
         "++model.ssq_fmt.view_complementary.candidate_hidden_injection=true",
         "model.ssq_fmt.view_complementary.lambda_separability_measurement=0.05",
+        "++model.ssq_fmt.view_complementary.phase_a_aux_loss_scale=0.25",
         "++model.ssq_fmt.memory.checkpoint_encoder=true",
         f"paths.output_dir={output}",
     ]
@@ -267,6 +268,10 @@ def audit_aggregation_and_full_optimizer(cfg: Any, args: argparse.Namespace) -> 
         "candidate support is incorrectly coupled back into view reliability",
     )
     check(net.unified_density_decoder.fusion_mode == "joint_nonresidual", "joint non-residual decoder is disabled")
+    check(
+        math.isclose(net.phase_a_aux_loss_scale, 0.25),
+        "Phase-A candidate auxiliary loss scale is not 0.25",
+    )
     assert_lr(mapping, net.complementary_aggregation.common_projection.parameters(), 3e-5, "full common projection")
     assert_lr(mapping, net.complementary_aggregation.candidate_projection.parameters(), 3e-5, "full candidate descriptor projection")
     assert_lr(mapping, net.unified_density_decoder.candidate_context.parameters(), 3e-5, "full candidate context")
