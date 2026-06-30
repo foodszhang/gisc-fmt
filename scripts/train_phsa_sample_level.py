@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
+import hydra
 from torch.utils.data import default_collate
+from omegaconf import DictConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -15,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from minr_fmt.datamodule import TrainingDataModule
 from minr_fmt.phsa_sample_level import activate_phsa_sample_level_hypotheses
+from minr_fmt.utils.logging_utils import setup_logger
 
 
 def _phsa_collate(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -54,7 +58,14 @@ def _activate_phsa_loader_contract() -> None:
 activate_phsa_sample_level_hypotheses()
 _activate_phsa_loader_contract()
 
-from train import _rewrite_positional_task, hydra_main  # noqa: E402
+from train import _rewrite_positional_task, run  # noqa: E402
+
+
+@hydra.main(version_base=None, config_path="../configs", config_name="config")
+def hydra_main(cfg: DictConfig) -> float | None:
+    warnings.filterwarnings("ignore", category=UserWarning)
+    setup_logger("ssq_fmt")
+    return run(cfg)
 
 
 if __name__ == "__main__":
