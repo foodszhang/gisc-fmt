@@ -194,6 +194,7 @@ run_phase_b() {
     model.ssq_fmt.view_complementary.lr.decoder=0.00003
     model.ssq_fmt.view_complementary.lr.separability=0.00001
     model.ssq_fmt.view_complementary.lr.shared=0.000005
+    "+model.finetune.freeze_modules=[surface_encoder]"
     "++optim.scheduler.warmup_epochs=2"
     "++optim.scheduler.warmup_start_factor=0.5"
     callbacks.early_stopping.patience=4

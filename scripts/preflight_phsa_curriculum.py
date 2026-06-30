@@ -138,6 +138,7 @@ def make_cfg(
                 "model.ssq_fmt.view_complementary.lr.decoder=0.00003",
                 "model.ssq_fmt.view_complementary.lr.separability=0.00001",
                 "model.ssq_fmt.view_complementary.lr.shared=0.000005",
+                "+model.finetune.freeze_modules=[surface_encoder]",
                 f"trainer.max_epochs={args.phase_b_epochs}",
             ]
         )
@@ -291,6 +292,10 @@ def audit_phase_b_optimizer(cfg: Any) -> None:
     module = TrainingLightningModule(cfg)
     net = module.net
     mapping = parameter_group_map(module)
+    check(
+        not any(parameter.requires_grad for parameter in net.surface_encoder.parameters()),
+        "Phase B encoder still builds a backward graph despite encoder LR=0",
+    )
     assert_lr(mapping, net.complementary_aggregation.common_projection.parameters(), 3e-5, "Phase B common projection")
     assert_lr(mapping, net.complementary_aggregation.candidate_projection.parameters(), 3e-5, "Phase B candidate descriptor projection")
     assert_lr(mapping, net.unified_density_decoder.candidate_context.parameters(), 3e-5, "Phase B candidate context")
