@@ -7,8 +7,17 @@ import torch.nn as nn
 
 
 class UnifiedDensityDecoder(nn.Module):
-    def __init__(self, representation_dim: int, position_dim: int, hidden_dim: int = 96) -> None:
+    def __init__(
+        self,
+        representation_dim: int,
+        position_dim: int,
+        hidden_dim: int = 96,
+        fusion_mode: str = "additive",
+    ) -> None:
         super().__init__()
+        if fusion_mode not in {"additive", "joint_nonresidual"}:
+            raise ValueError(f"unknown unified decoder fusion mode: {fusion_mode}")
+        self.fusion_mode = fusion_mode
         context_in = representation_dim + 3 + 3 + 1
         self.candidate_context = nn.Sequential(
             nn.Linear(context_in, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, representation_dim)
@@ -22,13 +31,26 @@ class UnifiedDensityDecoder(nn.Module):
         self.candidate_norm = nn.LayerNorm(representation_dim)
         self.shared_input = nn.Linear(representation_dim + position_dim, hidden_dim)
         self.candidate_input = nn.Linear(representation_dim, hidden_dim, bias=False)
-        nn.init.normal_(self.candidate_input.weight, std=1.0e-3)
-        self.head = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SiLU(),
-            nn.Linear(hidden_dim, 1),
-        )
+        if fusion_mode == "additive":
+            nn.init.normal_(self.candidate_input.weight, std=1.0e-3)
+        else:
+            nn.init.xavier_uniform_(self.candidate_input.weight)
+        if fusion_mode == "additive":
+            self.head = nn.Sequential(
+                nn.SiLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.SiLU(),
+                nn.Linear(hidden_dim, 1),
+            )
+        else:
+            self.head = nn.Sequential(
+                nn.SiLU(),
+                nn.Linear(hidden_dim * 2, hidden_dim * 2),
+                nn.SiLU(),
+                nn.Linear(hidden_dim * 2, hidden_dim),
+                nn.SiLU(),
+                nn.Linear(hidden_dim, 1),
+            )
 
     def forward(
         self,
@@ -83,7 +105,12 @@ class UnifiedDensityDecoder(nn.Module):
         # continuous existence/applicability after normalization instead.
         if continuous_applicability:
             candidate_hidden = candidate_hidden * hypothesis_gate.to(candidate_hidden.dtype)
-        pre_activation = shared_hidden + float(context_scale) * candidate_hidden
+        if self.fusion_mode == "joint_nonresidual":
+            pre_activation = torch.cat(
+                [shared_hidden, float(context_scale) * candidate_hidden], dim=-1
+            )
+        else:
+            pre_activation = shared_hidden + float(context_scale) * candidate_hidden
         density = torch.sigmoid(self.head(pre_activation))
         return {
             "density": density,

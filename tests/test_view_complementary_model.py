@@ -1,5 +1,6 @@
 import torch
 
+from minr_fmt.model_factory import Patch2ComplementaryAggregation
 from minr_fmt.models.ssq_fmt import SSQFMT
 from minr_fmt.network.unified_density_decoder import UnifiedDensityDecoder
 from minr_fmt.network.view_separability import ViewSeparability
@@ -94,6 +95,42 @@ def test_unified_decoder_has_exact_shared_fallback_and_candidate_permutation_inv
     )
     assert torch.equal(fallback["density"], shared_only["density"])
     assert torch.count_nonzero(fallback["candidate_context"]) == 0
+
+
+def test_joint_nonresidual_decoder_uses_candidates_and_has_exact_shared_fallback():
+    torch.manual_seed(5)
+    decoder = UnifiedDensityDecoder(8, 10, 12, fusion_mode="joint_nonresidual")
+    shared = torch.randn(2, 7, 8)
+    candidate = torch.randn(2, 3, 8)
+    points = torch.randn(2, 7, 3)
+    encoded = torch.randn(2, 7, 10)
+    centers = torch.randn(2, 3, 3)
+    covariance = torch.eye(3)[None, None].expand(2, 3, -1, -1).clone()
+    scores = torch.ones(2, 3)
+    valid = torch.ones(2, 3, dtype=torch.bool)
+    full = decoder(shared, candidate, points, encoded, centers, covariance, scores, valid)
+    shared_only = decoder(
+        shared, candidate, points, encoded, centers, covariance, scores, valid, "shared_only"
+    )
+    empty = decoder(
+        shared, candidate, points, encoded, centers, covariance, scores, valid & False
+    )
+    assert not torch.allclose(full["density"], shared_only["density"])
+    assert torch.equal(empty["density"], shared_only["density"])
+    assert full["decoder_pre_activation"].shape[-1] == 24
+
+
+def test_strong_shared_fusion_is_query_wise_and_masks_invalid_views():
+    torch.manual_seed(6)
+    aggregation = Patch2ComplementaryAggregation(8, 12, strong_shared_fusion=True)
+    per_view = torch.randn(2, 4, 7, 8)
+    valid = torch.ones(2, 4, 7, dtype=torch.bool)
+    valid[:, -1, :3] = False
+    shared, weights = aggregation.aggregate_shared(per_view, valid)
+    assert shared.shape == (2, 7, 12)
+    assert weights.shape == (2, 4, 7)
+    assert torch.count_nonzero(weights[:, -1, :3]) == 0
+    assert torch.allclose(weights.sum(dim=1), torch.ones(2, 7), atol=1.0e-6)
 
 
 def test_candidate_centers_change_detector_sampling_grid_and_no_residual_gate_is_returned():

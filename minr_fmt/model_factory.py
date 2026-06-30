@@ -13,7 +13,13 @@ from .models.ssq_fmt import SSQFMT
 class Patch2ComplementaryAggregation(nn.Module):
     """Encode shared and candidate view evidence in a common latent space."""
 
-    def __init__(self, feature_dim: int, output_dim: int, epsilon_s: float = 0.1) -> None:
+    def __init__(
+        self,
+        feature_dim: int,
+        output_dim: int,
+        epsilon_s: float = 0.1,
+        strong_shared_fusion: bool = False,
+    ) -> None:
         super().__init__()
         self.epsilon_s = float(epsilon_s)
         self.feature_norm = nn.LayerNorm(feature_dim)
@@ -25,6 +31,19 @@ class Patch2ComplementaryAggregation(nn.Module):
             nn.Linear(output_dim, output_dim),
         )
         self.output_norm = nn.LayerNorm(output_dim)
+        self.strong_shared_fusion = bool(strong_shared_fusion)
+        if self.strong_shared_fusion:
+            self.shared_attention = nn.Sequential(
+                nn.Linear(output_dim, output_dim),
+                nn.SiLU(),
+                nn.Linear(output_dim, 1),
+            )
+            self.shared_set_fusion = nn.Sequential(
+                nn.Linear(output_dim * 4, output_dim * 2),
+                nn.SiLU(),
+                nn.Linear(output_dim * 2, output_dim),
+                nn.LayerNorm(output_dim),
+            )
         self.last_candidate_view_features: torch.Tensor | None = None
         self.last_shared_view_weights: torch.Tensor | None = None
 
@@ -43,9 +62,31 @@ class Patch2ComplementaryAggregation(nn.Module):
         shared_per_view: torch.Tensor,
         view_valid: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        weight = self._normalize(view_valid.to(shared_per_view.dtype), dim=1)
         per_view = self.common_projection(self.feature_norm(shared_per_view))
-        shared = (per_view * weight[..., None]).sum(dim=1)
+        valid = view_valid.to(dtype=torch.bool, device=shared_per_view.device)
+        uniform = self._normalize(valid.to(shared_per_view.dtype), dim=1)
+        if self.strong_shared_fusion:
+            logits = self.shared_attention(per_view).squeeze(-1)
+            logits = logits.masked_fill(~valid, -1.0e4)
+            has_valid = valid.any(dim=1, keepdim=True)
+            logits = torch.where(has_valid, logits, torch.zeros_like(logits))
+            weight = torch.softmax(logits, dim=1) * valid.to(logits.dtype)
+            weight = self._normalize(weight, dim=1)
+            attended = (per_view * weight[..., None]).sum(dim=1)
+            mean = (per_view * uniform[..., None]).sum(dim=1)
+            centered = per_view - mean[:, None]
+            std = (
+                centered.square() * uniform[..., None]
+            ).sum(dim=1).clamp_min(1.0e-8).sqrt()
+            masked = per_view.masked_fill(~valid[..., None], -torch.inf)
+            maximum = masked.amax(dim=1)
+            maximum = torch.where(
+                has_valid.movedim(1, -1), maximum, torch.zeros_like(maximum)
+            )
+            shared = self.shared_set_fusion(torch.cat([attended, mean, std, maximum], dim=-1))
+        else:
+            weight = uniform
+            shared = (per_view * weight[..., None]).sum(dim=1)
         self.last_shared_view_weights = weight
         return self.output_norm(shared), weight
 
@@ -131,10 +172,12 @@ class SSQFMTPatch2(SSQFMT):
         feature_dim = old_aggregation.shared_projection.in_features
         output_dim = old_aggregation.shared_projection.out_features
         epsilon_s = float(old_aggregation.epsilon_s)
+        view_cfg = config.model.ssq_fmt.view_complementary
         self.complementary_aggregation = Patch2ComplementaryAggregation(
             feature_dim,
             output_dim,
             epsilon_s=epsilon_s,
+            strong_shared_fusion=bool(view_cfg.get("strong_shared_fusion", False)),
         )
 
         constructor = self.diverse_candidate_constructor

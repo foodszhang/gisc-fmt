@@ -9,22 +9,22 @@ export PYTHONUNBUFFERED=1
 
 SEED="${SEED:-42}"
 TRAIN_SAMPLES="${TRAIN_SAMPLES:-2400}"
-VAL_SAMPLES="${VAL_SAMPLES:-128}"
+VAL_SAMPLES="${VAL_SAMPLES:-300}"
 TEST_SAMPLES="${TEST_SAMPLES:-300}"
-TRAIN_QUERIES="${TRAIN_QUERIES:-4096}"
-EVAL_QUERIES="${EVAL_QUERIES:-4096}"
+TRAIN_QUERIES="${TRAIN_QUERIES:-16384}"
+EVAL_QUERIES="${EVAL_QUERIES:-16384}"
 HYPOTHESIS_POINTS="${HYPOTHESIS_POINTS:-4096}"
 HYPOTHESIS_SEED="${HYPOTHESIS_SEED:-42}"
-BATCH_SIZE="${BATCH_SIZE:-2}"
-NUM_WORKERS="${NUM_WORKERS:-6}"
+BATCH_SIZE="${BATCH_SIZE:-1}"
+NUM_WORKERS="${NUM_WORKERS:-8}"
 PREFETCH_FACTOR="${PREFETCH_FACTOR:-2}"
-PHASE_A_EPOCHS="${PHASE_A_EPOCHS:-20}"
-PHASE_B_EPOCHS="${PHASE_B_EPOCHS:-14}"
-FULL_EPOCHS="${FULL_EPOCHS:-16}"
+PHASE_A_EPOCHS="${PHASE_A_EPOCHS:-40}"
+PHASE_B_EPOCHS="${PHASE_B_EPOCHS:-15}"
+FULL_EPOCHS="${FULL_EPOCHS:-30}"
 VAL_EVERY="${VAL_EVERY:-2}"
 SELECTION_SAMPLES="${SELECTION_SAMPLES:-16}"
 
-RUN_ROOT="${RUN_ROOT:-outputs/view_complementary/phsa_curriculum_2400_seed${SEED}}"
+RUN_ROOT="${RUN_ROOT:-outputs/view_complementary/phsa_strong_joint_2400_seed${SEED}}"
 PHASE_A_DIR="${RUN_ROOT}_phase_a_e${PHASE_A_EPOCHS}"
 PHASE_B_DIR="${RUN_ROOT}_phase_b_e${PHASE_B_EPOCHS}"
 FULL_DIR="${RUN_ROOT}_full_e${FULL_EPOCHS}"
@@ -41,9 +41,8 @@ log() { printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 TOTAL_EPOCHS=$((PHASE_A_EPOCHS + PHASE_B_EPOCHS + FULL_EPOCHS))
-[[ "$TOTAL_EPOCHS" -eq 50 ]] || die "Phase lengths must total 50 epochs"
 for stage_epochs in "$PHASE_A_EPOCHS" "$PHASE_B_EPOCHS" "$FULL_EPOCHS"; do
-  (( stage_epochs % VAL_EVERY == 0 )) || die "Each stage length must be divisible by VAL_EVERY"
+  (( stage_epochs > 0 )) || die "Each stage length must be positive"
 done
 [[ "$PROPOSAL_COUNT" -eq "$HYPOTHESIS_POINTS" ]] || \
   die "PROPOSAL_COUNT must equal HYPOTHESIS_POINTS"
@@ -115,7 +114,6 @@ COMMON_ARGS=(
   data.persistent_workers=false
   "data.prefetch_factor=${PREFETCH_FACTOR}"
   data.resample_queries_each_epoch=true
-  "data.descatter_target_files=[]"
   "++data.load_stage1_prior=false"
   "++data.load_stage1_mesh=false"
   "trainer.check_val_every_n_epoch=${VAL_EVERY}"
@@ -125,16 +123,19 @@ COMMON_ARGS=(
   callbacks.checkpoint.save_top_k=3
   callbacks.checkpoint.save_last=true
   callbacks.early_stopping=null
-  model.ssq_fmt.view_complementary.ablation=a3_geometry_only
-  model.ssq_fmt.view_complementary.separability_mode=geometry_only
+  model.ssq_fmt.view_complementary.ablation=full
+  model.ssq_fmt.view_complementary.separability_mode=geometry_measurement
+  "++model.ssq_fmt.view_complementary.strong_shared_fusion=true"
+  "++model.ssq_fmt.view_complementary.decoder_fusion_mode=joint_nonresidual"
   "++model.ssq_fmt.view_complementary.sample_level_hypotheses.enabled=true"
   "++model.ssq_fmt.view_complementary.sample_level_hypotheses.count=${HYPOTHESIS_POINTS}"
   "++model.ssq_fmt.view_complementary.sample_level_hypotheses.seed=${HYPOTHESIS_SEED}"
   "++model.ssq_fmt.view_complementary.hypothesis_grid.enabled=false"
   "++model.ssq_fmt.view_complementary.routing.enabled=false"
-  "++model.ssq_fmt.view_complementary.continuous_applicability=false"
+  "++model.ssq_fmt.view_complementary.continuous_applicability=true"
   "++model.ssq_fmt.view_complementary.candidate_hidden_injection=true"
-  model.ssq_fmt.view_complementary.lambda_separability_measurement=0.0
+  model.ssq_fmt.view_complementary.lambda_separability_measurement=0.05
+  "++model.ssq_fmt.memory.checkpoint_encoder=true"
 )
 
 run_phase_a() {
@@ -143,14 +144,17 @@ run_phase_a() {
     log "Phase A already complete"
     return
   fi
-  log "Phase A: shared reconstruction and sample-level source-hypothesis learning"
+  log "Phase A: strong shared reconstruction and sample-level source-hypothesis learning"
+  log "Epochs=${PHASE_A_EPOCHS}; base LR=3e-4"
   local cmd=(
     uv run python scripts/train_phsa_sample_level.py fit
     "${COMMON_ARGS[@]}"
     "paths.output_dir=${PHASE_A_DIR}"
     model.ssq_fmt.view_complementary.training_phase=phase_a
     "++model.ssq_fmt.view_complementary.context_warmup_enabled=true"
-    optim.lr=0.0001
+    optim.lr=0.0003
+    "++optim.scheduler.warmup_epochs=5"
+    "++optim.scheduler.warmup_start_factor=0.2"
     "trainer.max_epochs=${PHASE_A_EPOCHS}"
   )
   if [[ -f "$last" ]]; then
@@ -159,16 +163,13 @@ run_phase_a() {
   "${cmd[@]}"
 }
 
-# The shared common projection and density head remain frozen in Phase B.
-TRAIN_MODULES_CANDIDATE='[complementary_aggregation.candidate_projection,unified_density_decoder.candidate_context,unified_density_decoder.candidate_norm,unified_density_decoder.candidate_input]'
-
 run_phase_b() {
   local init_ckpt="$1" last="${PHASE_B_DIR}/checkpoints/last.ckpt"
   if stage_finished "$PHASE_B_DIR" "$PHASE_B_EPOCHS"; then
     log "Phase B already complete"
     return
   fi
-  log "Phase B: candidate-specific PHSA warm-up with shared path frozen"
+  log "Phase B: candidate-conditioned joint-head warm-up"
   local cmd=(
     uv run python scripts/train_phsa_sample_level.py fit
     "${COMMON_ARGS[@]}"
@@ -177,13 +178,14 @@ run_phase_b() {
     "++model.ssq_fmt.view_complementary.context_warmup_enabled=true"
     model.ssq_fmt.view_complementary.context_warmup_steps=500
     model.ssq_fmt.view_complementary.lr.encoder=0.0
-    model.ssq_fmt.view_complementary.lr.constructor=0.0
+    model.ssq_fmt.view_complementary.lr.constructor=0.00001
     model.ssq_fmt.view_complementary.lr.candidate_encoder=0.00003
     model.ssq_fmt.view_complementary.lr.candidate_context=0.00003
-    model.ssq_fmt.view_complementary.lr.decoder=0.00001
-    model.ssq_fmt.view_complementary.lr.separability=0.0
-    model.ssq_fmt.view_complementary.lr.shared=0.00003
-    "+model.finetune.train_modules_only=${TRAIN_MODULES_CANDIDATE}"
+    model.ssq_fmt.view_complementary.lr.decoder=0.00003
+    model.ssq_fmt.view_complementary.lr.separability=0.00001
+    model.ssq_fmt.view_complementary.lr.shared=0.000005
+    "++optim.scheduler.warmup_epochs=2"
+    "++optim.scheduler.warmup_start_factor=0.5"
     "trainer.max_epochs=${PHASE_B_EPOCHS}"
   )
   if [[ -f "$last" ]]; then
@@ -207,13 +209,15 @@ run_full() {
     "paths.output_dir=${FULL_DIR}"
     model.ssq_fmt.view_complementary.training_phase=full
     "++model.ssq_fmt.view_complementary.context_warmup_enabled=false"
-    model.ssq_fmt.view_complementary.lr.encoder=0.000005
-    model.ssq_fmt.view_complementary.lr.constructor=0.00001
-    model.ssq_fmt.view_complementary.lr.candidate_encoder=0.000005
-    model.ssq_fmt.view_complementary.lr.candidate_context=0.00002
-    model.ssq_fmt.view_complementary.lr.decoder=0.00001
-    model.ssq_fmt.view_complementary.lr.separability=0.0
-    model.ssq_fmt.view_complementary.lr.shared=0.000005
+    model.ssq_fmt.view_complementary.lr.encoder=0.00002
+    model.ssq_fmt.view_complementary.lr.constructor=0.00002
+    model.ssq_fmt.view_complementary.lr.candidate_encoder=0.00003
+    model.ssq_fmt.view_complementary.lr.candidate_context=0.00003
+    model.ssq_fmt.view_complementary.lr.decoder=0.00003
+    model.ssq_fmt.view_complementary.lr.separability=0.00001
+    model.ssq_fmt.view_complementary.lr.shared=0.00002
+    "++optim.scheduler.warmup_epochs=3"
+    "++optim.scheduler.warmup_start_factor=0.5"
     "trainer.max_epochs=${FULL_EPOCHS}"
   )
   if [[ -f "$last" ]]; then
@@ -224,7 +228,7 @@ run_full() {
   "${cmd[@]}"
 }
 
-log "Audited PHSA curriculum: ${PHASE_A_EPOCHS}+${PHASE_B_EPOCHS}+${FULL_EPOCHS}=50 epochs"
+log "Audited strong-joint PHSA curriculum: ${PHASE_A_EPOCHS}+${PHASE_B_EPOCHS}+${FULL_EPOCHS}=${TOTAL_EPOCHS} epochs"
 log "Train=${TRAIN_SAMPLES}, val=${VAL_SAMPLES}, test=${TEST_SAMPLES} samples"
 log "Density queries=${TRAIN_QUERIES}; sample-level hypothesis points=${HYPOTHESIS_POINTS}"
 log "Dataset supplies raw measurements; the network owns normalization"

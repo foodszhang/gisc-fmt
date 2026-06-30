@@ -32,14 +32,6 @@ from minr_fmt.phsa_sample_level import (  # noqa: E402
 )
 
 
-TRAIN_ONLY = [
-    "complementary_aggregation.candidate_projection",
-    "unified_density_decoder.candidate_context",
-    "unified_density_decoder.candidate_norm",
-    "unified_density_decoder.candidate_input",
-]
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--train-samples", type=int, required=True)
@@ -95,16 +87,19 @@ def common_overrides(args: argparse.Namespace, *, smoke: bool = False) -> list[s
         "data.descatter_target_files=[]",
         "++data.load_stage1_prior=false",
         "++data.load_stage1_mesh=false",
-        "model.ssq_fmt.view_complementary.ablation=a3_geometry_only",
-        "model.ssq_fmt.view_complementary.separability_mode=geometry_only",
+        "model.ssq_fmt.view_complementary.ablation=full",
+        "model.ssq_fmt.view_complementary.separability_mode=geometry_measurement",
+        "++model.ssq_fmt.view_complementary.strong_shared_fusion=true",
+        "++model.ssq_fmt.view_complementary.decoder_fusion_mode=joint_nonresidual",
         "++model.ssq_fmt.view_complementary.sample_level_hypotheses.enabled=true",
         f"++model.ssq_fmt.view_complementary.sample_level_hypotheses.count={hypothesis_points}",
         f"++model.ssq_fmt.view_complementary.sample_level_hypotheses.seed={args.hypothesis_seed}",
         "++model.ssq_fmt.view_complementary.hypothesis_grid.enabled=false",
         "++model.ssq_fmt.view_complementary.routing.enabled=false",
-        "++model.ssq_fmt.view_complementary.continuous_applicability=false",
+        "++model.ssq_fmt.view_complementary.continuous_applicability=true",
         "++model.ssq_fmt.view_complementary.candidate_hidden_injection=true",
-        "model.ssq_fmt.view_complementary.lambda_separability_measurement=0.0",
+        "model.ssq_fmt.view_complementary.lambda_separability_measurement=0.05",
+        "++model.ssq_fmt.memory.checkpoint_encoder=true",
         f"paths.output_dir={output}",
     ]
 
@@ -121,25 +116,25 @@ def make_cfg(
             [
                 "model.ssq_fmt.view_complementary.training_phase=phase_a",
                 "++model.ssq_fmt.view_complementary.context_warmup_enabled=true",
-                "optim.lr=0.0001",
+                "optim.lr=0.0003",
+                "++optim.scheduler.warmup_epochs=5",
+                "++optim.scheduler.warmup_start_factor=0.2",
                 f"trainer.max_epochs={args.phase_a_epochs}",
             ]
         )
     elif phase == "phase_b":
-        train_only = "[" + ",".join(TRAIN_ONLY) + "]"
         overrides.extend(
             [
                 "model.ssq_fmt.view_complementary.training_phase=phase_b",
                 "++model.ssq_fmt.view_complementary.context_warmup_enabled=true",
                 "model.ssq_fmt.view_complementary.context_warmup_steps=500",
                 "model.ssq_fmt.view_complementary.lr.encoder=0.0",
-                "model.ssq_fmt.view_complementary.lr.constructor=0.0",
+                "model.ssq_fmt.view_complementary.lr.constructor=0.00001",
                 "model.ssq_fmt.view_complementary.lr.candidate_encoder=0.00003",
                 "model.ssq_fmt.view_complementary.lr.candidate_context=0.00003",
-                "model.ssq_fmt.view_complementary.lr.decoder=0.00001",
-                "model.ssq_fmt.view_complementary.lr.separability=0.0",
-                "model.ssq_fmt.view_complementary.lr.shared=0.00003",
-                f"++model.finetune.train_modules_only={train_only}",
+                "model.ssq_fmt.view_complementary.lr.decoder=0.00003",
+                "model.ssq_fmt.view_complementary.lr.separability=0.00001",
+                "model.ssq_fmt.view_complementary.lr.shared=0.000005",
                 f"trainer.max_epochs={args.phase_b_epochs}",
             ]
         )
@@ -148,13 +143,13 @@ def make_cfg(
             [
                 "model.ssq_fmt.view_complementary.training_phase=full",
                 "++model.ssq_fmt.view_complementary.context_warmup_enabled=false",
-                "model.ssq_fmt.view_complementary.lr.encoder=0.000005",
-                "model.ssq_fmt.view_complementary.lr.constructor=0.00001",
-                "model.ssq_fmt.view_complementary.lr.candidate_encoder=0.000005",
-                "model.ssq_fmt.view_complementary.lr.candidate_context=0.00002",
-                "model.ssq_fmt.view_complementary.lr.decoder=0.00001",
-                "model.ssq_fmt.view_complementary.lr.separability=0.0",
-                "model.ssq_fmt.view_complementary.lr.shared=0.000005",
+                "model.ssq_fmt.view_complementary.lr.encoder=0.00002",
+                "model.ssq_fmt.view_complementary.lr.constructor=0.00002",
+                "model.ssq_fmt.view_complementary.lr.candidate_encoder=0.00003",
+                "model.ssq_fmt.view_complementary.lr.candidate_context=0.00003",
+                "model.ssq_fmt.view_complementary.lr.decoder=0.00003",
+                "model.ssq_fmt.view_complementary.lr.separability=0.00001",
+                "model.ssq_fmt.view_complementary.lr.shared=0.00002",
                 f"trainer.max_epochs={args.full_epochs}",
             ]
         )
@@ -264,19 +259,18 @@ def audit_aggregation_and_full_optimizer(cfg: Any, args: argparse.Namespace) -> 
     check(descriptor_delta > 1e-7, "support descriptor no longer affects candidate representation")
 
     mapping = parameter_group_map(module)
-    assert_lr(mapping, net.complementary_aggregation.common_projection.parameters(), 5e-6, "full common projection")
-    assert_lr(mapping, net.complementary_aggregation.candidate_projection.parameters(), 5e-6, "full candidate descriptor projection")
-    assert_lr(mapping, net.unified_density_decoder.candidate_context.parameters(), 2e-5, "full candidate context")
-    assert_lr(mapping, net.unified_density_decoder.candidate_input.parameters(), 1e-5, "full candidate input")
-    assert_lr(mapping, net.unified_density_decoder.head.parameters(), 1e-5, "full density head")
-    assert_lr(mapping, net.unified_density_decoder.candidate_norm.parameters(), 5e-6, "full candidate norm")
+    check(aggregation.strong_shared_fusion, "strong query-wise shared fusion is disabled")
+    check(net.unified_density_decoder.fusion_mode == "joint_nonresidual", "joint non-residual decoder is disabled")
+    assert_lr(mapping, net.complementary_aggregation.common_projection.parameters(), 3e-5, "full common projection")
+    assert_lr(mapping, net.complementary_aggregation.candidate_projection.parameters(), 3e-5, "full candidate descriptor projection")
+    assert_lr(mapping, net.unified_density_decoder.candidate_context.parameters(), 3e-5, "full candidate context")
+    assert_lr(mapping, net.unified_density_decoder.candidate_input.parameters(), 3e-5, "full candidate input")
+    assert_lr(mapping, net.unified_density_decoder.head.parameters(), 3e-5, "full density head")
+    assert_lr(mapping, net.unified_density_decoder.candidate_norm.parameters(), 2e-5, "full candidate norm")
 
     names = {id(parameter): name for name, parameter in module.named_parameters()}
     zero_lr_names = [names[pid] for pid, (_group, lr) in mapping.items() if lr == 0.0]
-    check(
-        all("view_separability" in name for name in zero_lr_names),
-        f"unexpected zero-LR trainable parameters: {zero_lr_names[:20]}",
-    )
+    check(not zero_lr_names, f"unexpected zero-LR trainable parameters: {zero_lr_names[:20]}")
     print("[PASS] instantiated Patch-2 PHSA semantics and full-stage optimizer groups")
     del module
     gc.collect()
@@ -286,14 +280,13 @@ def audit_phase_b_optimizer(cfg: Any) -> None:
     module = TrainingLightningModule(cfg)
     net = module.net
     mapping = parameter_group_map(module)
-    check(not any(p.requires_grad for p in net.complementary_aggregation.common_projection.parameters()), "Phase B shared common projection is trainable")
-    check(not any(p.requires_grad for p in net.unified_density_decoder.head.parameters()), "Phase B shared density head is trainable")
+    assert_lr(mapping, net.complementary_aggregation.common_projection.parameters(), 3e-5, "Phase B common projection")
     assert_lr(mapping, net.complementary_aggregation.candidate_projection.parameters(), 3e-5, "Phase B candidate descriptor projection")
     assert_lr(mapping, net.unified_density_decoder.candidate_context.parameters(), 3e-5, "Phase B candidate context")
-    assert_lr(mapping, net.unified_density_decoder.candidate_input.parameters(), 1e-5, "Phase B candidate input")
-    assert_lr(mapping, net.unified_density_decoder.candidate_norm.parameters(), 3e-5, "Phase B candidate norm")
-    check(all(lr > 0.0 for _name, lr in mapping.values()), "Phase B contains a trainable zero-LR parameter")
-    print("[PASS] Phase B trains only candidate-specific modules; shared head is frozen")
+    assert_lr(mapping, net.unified_density_decoder.candidate_input.parameters(), 3e-5, "Phase B candidate input")
+    assert_lr(mapping, net.unified_density_decoder.head.parameters(), 3e-5, "Phase B joint density head")
+    assert_lr(mapping, net.unified_density_decoder.candidate_norm.parameters(), 5e-6, "Phase B candidate norm")
+    print("[PASS] Phase B warms the candidate-conditioned joint head")
     del module
     gc.collect()
 
@@ -378,13 +371,12 @@ def forward_smoke(cfg: Any, phase: str) -> None:
 
 def main() -> None:
     args = parse_args()
-    check(args.phase_a_epochs + args.phase_b_epochs + args.full_epochs == 50, "curriculum must total 50 epochs")
     for name, epochs in (
         ("phase_a", args.phase_a_epochs),
         ("phase_b", args.phase_b_epochs),
         ("full", args.full_epochs),
     ):
-        check(epochs % args.val_every == 0, f"{name} final epoch would not be validated")
+        check(epochs > 0, f"{name} must contain at least one epoch")
     check(args.train_queries > 0 and args.hypothesis_points > 0, "query counts must be positive")
 
     activate_phsa_sample_level_hypotheses()

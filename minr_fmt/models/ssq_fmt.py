@@ -542,6 +542,7 @@ class SSQFMT(nn.Module):
             representation_dim,
             self.position_encoding.out_dim,
             hidden_dim=hidden_dim,
+            fusion_mode=str(view_cfg.get("decoder_fusion_mode", "additive")),
         )
         candidate_field_mode = str(_cfg_get(ssq, "candidate_field.mode", "independent"))
         if candidate_field_mode not in {"independent", "shared_residual"}:
@@ -1210,6 +1211,115 @@ class SSQFMT(nn.Module):
             else candidates["candidate_valid_mask"]
         )
         centers = candidates["candidate_centers_mm"]
+        active_phase = self.view_training_phase
+        if active_phase == "phase_a" and not return_diagnostics:
+            if hasattr(self.complementary_aggregation, "aggregate_shared"):
+                shared, shared_weight = self.complementary_aggregation.aggregate_shared(
+                    query_per_view, samples["query_view_valid"]
+                )
+            else:
+                shared_weight = samples["query_view_valid"].to(query_per_view.dtype)
+                shared_weight = shared_weight / shared_weight.sum(
+                    dim=1, keepdim=True
+                ).clamp_min(1.0e-8)
+                shared = self.complementary_aggregation.shared_projection(
+                    (query_per_view * shared_weight[..., None]).sum(dim=1)
+                )
+            trunk = torch.tensor(
+                self.trunk_size_mm, device=points_mm.device, dtype=points_mm.dtype
+            )
+            encoded_points = self.position_encoding(
+                (points_mm / trunk.clamp_min(1.0e-6)).mul(2.0).sub(1.0)
+            )
+            decoded = self.unified_density_decoder(
+                shared,
+                shared.new_zeros((shared.shape[0], centers.shape[1], shared.shape[-1])),
+                points_mm,
+                encoded_points,
+                centers,
+                candidates["candidate_covariances_mm"],
+                candidates["candidate_scores"],
+                reconstruction_valid,
+                ablation="shared_only",
+                context_scale=0.0,
+            )
+            aux_outputs: dict[str, torch.Tensor] = {
+                "shared_density": decoded["density"],
+                "candidate_centers_mm": centers,
+                "candidate_covariances_mm": candidates["candidate_covariances_mm"],
+                "candidate_covariance_eigenvalues": candidates[
+                    "candidate_covariance_eigenvalues"
+                ],
+                "covariance_lower_bound_hit": candidates["covariance_lower_bound_hit"],
+                "covariance_upper_bound_hit": candidates["covariance_upper_bound_hit"],
+                "candidate_scores": candidates["candidate_scores"],
+                "candidate_valid_mask": reconstruction_valid,
+                "candidate_slot_valid_mask": candidates["candidate_slot_valid_mask"],
+                "candidate_analysis_valid_mask": candidates["candidate_analysis_valid_mask"],
+                "candidate_existence_probability": candidates[
+                    "candidate_existence_probability"
+                ],
+                "candidate_view_support": candidates["candidate_view_support"],
+                "proposal_assignment": candidates["proposal_assignment"],
+                "proposal_compatibility": candidates["proposal_compatibility"],
+                "per_view_evidence": proposal["evidence"],
+                "proposal_offsets_mm": proposal["offsets_mm"],
+                "proposal_points_mm": proposal["proposal_points_mm"],
+                "proposal_valid_mask": proposal["proposal_valid_mask"],
+                "shared_quotient": shared,
+                "view_weights": shared_weight,
+                "candidate_context": decoded["candidate_context"],
+                "decoder_pre_activation": decoded["decoder_pre_activation"],
+                "candidate_context_scale": decoded["density"].new_zeros(()),
+                "candidate_alpha": decoded["alpha"],
+                "measurement_supported": samples["query_view_valid"].any(dim=1),
+                "view_complementary_mode": torch.ones((), device=points_mm.device),
+            }
+            if (
+                self.training
+                and batch is not None
+                and torch.is_tensor(batch.get("gt_component_centers_mm"))
+                and torch.is_tensor(batch.get("gt_component_valid_mask"))
+            ):
+                gt_covariances = batch.get("gt_component_covariances_mm")
+                if not torch.is_tensor(gt_covariances):
+                    gt_covariances = torch.eye(3, device=points_mm.device)[None, None].expand(
+                        points_mm.shape[0], batch["gt_component_centers_mm"].shape[1], -1, -1
+                    )
+                evidence_loss = self._view_evidence_heatmap_loss(
+                    proposal["evidence"],
+                    evidence_points,
+                    evidence_valid,
+                    batch["gt_component_centers_mm"].to(device=points_mm.device),
+                    gt_covariances.to(device=points_mm.device),
+                    batch["gt_component_valid_mask"].to(device=points_mm.device),
+                    depth_maps,
+                    detector_valid_mask,
+                )
+                aux_outputs["view_evidence_heatmap_loss"] = evidence_loss
+                candidate_losses = self.diverse_candidate_constructor.supervision_losses(
+                    candidates,
+                    batch["gt_component_centers_mm"].to(device=points_mm.device),
+                    batch["gt_component_valid_mask"].to(device=points_mm.device),
+                    gt_covariances.to(device=points_mm.device),
+                )
+                aux_outputs.update(candidate_losses)
+                aux_outputs["view_complementary_aux_loss"] = evidence_loss
+                if self.view_training_epoch != 0:
+                    aux_outputs["view_complementary_aux_loss"] = evidence_loss + sum(
+                        self.view_candidate_loss_weights[key] * value
+                        for key, value in candidate_losses.items()
+                    )
+            out: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {
+                "density": decoded["density"],
+                "aux_outputs": aux_outputs,
+            }
+            if return_diagnostics:
+                diagnostics = dict(aux_outputs)
+                diagnostics["normalization_scale"] = norm_scale
+                out["diagnostics"] = diagnostics
+            return out
+
         candidate_mapped = self.geometry_mapper(
             centers,
             depth_maps=depth_maps,
@@ -1296,7 +1406,6 @@ class SSQFMT(nn.Module):
                     (query_per_view * routed_weight[..., None]).sum(dim=1)
                 )
             aggregation["query_view_weights"] = routed_weight
-        active_phase = self.view_training_phase
         if (
             active_phase == "phase_b"
             and self.view_complementary_ablation not in routing_modes
@@ -1329,17 +1438,21 @@ class SSQFMT(nn.Module):
             context_scale=context_scale,
             continuous_applicability=self.continuous_applicability_enabled,
         )
-        shared_decoded = self.unified_density_decoder(
-            aggregation["shared"],
-            aggregation["candidate"].detach() * 0.0,
-            points_mm,
-            encoded_points,
-            centers,
-            candidates["candidate_covariances_mm"],
-            candidates["candidate_scores"] * 0.0,
-            reconstruction_valid & False,
-            ablation="shared_only",
-            context_scale=0.0,
+        shared_decoded = (
+            decoded
+            if decoder_ablation in {"shared_only", "a0"} and context_scale == 0.0
+            else self.unified_density_decoder(
+                aggregation["shared"],
+                aggregation["candidate"].detach() * 0.0,
+                points_mm,
+                encoded_points,
+                centers,
+                candidates["candidate_covariances_mm"],
+                candidates["candidate_scores"] * 0.0,
+                reconstruction_valid & False,
+                ablation="shared_only",
+                context_scale=0.0,
+            )
         )
         aux_outputs: dict[str, torch.Tensor] = {
             "shared_density": shared_decoded["density"],
