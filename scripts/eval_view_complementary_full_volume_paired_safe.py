@@ -14,7 +14,23 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from minr_fmt.phsa_sample_level import activate_phsa_sample_level_hypotheses  # noqa: E402
 from scripts import eval_view_complementary_full_volume_paired as base  # noqa: E402
+
+# The runtime patch is parameter-free. During full-volume evaluation the evaluator
+# supplies its own fixed proposal cache, so only the removal of the unused candidate
+# quantile normalization is active.
+activate_phsa_sample_level_hypotheses()
+
+_original_load_model = base.load_model
+
+
+def load_model_respecting_configured_phase(run_dir: Path, device: torch.device):
+    cfg, module, checkpoint = _original_load_model(run_dir, device)
+    configured_phase = str(cfg.model.ssq_fmt.view_complementary.get("training_phase", "phase_b"))
+    if hasattr(module.net, "set_view_training_phase"):
+        module.net.set_view_training_phase(configured_phase)
+    return cfg, module, checkpoint
 
 
 def predict_full_volume_low_memory(
@@ -66,6 +82,7 @@ def predict_full_volume_low_memory(
     }
 
 
+base.load_model = load_model_respecting_configured_phase
 base.predict_full_volume = predict_full_volume_low_memory
 
 if __name__ == "__main__":
