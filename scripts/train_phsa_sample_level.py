@@ -4,9 +4,14 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Any
 
 from torch.utils.data import default_collate
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from minr_fmt.datamodule import TrainingDataModule
 from minr_fmt.phsa_sample_level import activate_phsa_sample_level_hypotheses
