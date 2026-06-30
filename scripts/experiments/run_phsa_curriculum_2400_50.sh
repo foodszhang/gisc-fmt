@@ -64,6 +64,7 @@ PY
 
 stage_finished() {
   local dir="$1" target="$2" last="${1}/checkpoints/last.ckpt"
+  [[ -f "${dir}/STAGE_DONE" ]] && return 0
   [[ -f "$last" ]] || return 1
   [[ "$(checkpoint_epoch "$last")" -ge $((target - 1)) ]]
 }
@@ -122,7 +123,9 @@ COMMON_ARGS=(
   trainer.gradient_clip_val=1.0
   callbacks.checkpoint.save_top_k=3
   callbacks.checkpoint.save_last=true
-  callbacks.early_stopping=null
+  callbacks.early_stopping.monitor=val_dice
+  callbacks.early_stopping.mode=max
+  callbacks.early_stopping.check_finite=true
   model.ssq_fmt.view_complementary.ablation=full
   model.ssq_fmt.view_complementary.separability_mode=geometry_measurement
   "++model.ssq_fmt.view_complementary.strong_shared_fusion=true"
@@ -155,12 +158,15 @@ run_phase_a() {
     optim.lr=0.0003
     "++optim.scheduler.warmup_epochs=5"
     "++optim.scheduler.warmup_start_factor=0.2"
+    callbacks.early_stopping.patience=6
+    callbacks.early_stopping.min_delta=0.001
     "trainer.max_epochs=${PHASE_A_EPOCHS}"
   )
   if [[ -f "$last" ]]; then
     cmd+=("ckpt_path=$(realpath "$last")" ckpt_weights_only=false)
   fi
   "${cmd[@]}"
+  touch "${PHASE_A_DIR}/STAGE_DONE"
 }
 
 run_phase_b() {
@@ -186,6 +192,8 @@ run_phase_b() {
     model.ssq_fmt.view_complementary.lr.shared=0.000005
     "++optim.scheduler.warmup_epochs=2"
     "++optim.scheduler.warmup_start_factor=0.5"
+    callbacks.early_stopping.patience=4
+    callbacks.early_stopping.min_delta=0.001
     "trainer.max_epochs=${PHASE_B_EPOCHS}"
   )
   if [[ -f "$last" ]]; then
@@ -194,6 +202,7 @@ run_phase_b() {
     cmd+=("ckpt_path=${init_ckpt}" ckpt_weights_only=true)
   fi
   "${cmd[@]}"
+  touch "${PHASE_B_DIR}/STAGE_DONE"
 }
 
 run_full() {
@@ -218,6 +227,8 @@ run_full() {
     model.ssq_fmt.view_complementary.lr.shared=0.00002
     "++optim.scheduler.warmup_epochs=3"
     "++optim.scheduler.warmup_start_factor=0.5"
+    callbacks.early_stopping.patience=6
+    callbacks.early_stopping.min_delta=0.001
     "trainer.max_epochs=${FULL_EPOCHS}"
   )
   if [[ -f "$last" ]]; then
@@ -226,6 +237,7 @@ run_full() {
     cmd+=("ckpt_path=${init_ckpt}" ckpt_weights_only=true)
   fi
   "${cmd[@]}"
+  touch "${FULL_DIR}/STAGE_DONE"
 }
 
 log "Audited strong-joint PHSA curriculum: ${PHASE_A_EPOCHS}+${PHASE_B_EPOCHS}+${FULL_EPOCHS}=${TOTAL_EPOCHS} epochs"
