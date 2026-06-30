@@ -12,12 +12,14 @@ TRAIN_SAMPLES="${TRAIN_SAMPLES:-2400}"
 VAL_SAMPLES="${VAL_SAMPLES:-128}"
 TRAIN_QUERIES="${TRAIN_QUERIES:-4096}"
 EVAL_QUERIES="${EVAL_QUERIES:-4096}"
+HYPOTHESIS_POINTS="${HYPOTHESIS_POINTS:-4096}"
+HYPOTHESIS_SEED="${HYPOTHESIS_SEED:-42}"
 BATCH_SIZE="${BATCH_SIZE:-2}"
-NUM_WORKERS="${NUM_WORKERS:-8}"
-PREFETCH_FACTOR="${PREFETCH_FACTOR:-4}"
+NUM_WORKERS="${NUM_WORKERS:-6}"
+PREFETCH_FACTOR="${PREFETCH_FACTOR:-2}"
 PHASE_A_EPOCHS="${PHASE_A_EPOCHS:-20}"
-PHASE_B_EPOCHS="${PHASE_B_EPOCHS:-15}"
-FULL_EPOCHS="${FULL_EPOCHS:-15}"
+PHASE_B_EPOCHS="${PHASE_B_EPOCHS:-14}"
+FULL_EPOCHS="${FULL_EPOCHS:-16}"
 VAL_EVERY="${VAL_EVERY:-2}"
 
 RUN_ROOT="${RUN_ROOT:-outputs/view_complementary/phsa_curriculum_2400_seed${SEED}}"
@@ -28,9 +30,29 @@ OLD_EVAL_DIR="${OLD_EVAL_DIR:-outputs/view_complementary/phsa_full_volume_paired
 FINAL_EVAL_DIR="${FINAL_EVAL_DIR:-${RUN_ROOT}_full_volume}"
 RUN_FULL_EVAL="${RUN_FULL_EVAL:-1}"
 CHUNK_SIZE="${CHUNK_SIZE:-32768}"
-PROPOSAL_COUNT="${PROPOSAL_COUNT:-4096}"
-PROPOSAL_SEED="${PROPOSAL_SEED:-42}"
+PROPOSAL_COUNT="${PROPOSAL_COUNT:-${HYPOTHESIS_POINTS}}"
+PROPOSAL_SEED="${PROPOSAL_SEED:-${HYPOTHESIS_SEED}}"
 THRESHOLD="${THRESHOLD:-0.5}"
+
+TOTAL_EPOCHS=$((PHASE_A_EPOCHS + PHASE_B_EPOCHS + FULL_EPOCHS))
+[[ "$TOTAL_EPOCHS" -eq 50 ]] || {
+  echo "ERROR: PHASE_A_EPOCHS + PHASE_B_EPOCHS + FULL_EPOCHS must equal 50" >&2
+  exit 1
+}
+for stage_epochs in "$PHASE_A_EPOCHS" "$PHASE_B_EPOCHS" "$FULL_EPOCHS"; do
+  (( stage_epochs % VAL_EVERY == 0 )) || {
+    echo "ERROR: each stage length must be divisible by VAL_EVERY so the final epoch is validated" >&2
+    exit 1
+  }
+done
+[[ "$PROPOSAL_COUNT" -eq "$HYPOTHESIS_POINTS" ]] || {
+  echo "ERROR: PROPOSAL_COUNT must equal HYPOTHESIS_POINTS for train/test hypothesis consistency" >&2
+  exit 1
+}
+[[ "$PROPOSAL_SEED" -eq "$HYPOTHESIS_SEED" ]] || {
+  echo "ERROR: PROPOSAL_SEED must equal HYPOTHESIS_SEED for train/test hypothesis consistency" >&2
+  exit 1
+}
 
 mkdir -p "$PHASE_A_DIR" "$PHASE_B_DIR" "$FULL_DIR" "$FINAL_EVAL_DIR/predictions"
 
@@ -86,6 +108,7 @@ COMMON_ARGS=(
   "data.val_max_samples=${VAL_SAMPLES}"
   data.subset_policy=random
   "data.subset_seed=${SEED}"
+  data.projection_norm=raw
   "data.sample_num=${TRAIN_QUERIES}"
   "data.num_queries=${TRAIN_QUERIES}"
   "data.query_sampling.num_queries=${TRAIN_QUERIES}"
@@ -104,11 +127,14 @@ COMMON_ARGS=(
   trainer.num_sanity_val_steps=0
   trainer.enable_progress_bar=true
   trainer.gradient_clip_val=1.0
-  callbacks.checkpoint.save_top_k=1
+  callbacks.checkpoint.save_top_k=3
   callbacks.checkpoint.save_last=true
   callbacks.early_stopping=null
   model.ssq_fmt.view_complementary.ablation=a3_geometry_only
   model.ssq_fmt.view_complementary.separability_mode=geometry_only
+  "++model.ssq_fmt.view_complementary.sample_level_hypotheses.enabled=true"
+  "++model.ssq_fmt.view_complementary.sample_level_hypotheses.count=${HYPOTHESIS_POINTS}"
+  "++model.ssq_fmt.view_complementary.sample_level_hypotheses.seed=${HYPOTHESIS_SEED}"
   "++model.ssq_fmt.view_complementary.hypothesis_grid.enabled=false"
   "++model.ssq_fmt.view_complementary.routing.enabled=false"
   "++model.ssq_fmt.view_complementary.continuous_applicability=false"
@@ -123,10 +149,10 @@ run_phase_a() {
     return
   fi
 
-  log "Phase A: from-scratch shared reconstruction and source-hypothesis learning"
+  log "Phase A: from-scratch shared reconstruction and sample-level source-hypothesis learning"
   log "Epochs=${PHASE_A_EPOCHS}; base LR=1e-4"
   local cmd=(
-    uv run python train.py fit
+    uv run python scripts/train_phsa_sample_level.py fit
     "${COMMON_ARGS[@]}"
     "paths.output_dir=${PHASE_A_DIR}"
     model.ssq_fmt.view_complementary.training_phase=phase_a
@@ -152,7 +178,7 @@ run_phase_b() {
   log "Phase B: candidate-conditioned PHSA decoder warm-up"
   log "Epochs=${PHASE_B_EPOCHS}; frozen shared evidence path"
   local cmd=(
-    uv run python train.py fit
+    uv run python scripts/train_phsa_sample_level.py fit
     "${COMMON_ARGS[@]}"
     "paths.output_dir=${PHASE_B_DIR}"
     model.ssq_fmt.view_complementary.training_phase=phase_b
@@ -164,7 +190,7 @@ run_phase_b() {
     model.ssq_fmt.view_complementary.lr.candidate_context=0.00003
     model.ssq_fmt.view_complementary.lr.decoder=0.00001
     model.ssq_fmt.view_complementary.lr.separability=0.0
-    model.ssq_fmt.view_complementary.lr.shared=0.0
+    model.ssq_fmt.view_complementary.lr.shared=0.00003
     "+model.finetune.train_modules_only=${TRAIN_MODULES_CANDIDATE}"
     "trainer.max_epochs=${PHASE_B_EPOCHS}"
   )
@@ -186,14 +212,14 @@ run_full() {
   log "Phase C: joint end-to-end fine-tuning of the active PHSA path"
   log "Epochs=${FULL_EPOCHS}; lower discriminative learning rates"
   local cmd=(
-    uv run python train.py fit
+    uv run python scripts/train_phsa_sample_level.py fit
     "${COMMON_ARGS[@]}"
     "paths.output_dir=${FULL_DIR}"
     model.ssq_fmt.view_complementary.training_phase=full
     "++model.ssq_fmt.view_complementary.context_warmup_enabled=false"
     model.ssq_fmt.view_complementary.lr.encoder=0.000005
     model.ssq_fmt.view_complementary.lr.constructor=0.00001
-    model.ssq_fmt.view_complementary.lr.candidate_encoder=0.00002
+    model.ssq_fmt.view_complementary.lr.candidate_encoder=0.000005
     model.ssq_fmt.view_complementary.lr.candidate_context=0.00002
     model.ssq_fmt.view_complementary.lr.decoder=0.00001
     model.ssq_fmt.view_complementary.lr.separability=0.0
@@ -208,9 +234,24 @@ run_full() {
   "${cmd[@]}"
 }
 
-log "Corrected PHSA curriculum: ${PHASE_A_EPOCHS}+${PHASE_B_EPOCHS}+${FULL_EPOCHS} epochs"
-log "Train samples=${TRAIN_SAMPLES}, train queries=${TRAIN_QUERIES}, val samples=${VAL_SAMPLES}"
+log "Audited PHSA curriculum: ${PHASE_A_EPOCHS}+${PHASE_B_EPOCHS}+${FULL_EPOCHS}=50 epochs"
+log "Train samples=${TRAIN_SAMPLES}, density queries=${TRAIN_QUERIES}, fixed hypothesis points=${HYPOTHESIS_POINTS}"
+log "Validation samples=${VAL_SAMPLES}; every ${VAL_EVERY} epochs"
 log "The entire curriculum starts from random initialization in Phase A"
+log "Dataset projection normalization is raw; network owns the per-view normalization"
+
+uv run python scripts/preflight_phsa_curriculum.py \
+  --train-samples "$TRAIN_SAMPLES" \
+  --val-samples "$VAL_SAMPLES" \
+  --train-queries "$TRAIN_QUERIES" \
+  --eval-queries "$EVAL_QUERIES" \
+  --hypothesis-points "$HYPOTHESIS_POINTS" \
+  --hypothesis-seed "$HYPOTHESIS_SEED" \
+  --batch-size "$BATCH_SIZE" \
+  --phase-a-epochs "$PHASE_A_EPOCHS" \
+  --phase-b-epochs "$PHASE_B_EPOCHS" \
+  --full-epochs "$FULL_EPOCHS" \
+  --val-every "$VAL_EVERY"
 
 run_phase_a
 PHASE_A_BEST="$(best_checkpoint "$PHASE_A_DIR")"
@@ -223,7 +264,7 @@ printf '%s\n' "$PHASE_B_BEST" > "${PHASE_B_DIR}/BEST_CHECKPOINT.txt"
 run_full "$PHASE_B_BEST"
 FULL_BEST="$(best_checkpoint "$FULL_DIR")"
 printf '%s\n' "$FULL_BEST" > "${FULL_DIR}/BEST_CHECKPOINT.txt"
-log "Final PHSA checkpoint: ${FULL_BEST}"
+log "Final PHSA checkpoint selected by sampled-query validation: ${FULL_BEST}"
 
 if [[ "$RUN_FULL_EVAL" != "1" ]]; then
   log "RUN_FULL_EVAL=${RUN_FULL_EVAL}; curriculum complete without test evaluation"
