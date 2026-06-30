@@ -159,7 +159,7 @@ run_phase_a() {
     "++optim.scheduler.warmup_epochs=5"
     "++optim.scheduler.warmup_start_factor=0.2"
     callbacks.early_stopping.patience=6
-    callbacks.early_stopping.min_delta=0.001
+    "++callbacks.early_stopping.min_delta=0.001"
     "trainer.max_epochs=${PHASE_A_EPOCHS}"
   )
   if [[ -f "$last" ]]; then
@@ -193,7 +193,7 @@ run_phase_b() {
     "++optim.scheduler.warmup_epochs=2"
     "++optim.scheduler.warmup_start_factor=0.5"
     callbacks.early_stopping.patience=4
-    callbacks.early_stopping.min_delta=0.001
+    "++callbacks.early_stopping.min_delta=0.001"
     "trainer.max_epochs=${PHASE_B_EPOCHS}"
   )
   if [[ -f "$last" ]]; then
@@ -228,7 +228,7 @@ run_full() {
     "++optim.scheduler.warmup_epochs=3"
     "++optim.scheduler.warmup_start_factor=0.5"
     callbacks.early_stopping.patience=6
-    callbacks.early_stopping.min_delta=0.001
+    "++callbacks.early_stopping.min_delta=0.001"
     "trainer.max_epochs=${FULL_EPOCHS}"
   )
   if [[ -f "$last" ]]; then
