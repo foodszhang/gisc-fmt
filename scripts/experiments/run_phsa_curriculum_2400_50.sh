@@ -174,6 +174,7 @@ run_phase_a() {
 
 run_phase_b() {
   local init_ckpt="$1" last="${PHASE_B_DIR}/checkpoints/last.ckpt"
+  local init_alias="${PHASE_B_DIR}/phase_a_init.ckpt"
   if stage_finished "$PHASE_B_DIR" "$PHASE_B_EPOCHS"; then
     log "Phase B already complete"
     return
@@ -202,7 +203,9 @@ run_phase_b() {
   if [[ -f "$last" ]]; then
     cmd+=("ckpt_path=$(realpath "$last")" ckpt_weights_only=false)
   else
-    cmd+=("ckpt_path=${init_ckpt}" ckpt_weights_only=true)
+    ln -sfn "$(realpath "$init_ckpt")" "$init_alias"
+    [[ "$init_alias" = /* ]] || init_alias="${ROOT}/${init_alias}"
+    cmd+=("ckpt_path=${init_alias}" ckpt_weights_only=true)
   fi
   "${cmd[@]}"
   touch "${PHASE_B_DIR}/STAGE_DONE"
@@ -210,6 +213,7 @@ run_phase_b() {
 
 run_full() {
   local init_ckpt="$1" last="${FULL_DIR}/checkpoints/last.ckpt"
+  local init_alias="${FULL_DIR}/phase_b_init.ckpt"
   if stage_finished "$FULL_DIR" "$FULL_EPOCHS"; then
     log "Phase C already complete"
     return
@@ -237,7 +241,9 @@ run_full() {
   if [[ -f "$last" ]]; then
     cmd+=("ckpt_path=$(realpath "$last")" ckpt_weights_only=false)
   else
-    cmd+=("ckpt_path=${init_ckpt}" ckpt_weights_only=true)
+    ln -sfn "$(realpath "$init_ckpt")" "$init_alias"
+    [[ "$init_alias" = /* ]] || init_alias="${ROOT}/${init_alias}"
+    cmd+=("ckpt_path=${init_alias}" ckpt_weights_only=true)
   fi
   "${cmd[@]}"
   touch "${FULL_DIR}/STAGE_DONE"
