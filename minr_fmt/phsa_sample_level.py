@@ -16,9 +16,31 @@ from typing import Any, Callable
 
 import numpy as np
 import torch
+import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
 
 _ACTIVATED = False
+
+
+class _PassthroughCandidateNormalizer(nn.Module):
+    """Avoid an unused full-image quantile operation in the PHSA path.
+
+    The view-complementary forward computes ``candidate_y_norm`` but never consumes
+    it. The original normalizer has no parameters or persistent buffers, so this
+    replacement preserves checkpoint compatibility and model outputs.
+    """
+
+    def forward(
+        self,
+        measurements: torch.Tensor,
+        _valid_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        scale = torch.ones(
+            (measurements.shape[0],),
+            dtype=measurements.dtype,
+            device=measurements.device,
+        )
+        return measurements, scale
 
 
 def _plain_config(config: Any) -> dict[str, Any]:
@@ -99,6 +121,11 @@ def activate_phsa_sample_level_hypotheses() -> None:
         self._phsa_hypothesis_point_cache: dict[str, torch.Tensor] = {}
         self._phsa_active_hypothesis_points: torch.Tensor | None = None
         self._phsa_active_hypothesis_valid: torch.Tensor | None = None
+
+        # ``candidate_y_norm`` and its scale are not consumed by the active
+        # view-complementary information path. Avoid a redundant 99.9th-percentile
+        # reduction over all detector pixels on every forward call.
+        self.candidate_normalizer = _PassthroughCandidateNormalizer()
 
     def sample_level_points(self, batch: dict[str, Any], reference: torch.Tensor) -> torch.Tensor | None:
         if not getattr(self, "phsa_sample_level_hypotheses_enabled", False):
