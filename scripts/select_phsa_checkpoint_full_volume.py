@@ -10,8 +10,8 @@ The test split is never touched during checkpoint selection.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -33,6 +33,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def checkpoint_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def checkpoints(run_dir: Path) -> list[Path]:
     root = run_dir / "checkpoints"
     values = sorted(path.resolve() for path in root.glob("*.ckpt") if path.name != "last.ckpt")
@@ -40,12 +48,11 @@ def checkpoints(run_dir: Path) -> list[Path]:
     if last.exists():
         values.append(last.resolve())
     unique: list[Path] = []
-    seen: set[tuple[int, int]] = set()
+    seen: set[str] = set()
     for path in values:
-        stat = path.stat()
-        signature = (int(stat.st_size), int(stat.st_mtime_ns))
-        if signature not in seen:
-            seen.add(signature)
+        fingerprint = checkpoint_sha256(path)
+        if fingerprint not in seen:
+            seen.add(fingerprint)
             unique.append(path)
     if not unique:
         raise FileNotFoundError(f"No checkpoints under {root}")
@@ -73,14 +80,33 @@ def candidate_run(run_dir: Path, selection_root: Path, checkpoint: Path, index: 
 
 def evaluate_candidate(
     args: argparse.Namespace,
-    run_dir: Path,
     checkpoint: Path,
     index: int,
 ) -> dict[str, object]:
     candidate = candidate_run(args.run_dir, args.output_dir, checkpoint, index)
     evaluation = args.output_dir / "evaluations" / f"{index:02d}_{checkpoint.stem}"
     summary_path = evaluation / "summary.json"
+    manifest_path = evaluation / "selection_manifest.json"
+    fingerprint = checkpoint_sha256(checkpoint)
+    manifest = {
+        "checkpoint": str(checkpoint),
+        "checkpoint_sha256": fingerprint,
+        "max_samples": args.max_samples,
+        "proposal_count": args.proposal_count,
+        "proposal_seed": args.proposal_seed,
+        "chunk_size": args.chunk_size,
+        "threshold": args.threshold,
+    }
+    cached_manifest = None
+    if manifest_path.exists():
+        try:
+            cached_manifest = json.loads(manifest_path.read_text())
+        except json.JSONDecodeError:
+            cached_manifest = None
+    if cached_manifest != manifest:
+        shutil.rmtree(evaluation, ignore_errors=True)
     if not summary_path.exists():
+        evaluation.mkdir(parents=True, exist_ok=True)
         command = [
             sys.executable,
             str(ROOT / "scripts" / "eval_view_complementary_full_volume_paired_safe.py"),
@@ -108,20 +134,21 @@ def evaluate_candidate(
             args.device,
         ]
         subprocess.run(command, cwd=ROOT, check=True)
+        manifest_path.write_text(json.dumps(manifest, indent=2))
     summary = json.loads(summary_path.read_text())
     metrics = summary["models"]["phsa"]
-    dice = float(metrics["dice_mean"])
     result = {
         "checkpoint": str(checkpoint),
+        "checkpoint_sha256": fingerprint,
         "candidate_run": str(candidate.resolve()),
         "evaluation_dir": str(evaluation.resolve()),
         "num_samples": int(metrics["num_samples"]),
-        "dice_mean": dice,
+        "dice_mean": float(metrics["dice_mean"]),
         "nrmse_mean": metrics.get("nrmse_mean"),
         "component_recall_mean": metrics.get("component_recall_mean"),
     }
     # Predictions can be regenerated from the immutable checkpoint and consume most
-    # of the selector disk space; retain metrics and sample IDs only.
+    # of the selector disk space; retain metrics, manifest and sample IDs only.
     shutil.rmtree(evaluation / "predictions", ignore_errors=True)
     return result
 
@@ -138,7 +165,7 @@ def main() -> None:
 
     candidates = checkpoints(args.run_dir)
     rows = [
-        evaluate_candidate(args, args.run_dir, checkpoint, index)
+        evaluate_candidate(args, checkpoint, index)
         for index, checkpoint in enumerate(candidates, start=1)
     ]
     selected = max(rows, key=lambda row: (float(row["dice_mean"]), str(row["checkpoint"])))
