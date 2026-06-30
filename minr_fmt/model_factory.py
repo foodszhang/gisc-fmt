@@ -19,6 +19,7 @@ class Patch2ComplementaryAggregation(nn.Module):
         output_dim: int,
         epsilon_s: float = 0.1,
         strong_shared_fusion: bool = False,
+        support_weighted_reliability: bool = True,
     ) -> None:
         super().__init__()
         self.epsilon_s = float(epsilon_s)
@@ -32,6 +33,7 @@ class Patch2ComplementaryAggregation(nn.Module):
         )
         self.output_norm = nn.LayerNorm(output_dim)
         self.strong_shared_fusion = bool(strong_shared_fusion)
+        self.support_weighted_reliability = bool(support_weighted_reliability)
         if self.strong_shared_fusion:
             self.shared_attention = nn.Sequential(
                 nn.Linear(output_dim, output_dim),
@@ -119,7 +121,7 @@ class Patch2ComplementaryAggregation(nn.Module):
 
         if uniform_views:
             reliability = valid_float
-        elif geometry_only:
+        elif geometry_only or not self.support_weighted_reliability:
             reliability = (self.epsilon_s + separability) * valid_float
         else:
             # With separability_mode=none, separability is one everywhere and this
@@ -178,6 +180,9 @@ class SSQFMTPatch2(SSQFMT):
             output_dim,
             epsilon_s=epsilon_s,
             strong_shared_fusion=bool(view_cfg.get("strong_shared_fusion", False)),
+            support_weighted_reliability=bool(
+                view_cfg.get("support_weighted_reliability", True)
+            ),
         )
 
         constructor = self.diverse_candidate_constructor

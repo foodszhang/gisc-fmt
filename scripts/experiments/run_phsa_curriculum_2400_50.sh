@@ -130,6 +130,7 @@ COMMON_ARGS=(
   model.ssq_fmt.view_complementary.separability_mode=geometry_measurement
   "++model.ssq_fmt.view_complementary.strong_shared_fusion=true"
   "++model.ssq_fmt.view_complementary.decoder_fusion_mode=joint_nonresidual"
+  "++model.ssq_fmt.view_complementary.support_weighted_reliability=false"
   "++model.ssq_fmt.view_complementary.sample_level_hypotheses.enabled=true"
   "++model.ssq_fmt.view_complementary.sample_level_hypotheses.count=${HYPOTHESIS_POINTS}"
   "++model.ssq_fmt.view_complementary.sample_level_hypotheses.seed=${HYPOTHESIS_SEED}"

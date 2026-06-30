@@ -91,6 +91,7 @@ def common_overrides(args: argparse.Namespace, *, smoke: bool = False) -> list[s
         "model.ssq_fmt.view_complementary.separability_mode=geometry_measurement",
         "++model.ssq_fmt.view_complementary.strong_shared_fusion=true",
         "++model.ssq_fmt.view_complementary.decoder_fusion_mode=joint_nonresidual",
+        "++model.ssq_fmt.view_complementary.support_weighted_reliability=false",
         "++model.ssq_fmt.view_complementary.sample_level_hypotheses.enabled=true",
         f"++model.ssq_fmt.view_complementary.sample_level_hypotheses.count={hypothesis_points}",
         f"++model.ssq_fmt.view_complementary.sample_level_hypotheses.seed={args.hypothesis_seed}",
@@ -260,6 +261,10 @@ def audit_aggregation_and_full_optimizer(cfg: Any, args: argparse.Namespace) -> 
 
     mapping = parameter_group_map(module)
     check(aggregation.strong_shared_fusion, "strong query-wise shared fusion is disabled")
+    check(
+        not aggregation.support_weighted_reliability,
+        "candidate support is incorrectly coupled back into view reliability",
+    )
     check(net.unified_density_decoder.fusion_mode == "joint_nonresidual", "joint non-residual decoder is disabled")
     assert_lr(mapping, net.complementary_aggregation.common_projection.parameters(), 3e-5, "full common projection")
     assert_lr(mapping, net.complementary_aggregation.candidate_projection.parameters(), 3e-5, "full candidate descriptor projection")

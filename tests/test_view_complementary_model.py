@@ -133,6 +133,41 @@ def test_strong_shared_fusion_is_query_wise_and_masks_invalid_views():
     assert torch.allclose(weights.sum(dim=1), torch.ones(2, 7), atol=1.0e-6)
 
 
+def test_candidate_support_changes_descriptor_but_not_view_reliability_when_decoupled():
+    torch.manual_seed(7)
+    aggregation = Patch2ComplementaryAggregation(
+        8, 12, support_weighted_reliability=False
+    )
+    shared = torch.randn(1, 3, 8)
+    candidate = torch.randn(1, 3, 2, 8)
+    valid = torch.ones(1, 3, dtype=torch.bool)
+    candidate_valid = torch.ones(1, 2, dtype=torch.bool)
+    candidate_view_valid = torch.ones(1, 3, 2, dtype=torch.bool)
+    separability = torch.tensor([[[0.2, 0.8], [0.5, 0.3], [0.9, 0.4]]])
+    support_a = torch.full((1, 3, 2), 0.1)
+    support_b = torch.tensor([[[0.9, 0.1], [0.2, 0.8], [0.5, 0.4]]])
+    out_a = aggregation(
+        shared,
+        candidate,
+        valid,
+        support_a,
+        separability,
+        candidate_valid,
+        candidate_view_valid=candidate_view_valid,
+    )
+    out_b = aggregation(
+        shared,
+        candidate,
+        valid,
+        support_b,
+        separability,
+        candidate_valid,
+        candidate_view_valid=candidate_view_valid,
+    )
+    assert torch.allclose(out_a["view_weights"], out_b["view_weights"], atol=1.0e-7)
+    assert not torch.allclose(out_a["candidate"], out_b["candidate"])
+
+
 def test_candidate_centers_change_detector_sampling_grid_and_no_residual_gate_is_returned():
     model = SSQFMT(_cfg())
     assert model.source_hypothesis_residual_decoder is None
