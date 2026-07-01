@@ -512,6 +512,14 @@ class SSQFMT(nn.Module):
             view_cfg.get("lambda_separability_measurement", 0.05)
         )
         self.phase_a_aux_loss_scale = float(view_cfg.get("phase_a_aux_loss_scale", 1.0))
+        self.phase_b_aux_loss_scale = float(view_cfg.get("phase_b_aux_loss_scale", 1.0))
+        self.full_aux_loss_scale = float(view_cfg.get("full_aux_loss_scale", 1.0))
+        self.phase_b_separability_loss_scale = float(
+            view_cfg.get("phase_b_separability_loss_scale", 1.0)
+        )
+        self.full_separability_loss_scale = float(
+            view_cfg.get("full_separability_loss_scale", 1.0)
+        )
         self.view_candidate_evidence = ViewCandidateEvidence(
             sample_feature_dim,
             hidden_dim=int(view_cfg.get("hidden_dim", hidden_dim)),
@@ -1202,15 +1210,7 @@ class SSQFMT(nn.Module):
             grid_shape=evidence_grid_shape,
         )
         candidates = self.diverse_candidate_constructor(proposal)
-        continuous_hypothesis_modes = {
-            "a3_v2_bounded_routing",
-            "fixed_grid_stabilized",
-        }
-        reconstruction_valid = (
-            candidates["candidate_slot_valid_mask"]
-            if self.view_complementary_ablation in continuous_hypothesis_modes
-            else candidates["candidate_valid_mask"]
-        )
+        reconstruction_valid = candidates["candidate_slot_valid_mask"]
         centers = candidates["candidate_centers_mm"]
         active_phase = self.view_training_phase
         if active_phase == "phase_a" and not return_diagnostics:
@@ -1270,6 +1270,13 @@ class SSQFMT(nn.Module):
                 "shared_quotient": shared,
                 "view_weights": shared_weight,
                 "candidate_context": decoded["candidate_context"],
+                "candidate_branch_features": decoded["candidate_branch_features"],
+                "candidate_applicability": decoded["candidate_applicability"],
+                "candidate_delta_logit": decoded["candidate_delta_logit"],
+                "hypothesis_gate": decoded["hypothesis_gate"],
+                "branch_density": decoded["branch_density"],
+                "p_all": decoded["p_all"],
+                "pi": decoded["pi"],
                 "decoder_pre_activation": decoded["decoder_pre_activation"],
                 "candidate_context_scale": decoded["density"].new_zeros(()),
                 "candidate_alpha": decoded["alpha"],
@@ -1352,14 +1359,18 @@ class SSQFMT(nn.Module):
         detector_scale = (
             eigen_scale[:, None] * px_per_mm[None, :, None] + candidate_samples["sigma_f"]
         )
+        candidate_valid_by_view = (
+            candidate_mapped["valid_mask"]
+            & candidate_samples["query_view_valid"]
+            & reconstruction_valid[:, None]
+        )
         separability = self.view_separability(
             candidate_per_view,
             candidate_mapped["uv_px"].to(candidate_per_view.dtype),
             detector_scale,
-            reconstruction_valid,
+            candidate_valid_by_view,
             mode=self.view_separability_mode,
         )
-        candidate_valid_by_view = candidate_mapped["valid_mask"] & reconstruction_valid[:, None]
         support = candidates["candidate_view_support"].transpose(1, 2)
         support = support * candidate_valid_by_view.to(support.dtype)
         aggregation = self.complementary_aggregation(
@@ -1489,6 +1500,13 @@ class SSQFMT(nn.Module):
             "measurement_separability_correction": separability["correction"],
             "candidate_detector_scales": detector_scale,
             "candidate_context": decoded["candidate_context"],
+            "candidate_branch_features": decoded["candidate_branch_features"],
+            "candidate_applicability": decoded["candidate_applicability"],
+            "candidate_delta_logit": decoded["candidate_delta_logit"],
+            "hypothesis_gate": decoded["hypothesis_gate"],
+            "branch_density": decoded["branch_density"],
+            "p_all": decoded["p_all"],
+            "pi": decoded["pi"],
             "decoder_pre_activation": decoded["decoder_pre_activation"],
             "candidate_context_scale": decoded["density"].new_tensor(context_scale),
             "candidate_alpha": decoded["alpha"],
@@ -1523,7 +1541,10 @@ class SSQFMT(nn.Module):
         measurement_correction_target = (
             self.view_separability.delta_max * 0.5 * (1.0 - feature_cosine.detach())
         )
-        pair_valid = reconstruction_valid[:, None, :, None] & reconstruction_valid[:, None, None, :]
+        pair_valid = (
+            candidate_valid_by_view[..., :, None]
+            & candidate_valid_by_view[..., None, :]
+        )
         pair_eye = torch.eye(centers.shape[1], device=points_mm.device, dtype=torch.bool)[
             None, None
         ]
@@ -1572,19 +1593,28 @@ class SSQFMT(nn.Module):
                     self.phase_a_aux_loss_scale * evidence_loss
                 )
             else:
-                aux_outputs["view_complementary_aux_loss"] = evidence_loss + sum(
+                hypothesis_aux_loss = evidence_loss + sum(
                     self.view_candidate_loss_weights[key] * value
                     for key, value in candidate_losses.items()
                 )
                 if active_phase == "phase_a":
-                    aux_outputs["view_complementary_aux_loss"] = (
-                        self.phase_a_aux_loss_scale
-                        * aux_outputs["view_complementary_aux_loss"]
-                    )
+                    hypothesis_scale = self.phase_a_aux_loss_scale
+                    separability_scale = 0.0
+                elif active_phase == "phase_b":
+                    hypothesis_scale = self.phase_b_aux_loss_scale
+                    separability_scale = self.phase_b_separability_loss_scale
+                else:
+                    hypothesis_scale = self.full_aux_loss_scale
+                    separability_scale = self.full_separability_loss_scale
+                aux_outputs["view_complementary_aux_loss"] = (
+                    hypothesis_scale * hypothesis_aux_loss
+                )
                 if active_phase in {"phase_b", "full"}:
                     aux_outputs["view_complementary_aux_loss"] = (
                         aux_outputs["view_complementary_aux_loss"]
-                        + self.lambda_separability_measurement * separability_measurement_loss
+                        + separability_scale
+                        * self.lambda_separability_measurement
+                        * separability_measurement_loss
                     )
         out: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {
             "density": decoded["density"],

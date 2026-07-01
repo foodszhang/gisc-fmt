@@ -27,7 +27,7 @@ class ViewSeparability(nn.Module):
         candidate_valid: torch.Tensor,
         mode: str = "geometry_measurement",
     ) -> dict[str, torch.Tensor]:
-        """Use [B,V,M,D], [B,V,M,2], [B,V,M], and [B,M]."""
+        """Use [B,V,M,D], [B,V,M,2], [B,V,M], and [B,V,M]."""
         if mode not in {"none", "geometry_only", "geometry_measurement"}:
             raise ValueError(f"unknown separability mode: {mode}")
         delta = (
@@ -40,9 +40,9 @@ class ViewSeparability(nn.Module):
         )
         collision = torch.exp(-0.5 * delta.square().sum(dim=-1) / variance.clamp_min(1.0e-6))
         geometry = 1.0 - collision
-        pair_valid = (
-            candidate_valid[:, None, :, None] & candidate_valid[:, None, None, :]
-        )
+        if candidate_valid.ndim != 3:
+            raise ValueError("candidate_valid must have shape [B,V,M]")
+        pair_valid = candidate_valid[..., :, None] & candidate_valid[..., None, :]
         if mode == "none":
             pair = torch.ones_like(geometry)
             correction = torch.zeros_like(geometry)
@@ -64,7 +64,7 @@ class ViewSeparability(nn.Module):
         eye = torch.eye(m, dtype=torch.bool, device=features.device)[None, None]
         candidate = pair.masked_fill(eye, 1.0).amin(dim=-1)
         candidate = torch.where(
-            candidate_valid[:, None], candidate, torch.zeros_like(candidate)
+            candidate_valid, candidate, torch.zeros_like(candidate)
         )
         return {
             "pair_separability": pair,

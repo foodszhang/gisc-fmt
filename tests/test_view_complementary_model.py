@@ -2,6 +2,7 @@ import torch
 
 from minr_fmt.model_factory import Patch2ComplementaryAggregation
 from minr_fmt.models.ssq_fmt import SSQFMT
+from minr_fmt.network.diverse_candidate_constructor import DiverseCandidateConstructor
 from minr_fmt.network.unified_density_decoder import UnifiedDensityDecoder
 from minr_fmt.network.view_separability import ViewSeparability
 from tests.test_ssq_math_invariants import make_batch, make_cfg
@@ -28,7 +29,7 @@ def test_geometry_and_measurement_separability_are_symmetric_and_bounded():
     features = torch.randn(2, 3, 4, 6)
     centers = torch.randn(2, 3, 4, 2)
     scales = torch.ones(2, 3, 4)
-    valid = torch.ones(2, 4, dtype=torch.bool)
+    valid = torch.ones(2, 3, 4, dtype=torch.bool)
     geometry = module(features, centers, scales, valid, mode="geometry_only")
     with torch.no_grad():
         module.correction[-1].bias.fill_(0.1)
@@ -44,7 +45,7 @@ def test_geometry_separability_uses_consistent_pixel_units():
     module = ViewSeparability(4)
     features = torch.zeros(1, 1, 2, 4)
     centers = torch.tensor([[[[0.0, 0.0], [10.0, 0.0]]]])
-    valid = torch.ones(1, 2, dtype=torch.bool)
+    valid = torch.ones(1, 1, 2, dtype=torch.bool)
     narrow = module(
         features, centers, torch.full((1, 1, 2), 2.0), valid, mode="geometry_only"
     )["pair_separability"][0, 0, 0, 1]
@@ -61,6 +62,35 @@ def test_geometry_separability_uses_consistent_pixel_units():
     assert narrow > 0.99
     assert broad < 0.2
     assert torch.allclose(narrow, scaled, atol=1.0e-6)
+
+
+def test_invalid_view_candidate_does_not_reduce_another_candidate_separability():
+    module = ViewSeparability(4)
+    features = torch.zeros(1, 1, 3, 4)
+    centers = torch.tensor([[[[0.0, 0.0], [0.0, 0.0], [20.0, 0.0]]]])
+    scales = torch.ones(1, 1, 3)
+    valid = torch.tensor([[[True, False, True]]])
+    result = module(features, centers, scales, valid, mode="geometry_only")
+    assert result["separability"][0, 0, 0] > 0.99
+    assert result["separability"][0, 0, 1] == 0.0
+
+
+def test_candidate_center_loss_is_mean_over_matches_once_and_matches_rectangular_sets():
+    centers = torch.tensor([[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]])
+    candidates = {
+        "candidate_centers_mm": centers,
+        "candidate_existence_probability": torch.full((1, 2), 0.5),
+        "candidate_existence_logits": torch.zeros(1, 2),
+        "candidate_slot_valid_mask": torch.ones(1, 2, dtype=torch.bool),
+        "candidate_valid_mask": torch.ones(1, 2, dtype=torch.bool),
+        "candidate_covariances_mm": torch.eye(3)[None, None].expand(1, 2, -1, -1),
+    }
+    gt = torch.tensor([[[9.0, 0.0, 0.0], [30.0, 0.0, 0.0], [1.0, 0.0, 0.0]]])
+    losses = DiverseCandidateConstructor.supervision_losses(
+        candidates, gt, torch.ones(1, 3, dtype=torch.bool)
+    )
+    # Optimal rectangular assignment is 0->1 and 10->9; each match has mean L1 1/3.
+    assert torch.allclose(losses["candidate_center_loss"], torch.tensor(1.0 / 3.0))
 
 
 def test_unified_decoder_has_exact_shared_fallback_and_candidate_permutation_invariance():
@@ -115,9 +145,15 @@ def test_joint_nonresidual_decoder_uses_candidates_and_has_exact_shared_fallback
     empty = decoder(
         shared, candidate, points, encoded, centers, covariance, scores, valid & False
     )
-    assert not torch.allclose(full["density"], shared_only["density"])
+    assert torch.allclose(full["density"], shared_only["density"], atol=1.0e-4)
     assert torch.equal(empty["density"], shared_only["density"])
     assert full["decoder_pre_activation"].shape[-1] == 24
+    assert full["branch_density"].shape == (2, 7, 4, 1)
+    with torch.no_grad():
+        decoder.candidate_branch_head[-1].bias.fill_(5.0)
+    adapted = decoder(shared, candidate, points, encoded, centers, covariance, scores, valid)
+    assert not torch.allclose(adapted["density"], shared_only["density"])
+    assert torch.all(adapted["density"] >= shared_only["density"])
 
 
 def test_strong_shared_fusion_is_query_wise_and_masks_invalid_views():

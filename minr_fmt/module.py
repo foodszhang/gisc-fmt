@@ -474,13 +474,31 @@ class TrainingLightningModule(LightningModule):
         return str(getattr(self.cfg.model, "name", "")).lower() == "ssq_fmt"
 
     def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        current_state = self.state_dict()
         routing_key = "net.bounded_view_routing.routing_gain_raw"
-        if routing_key in self.state_dict() and routing_key not in state_dict:
+        compatibility_keys = [
+            key
+            for key in current_state
+            if key.startswith(
+                (
+                    "net.unified_density_decoder.candidate_residual_head.",
+                    "net.unified_density_decoder.candidate_branch_head.",
+                )
+            )
+        ]
+        if routing_key in current_state:
+            compatibility_keys.append(routing_key)
+        if any(
+            key not in state_dict or state_dict[key].shape != current_state[key].shape
+            for key in compatibility_keys
+        ):
             state_dict = dict(state_dict)
-            state_dict[routing_key] = self.state_dict()[routing_key]
+            for key in compatibility_keys:
+                if key not in state_dict or state_dict[key].shape != current_state[key].shape:
+                    state_dict[key] = current_state[key]
         if self._is_ssq_model() and not strict:
-            missing = sorted(set(self.state_dict().keys()) - set(state_dict.keys()))
-            unexpected = sorted(set(state_dict.keys()) - set(self.state_dict().keys()))
+            missing = sorted(set(current_state.keys()) - set(state_dict.keys()))
+            unexpected = sorted(set(state_dict.keys()) - set(current_state.keys()))
             raise RuntimeError(
                 "SSQ-FMT checkpoint loading requires strict=True; "
                 f"missing_keys={missing[:20]} unexpected_keys={unexpected[:20]}"
@@ -1600,6 +1618,12 @@ class TrainingLightningModule(LightningModule):
                 "candidate_context": self.net.unified_density_decoder.candidate_context,
                 "shared_decoder": self.net.unified_density_decoder.head,
             }
+            if self.net.unified_density_decoder.candidate_residual_head is not None:
+                modules["candidate_residual"] = (
+                    self.net.unified_density_decoder.candidate_residual_head
+                )
+            if self.net.unified_density_decoder.candidate_branch_head is not None:
+                modules["candidate_branch"] = self.net.unified_density_decoder.candidate_branch_head
             norms = {name: self._module_gradient_norm(module) for name, module in modules.items()}
             for name, value in norms.items():
                 self.log(
@@ -1697,6 +1721,23 @@ class TrainingLightningModule(LightningModule):
             and getattr(self.net, "composition_mode", None) == "view_complementary"
             and view_phase in {"phase_b", "full"}
         ):
+            if view_phase == "phase_b":
+                # Keep the Phase-A shared reconstruction function fixed. Candidate-side
+                # adapters remain trainable against the frozen shared representation/head.
+                frozen_shared_modules = [
+                    self.net.complementary_aggregation.feature_norm,
+                    self.net.complementary_aggregation.common_projection,
+                    self.net.complementary_aggregation.output_norm,
+                    getattr(self.net.complementary_aggregation, "shared_attention", None),
+                    getattr(self.net.complementary_aggregation, "shared_set_fusion", None),
+                    self.net.unified_density_decoder.shared_norm,
+                    self.net.unified_density_decoder.shared_input,
+                    self.net.unified_density_decoder.head,
+                ]
+                for module in frozen_shared_modules:
+                    if module is not None:
+                        for parameter in module.parameters():
+                            parameter.requires_grad_(False)
             lr_cfg = self.cfg.model.ssq_fmt.view_complementary.lr
             grouped_modules = {
                 "encoder": [self.net.surface_encoder, self.net.surface_sampler],
@@ -1713,7 +1754,17 @@ class TrainingLightningModule(LightningModule):
                 "decoder": [
                     self.net.unified_density_decoder.candidate_input,
                     self.net.unified_density_decoder.head,
-                ],
+                ]
+                + (
+                    [self.net.unified_density_decoder.candidate_residual_head]
+                    if self.net.unified_density_decoder.candidate_residual_head is not None
+                    else []
+                )
+                + (
+                    [self.net.unified_density_decoder.candidate_branch_head]
+                    if self.net.unified_density_decoder.candidate_branch_head is not None
+                    else []
+                ),
                 "separability": [self.net.view_separability],
                 "routing": [self.net.bounded_view_routing]
                 if self.net.bounded_view_routing is not None

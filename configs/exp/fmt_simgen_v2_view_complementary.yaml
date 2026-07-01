@@ -51,6 +51,11 @@ model:
       evidence_eta0: 0.25
       context_warmup_steps: 50
       lambda_separability_measurement: 0.0
+      phase_a_aux_loss_scale: 0.25
+      phase_b_aux_loss_scale: 0.02
+      full_aux_loss_scale: 0.0
+      phase_b_separability_loss_scale: 1.0
+      full_separability_loss_scale: 0.0
       lambda_center: 1.0
       lambda_cov: 0.1
       lambda_exist: 0.5
@@ -73,6 +78,13 @@ loss:
   pos_weight: 50.0
   sparse_weight: 0.1
   dice_weight: 0.5
+  candidate_branch_target_mode: hungarian_component
+  candidate_branch_density_weight: 0.0
+  candidate_branch_dice_weight: 0.0
+  candidate_assignment_target_mode: hungarian_component
+  candidate_assignment_weight: 0.0
+  component_match_center_weight: 0.25
+  component_unmatched_weight: 0.25
   lambda_shared: 0.0
 
 optim:

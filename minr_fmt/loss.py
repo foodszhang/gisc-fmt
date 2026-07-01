@@ -406,6 +406,7 @@ class MorphologyAwareDensityLoss(nn.Module):
     def _matched_component_targets(
         self,
         candidate_prediction: torch.Tensor,
+        target_density: torch.Tensor,
         query_component_ids: torch.Tensor,
         candidate_centers_mm: torch.Tensor,
         candidate_valid_mask: torch.Tensor,
@@ -430,10 +431,10 @@ class MorphologyAwareDensityLoss(nn.Module):
             count = min(valid_candidates.numel(), valid_components.numel())
             if count == 0:
                 continue
-            valid_components = valid_components[:count]
             component_masks = torch.stack(
                 [
                     (query_component_ids[batch_index] == int(component_index) + 1).float()
+                    * target_density[batch_index, :, 0].float()
                     for component_index in valid_components
                 ],
                 dim=-1,
@@ -453,19 +454,43 @@ class MorphologyAwareDensityLoss(nn.Module):
             )
             center_cost = (center_distance / 3.0).clamp(max=2.0)
             cost = overlap_cost + self.component_match_center_weight * center_cost
-            permutations = torch.tensor(
-                list(itertools.permutations(range(valid_candidates.numel()), count)),
-                dtype=torch.long,
-                device=cost.device,
-            )
-            component_index = torch.arange(count, device=cost.device)
-            permutation_cost = cost[permutations, component_index].sum(dim=1)
-            selected = permutations[permutation_cost.argmin()]
-            for local_component, local_candidate in enumerate(selected):
+            if valid_candidates.numel() >= valid_components.numel():
+                permutations = torch.tensor(
+                    list(
+                        itertools.permutations(
+                            range(valid_candidates.numel()), valid_components.numel()
+                        )
+                    ),
+                    dtype=torch.long,
+                    device=cost.device,
+                )
+                component_index = torch.arange(valid_components.numel(), device=cost.device)
+                selected_candidates = permutations[
+                    cost[permutations, component_index].sum(dim=1).argmin()
+                ]
+                matched_pairs = zip(selected_candidates.tolist(), component_index.tolist())
+            else:
+                permutations = torch.tensor(
+                    list(
+                        itertools.permutations(
+                            range(valid_components.numel()), valid_candidates.numel()
+                        )
+                    ),
+                    dtype=torch.long,
+                    device=cost.device,
+                )
+                candidate_index = torch.arange(valid_candidates.numel(), device=cost.device)
+                selected_components = permutations[
+                    cost[candidate_index, permutations].sum(dim=1).argmin()
+                ]
+                matched_pairs = zip(candidate_index.tolist(), selected_components.tolist())
+            for local_candidate, local_component in matched_pairs:
                 candidate_index = valid_candidates[local_candidate]
                 component = valid_components[local_component]
                 mask = query_component_ids[batch_index] == int(component) + 1
-                targets[batch_index, mask, candidate_index, 0] = 1.0
+                targets[batch_index, mask, candidate_index, 0] = target_density[
+                    batch_index, mask, 0
+                ]
                 matched[batch_index, candidate_index] = True
                 matched_candidate_for_query[batch_index, mask] = candidate_index
         return targets, matched, matched_candidate_for_query
@@ -597,6 +622,7 @@ class MorphologyAwareDensityLoss(nn.Module):
             component_targets, matched_candidates, matched_candidate_for_query = (
                 self._matched_component_targets(
                     cand_pred,
+                    target_density,
                     query_component_ids.to(device=pred.device),
                     aux_outputs["candidate_centers_mm"].to(device=pred.device),
                     aux_outputs["candidate_valid_mask"].to(device=pred.device),

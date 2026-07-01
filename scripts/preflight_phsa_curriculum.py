@@ -102,6 +102,12 @@ def common_overrides(args: argparse.Namespace, *, smoke: bool = False) -> list[s
         "++model.ssq_fmt.view_complementary.candidate_hidden_injection=true",
         "model.ssq_fmt.view_complementary.lambda_separability_measurement=0.05",
         "++model.ssq_fmt.view_complementary.phase_a_aux_loss_scale=0.25",
+        "++model.ssq_fmt.view_complementary.phase_b_aux_loss_scale=0.02",
+        "++model.ssq_fmt.view_complementary.full_aux_loss_scale=0.0",
+        "++model.ssq_fmt.view_complementary.phase_b_separability_loss_scale=1.0",
+        "++model.ssq_fmt.view_complementary.full_separability_loss_scale=0.0",
+        "loss.candidate_branch_target_mode=hungarian_component",
+        "loss.candidate_assignment_target_mode=hungarian_component",
         "++model.ssq_fmt.memory.checkpoint_encoder=true",
         f"paths.output_dir={output}",
     ]
@@ -138,7 +144,10 @@ def make_cfg(
                 "model.ssq_fmt.view_complementary.lr.decoder=0.00003",
                 "model.ssq_fmt.view_complementary.lr.separability=0.00001",
                 "model.ssq_fmt.view_complementary.lr.shared=0.000005",
-                "+model.finetune.freeze_modules=[surface_encoder]",
+                "loss.candidate_branch_density_weight=0.25",
+                "loss.candidate_branch_dice_weight=0.25",
+                "loss.candidate_assignment_weight=0.05",
+                "+model.finetune.freeze_modules=[surface_encoder,surface_sampler]",
                 "++model.ssq_fmt.memory.checkpoint_encoder=false",
                 f"trainer.max_epochs={args.phase_b_epochs}",
             ]
@@ -148,13 +157,17 @@ def make_cfg(
             [
                 "model.ssq_fmt.view_complementary.training_phase=full",
                 "++model.ssq_fmt.view_complementary.context_warmup_enabled=false",
-                "model.ssq_fmt.view_complementary.lr.encoder=0.00002",
+                "model.ssq_fmt.view_complementary.lr.encoder=0.0",
                 "model.ssq_fmt.view_complementary.lr.constructor=0.00002",
                 "model.ssq_fmt.view_complementary.lr.candidate_encoder=0.00003",
                 "model.ssq_fmt.view_complementary.lr.candidate_context=0.00003",
                 "model.ssq_fmt.view_complementary.lr.decoder=0.00003",
                 "model.ssq_fmt.view_complementary.lr.separability=0.00001",
-                "model.ssq_fmt.view_complementary.lr.shared=0.00002",
+                "model.ssq_fmt.view_complementary.lr.shared=0.000005",
+                "loss.candidate_branch_density_weight=0.25",
+                "loss.candidate_branch_dice_weight=0.25",
+                "loss.candidate_assignment_weight=0.05",
+                "+model.finetune.freeze_modules=[surface_encoder,surface_sampler]",
                 f"trainer.max_epochs={args.full_epochs}",
             ]
         )
@@ -274,12 +287,18 @@ def audit_aggregation_and_full_optimizer(cfg: Any, args: argparse.Namespace) -> 
         math.isclose(net.phase_a_aux_loss_scale, 0.25),
         "Phase-A candidate auxiliary loss scale is not 0.25",
     )
+    check(math.isclose(net.full_aux_loss_scale, 0.0), "full auxiliary loss is not disabled")
     assert_lr(mapping, net.complementary_aggregation.common_projection.parameters(), 3e-5, "full common projection")
     assert_lr(mapping, net.complementary_aggregation.candidate_projection.parameters(), 3e-5, "full candidate descriptor projection")
     assert_lr(mapping, net.unified_density_decoder.candidate_context.parameters(), 3e-5, "full candidate context")
     assert_lr(mapping, net.unified_density_decoder.candidate_input.parameters(), 3e-5, "full candidate input")
     assert_lr(mapping, net.unified_density_decoder.head.parameters(), 3e-5, "full density head")
-    assert_lr(mapping, net.unified_density_decoder.candidate_norm.parameters(), 2e-5, "full candidate norm")
+    assert_lr(
+        mapping,
+        net.unified_density_decoder.candidate_norm.parameters(),
+        5e-6,
+        "full candidate norm",
+    )
 
     names = {id(parameter): name for name, parameter in module.named_parameters()}
     zero_lr_names = [names[pid] for pid, (_group, lr) in mapping.items() if lr == 0.0]
@@ -297,13 +316,22 @@ def audit_phase_b_optimizer(cfg: Any) -> None:
         not any(parameter.requires_grad for parameter in net.surface_encoder.parameters()),
         "Phase B encoder still builds a backward graph despite encoder LR=0",
     )
-    assert_lr(mapping, net.complementary_aggregation.common_projection.parameters(), 3e-5, "Phase B common projection")
+    check(
+        not any(
+            parameter.requires_grad
+            for parameter in net.complementary_aggregation.common_projection.parameters()
+        ),
+        "Phase B common projection is not frozen",
+    )
     assert_lr(mapping, net.complementary_aggregation.candidate_projection.parameters(), 3e-5, "Phase B candidate descriptor projection")
     assert_lr(mapping, net.unified_density_decoder.candidate_context.parameters(), 3e-5, "Phase B candidate context")
     assert_lr(mapping, net.unified_density_decoder.candidate_input.parameters(), 3e-5, "Phase B candidate input")
-    assert_lr(mapping, net.unified_density_decoder.head.parameters(), 3e-5, "Phase B joint density head")
+    check(
+        not any(parameter.requires_grad for parameter in net.unified_density_decoder.head.parameters()),
+        "Phase B shared joint head is not frozen",
+    )
     assert_lr(mapping, net.unified_density_decoder.candidate_norm.parameters(), 5e-6, "Phase B candidate norm")
-    print("[PASS] Phase B warms the candidate-conditioned joint head")
+    print("[PASS] Phase B trains candidate adapters while preserving the shared function")
     del module
     gc.collect()
 

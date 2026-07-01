@@ -51,6 +51,25 @@ class UnifiedDensityDecoder(nn.Module):
                 nn.SiLU(),
                 nn.Linear(hidden_dim, 1),
             )
+        self.candidate_residual_head = None
+        self.candidate_branch_head = None
+        if fusion_mode == "joint_nonresidual":
+            self.candidate_residual_head = nn.Sequential(
+                nn.SiLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.SiLU(),
+                nn.Linear(hidden_dim, 1),
+            )
+            nn.init.zeros_(self.candidate_residual_head[-1].weight)
+            nn.init.zeros_(self.candidate_residual_head[-1].bias)
+            self.candidate_branch_head = nn.Sequential(
+                nn.LayerNorm(representation_dim * 2 + 7),
+                nn.Linear(representation_dim * 2 + 7, hidden_dim),
+                nn.SiLU(),
+                nn.Linear(hidden_dim, 1),
+            )
+            nn.init.normal_(self.candidate_branch_head[-1].weight, std=1.0e-2)
+            nn.init.constant_(self.candidate_branch_head[-1].bias, -4.595)
 
     def forward(
         self,
@@ -70,7 +89,10 @@ class UnifiedDensityDecoder(nn.Module):
         m = centers_mm.shape[1]
         context = shared.new_zeros((b, n, shared.shape[-1]))
         alpha = shared.new_zeros((b, n, m))
-        hypothesis_gate = shared.new_ones((b, n, 1))
+        applicability = shared.new_zeros((b, n, m))
+        encoded = shared.new_zeros((b, n, m, shared.shape[-1]))
+        branch_features = shared.new_zeros((b, n, m, shared.shape[-1] * 2 + 7))
+        hypothesis_gate = shared.new_zeros((b, n, 1))
         if ablation == "shared_capacity":
             context = self.control_context(torch.cat([shared, encoded_points], dim=-1))
         elif ablation not in {"shared_only", "a0"} and m:
@@ -97,6 +119,18 @@ class UnifiedDensityDecoder(nn.Module):
             )
             encoded = self.candidate_context(candidate_input)
             context = (alpha[..., None] * encoded).sum(dim=2)
+            relative = (delta / scales[:, None].clamp_min(1.0e-4)).clamp(-4.0, 4.0)
+            scale_feature = torch.log1p(scales)[:, None].expand(-1, n, -1, -1)
+            branch_features = torch.cat(
+                [
+                    shared[:, :, None].expand(-1, -1, m, -1),
+                    candidate[:, None].expand(-1, n, -1, -1),
+                    relative,
+                    scale_feature,
+                    scores[:, None, :, None].expand(-1, n, -1, -1),
+                ],
+                dim=-1,
+            )
         shared_hidden = self.shared_input(
             torch.cat([self.shared_norm(shared), encoded_points], dim=-1)
         )
@@ -106,15 +140,50 @@ class UnifiedDensityDecoder(nn.Module):
         if continuous_applicability:
             candidate_hidden = candidate_hidden * hypothesis_gate.to(candidate_hidden.dtype)
         if self.fusion_mode == "joint_nonresidual":
+            # Preserve the Phase-A shared head and learn one explicitly supervised
+            # density field per candidate. Candidate fields can only add probability.
             pre_activation = torch.cat(
-                [shared_hidden, float(context_scale) * candidate_hidden], dim=-1
+                [shared_hidden, torch.zeros_like(candidate_hidden)], dim=-1
             )
+            shared_density = torch.sigmoid(self.head(pre_activation))
+            candidate_branch_density = torch.sigmoid(
+                self.candidate_branch_head(branch_features)
+            )
+            candidate_branch_density = candidate_branch_density * valid[:, None, :, None].to(
+                candidate_branch_density.dtype
+            )
+            weighted_branch = (
+                candidate_branch_density.squeeze(-1)
+                * applicability.to(candidate_branch_density.dtype)
+                * float(context_scale)
+            ).clamp(0.0, 1.0)
+            strongest_candidate = weighted_branch.amax(dim=-1, keepdim=True)
+            density = torch.maximum(shared_density, strongest_candidate)
+            candidate_delta_logit = torch.logit(
+                density.float().clamp(1.0e-6, 1.0 - 1.0e-6)
+            ) - torch.logit(shared_density.float().clamp(1.0e-6, 1.0 - 1.0e-6))
         else:
             pre_activation = shared_hidden + float(context_scale) * candidate_hidden
-        density = torch.sigmoid(self.head(pre_activation))
+            candidate_delta_logit = self.head(pre_activation) * 0.0
+            density = torch.sigmoid(self.head(pre_activation))
+            shared_density = density
+            candidate_branch_density = density.new_zeros((b, n, m, 1))
+        shared_prior = (1.0 - hypothesis_gate).clamp(0.0, 1.0)
+        all_prior = torch.cat([shared_prior, applicability], dim=-1)
+        all_prior = all_prior / all_prior.sum(dim=-1, keepdim=True).clamp_min(1.0e-8)
         return {
             "density": density,
+            "shared_density": shared_density,
+            "branch_density": torch.cat(
+                [shared_density[:, :, None], candidate_branch_density], dim=2
+            ),
+            "p_all": all_prior,
+            "pi": all_prior,
             "candidate_context": context,
+            "candidate_branch_features": branch_features,
+            "candidate_applicability": applicability,
             "alpha": alpha,
             "decoder_pre_activation": pre_activation,
+            "candidate_delta_logit": candidate_delta_logit,
+            "hypothesis_gate": hypothesis_gate,
         }

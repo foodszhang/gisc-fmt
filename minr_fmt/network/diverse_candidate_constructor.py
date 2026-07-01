@@ -164,7 +164,9 @@ class DiverseCandidateConstructor(nn.Module):
         analysis_valid = anchor_valid & (
             existence_probability.detach() >= self.candidate_conf_threshold
         )
-        candidate_valid = anchor_valid if self.training else analysis_valid
+        # Reconstruction uses the same continuous candidate slots in train/eval.
+        # The confidence-thresholded mask is retained strictly for analysis metrics.
+        candidate_valid = anchor_valid
         covariance = torch.diag_embed(variance)
         return {
             "candidate_centers_mm": anchors,
@@ -222,13 +224,25 @@ class DiverseCandidateConstructor(nn.Module):
                 )
                 columns = torch.arange(count, device=centers.device)
                 selected = permutations[cost[permutations, columns].sum(dim=1).argmin()]
-                matched_candidates = candidate_index[selected]
-                matched_components = component_index[:count]
-                center_loss = center_loss + F.l1_loss(
-                    centers[batch_index, matched_candidates],
-                    gt_centers_mm[batch_index, matched_components].to(centers.dtype),
-                    reduction="mean",
-                )
+                if candidate_index.numel() >= component_index.numel():
+                    matched_candidates = candidate_index[selected]
+                    matched_components = component_index
+                else:
+                    gt_permutations = torch.tensor(
+                        list(itertools.permutations(range(component_index.numel()), count)),
+                        device=centers.device,
+                    )
+                    rows = torch.arange(count, device=centers.device)
+                    selected_gt = gt_permutations[
+                        cost[rows, gt_permutations].sum(dim=1).argmin()
+                    ]
+                    matched_candidates = candidate_index
+                    matched_components = component_index[selected_gt]
+                per_match_center = (
+                    centers[batch_index, matched_candidates]
+                    - gt_centers_mm[batch_index, matched_components].to(centers.dtype)
+                ).abs().mean(dim=-1)
+                center_loss = center_loss + per_match_center.sum()
                 if gt_covariances_mm is not None:
                     predicted_eigen = torch.diagonal(
                         candidates["candidate_covariances_mm"][
