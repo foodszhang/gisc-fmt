@@ -101,6 +101,44 @@ COMMON=(
   "++callbacks.early_stopping.min_delta=0.0005"
 )
 
+evaluate_checkpoint() {
+  local name="$1" checkpoint="$2" enabled="$3" compose="$4"
+  local eval_dir="${RUN_ROOT}/${name}/full_volume_test"
+  if [[ -f "${eval_dir}/metrics_summary.json" && -f "${eval_dir}/components/component_summary.json" ]]; then
+    log "Evaluation already complete for ${name}"
+    return
+  fi
+  mkdir -p "$eval_dir"
+  local eval_cmd=(
+    uv run python scripts/eval_morphology_amplitude_full_volume.py
+    --exp fmt_simgen_v2_morphology_amplitude_phase_a
+    --ckpt_path "$checkpoint"
+    --split test
+    --threshold "$THRESHOLD"
+    --chunk_size "$CHUNK_SIZE"
+    --max_samples "$EVAL_MAX_SAMPLES"
+    --save_dir "$eval_dir"
+    --save_predictions
+    model=ssq_fmt
+    data.dataset_type=fmt_simgen
+    "data.test_max_samples=${TEST_SAMPLES}"
+    data.projection_norm=raw
+    "++data.load_stage1_prior=false"
+    "++data.load_stage1_mesh=false"
+    model.ssq_fmt.view_complementary.training_phase=phase_a
+    model.ssq_fmt.view_complementary.ablation=shared_only
+    "model.ssq_fmt.view_complementary.factorized_reconstruction.enabled=${enabled}"
+    "model.ssq_fmt.view_complementary.factorized_reconstruction.compose_density=${compose}"
+  )
+  "${eval_cmd[@]}"
+  uv run python scripts/eval_components_fmt_simgen.py \
+    --eval_dir "$eval_dir" \
+    --split test \
+    --threshold "$THRESHOLD" \
+    --max_samples "$EVAL_MAX_SAMPLES" \
+    --save_dir "${eval_dir}/components"
+}
+
 run_variant() {
   local name="$1" enabled="$2" compose="$3" support_w="$4" amplitude_w="$5" component_w="$6"
   local out="${RUN_ROOT}/${name}"
@@ -130,39 +168,14 @@ run_variant() {
   log "Best checkpoint for ${name}: ${best}"
 
   if [[ "$RUN_FULL_EVAL" == "1" ]]; then
-    local eval_dir="${out}/full_volume_test"
-    local eval_cmd=(
-      uv run python scripts/eval_morphology_amplitude_full_volume.py
-      --exp fmt_simgen_v2_morphology_amplitude_phase_a
-      --ckpt_path "$best"
-      --split test
-      --threshold "$THRESHOLD"
-      --chunk_size "$CHUNK_SIZE"
-      --max_samples "$EVAL_MAX_SAMPLES"
-      --save_dir "$eval_dir"
-      --save_predictions
-      model=ssq_fmt
-      data.dataset_type=fmt_simgen
-      "data.test_max_samples=${TEST_SAMPLES}"
-      data.projection_norm=raw
-      "++data.load_stage1_prior=false"
-      "++data.load_stage1_mesh=false"
-      model.ssq_fmt.view_complementary.training_phase=phase_a
-      model.ssq_fmt.view_complementary.ablation=shared_only
-      "model.ssq_fmt.view_complementary.factorized_reconstruction.enabled=${enabled}"
-      "model.ssq_fmt.view_complementary.factorized_reconstruction.compose_density=${compose}"
-    )
-    "${eval_cmd[@]}"
-    uv run python scripts/eval_components_fmt_simgen.py \
-      --eval_dir "$eval_dir" \
-      --split test \
-      --threshold "$THRESHOLD" \
-      --max_samples "$EVAL_MAX_SAMPLES" \
-      --save_dir "${eval_dir}/components"
+    evaluate_checkpoint "$name" "$best" "$enabled" "$compose"
   fi
 }
 
 log "Running matched continuations from ${PHASE_A_CKPT}"
+if [[ "$RUN_FULL_EVAL" == "1" ]]; then
+  evaluate_checkpoint phase_a_reference "$PHASE_A_CKPT" false true
+fi
 run_variant scalar_control false true 0.0 0.0 0.0
 run_variant support_aux true false 0.10 0.0 0.0
 run_variant factorized_core true true 0.10 0.25 0.0
