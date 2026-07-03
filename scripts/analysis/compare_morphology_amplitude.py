@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect matched morphology-amplitude experiment summaries into one table."""
+"""Collect matched Phase-A morphology-amplitude screening results."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ VARIANTS = (
     "scalar_control",
     "support_aux",
     "factorized_core",
-    "factorized_component",
 )
 
 
@@ -33,7 +32,7 @@ def main() -> None:
     root = Path(args.run_root)
     rows = []
     for name in VARIANTS:
-        eval_dir = root / name / "full_volume_test"
+        eval_dir = root / name / "full_volume_val"
         volume = load_json(eval_dir / "metrics_summary.json")
         component = load_json(eval_dir / "components" / "component_summary.json")
         row = {"variant": name}
