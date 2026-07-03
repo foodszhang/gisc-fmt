@@ -1,7 +1,8 @@
-"""Morphology-amplitude factorization utilities for the audited Phase-A path."""
+"""Morphology-amplitude factorization on the checkpoint-compatible Phase-A path."""
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from pathlib import Path
 from types import MethodType
@@ -10,8 +11,6 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from minr_fmt.network.ssq_decoder import SharedDensityLogitDecoder
 
 
 @dataclass(frozen=True)
@@ -25,12 +24,17 @@ class MorphologyAmplitudeLossConfig:
 
 
 class MorphologyAmplitudeObjective:
-    """Compute auxiliary terms without creating a second density field."""
+    """Auxiliary supervision for one factorized fluorescence density field."""
 
     def __init__(self, config: MorphologyAmplitudeLossConfig) -> None:
         if not 0.0 <= config.support_threshold < 1.0:
             raise ValueError("support_threshold must lie in [0, 1)")
-        for name in ("support_weight", "support_dice_weight", "amplitude_weight", "component_weight"):
+        for name in (
+            "support_weight",
+            "support_dice_weight",
+            "amplitude_weight",
+            "component_weight",
+        ):
             if getattr(config, name) < 0.0:
                 raise ValueError(f"{name} must be non-negative")
         self.config = config
@@ -41,7 +45,9 @@ class MorphologyAmplitudeObjective:
             return x.unsqueeze(-1)
         if x.dim() == 3 and x.shape[-1] == 1:
             return x
-        raise ValueError(f"{name} must have shape [B,N] or [B,N,1], got {tuple(x.shape)}")
+        raise ValueError(
+            f"{name} must have shape [B,N] or [B,N,1], got {tuple(x.shape)}"
+        )
 
     def _component_balanced_l1(
         self,
@@ -67,7 +73,11 @@ class MorphologyAmplitudeObjective:
                 mask = ids[batch_index] == component_id
                 if mask.any():
                     per_component.append(error[batch_index][mask].mean())
-        return torch.stack(per_component).mean() if per_component else density.sum() * 0.0
+        return (
+            torch.stack(per_component).mean()
+            if per_component
+            else density.sum() * 0.0
+        )
 
     def __call__(
         self,
@@ -84,9 +94,15 @@ class MorphologyAmplitudeObjective:
         amplitude = self._as_scalar_field(amplitude, "amplitude").clamp(0.0, 1.0)
         density = self._as_scalar_field(density, "density").clamp(0.0, 1.0)
         target = self._as_scalar_field(target_density, "target_density").to(
-            device=density.device, dtype=density.dtype
+            device=density.device,
+            dtype=density.dtype,
         ).clamp(0.0, 1.0)
-        if not (support_probability.shape == amplitude.shape == density.shape == target.shape):
+        if not (
+            support_probability.shape
+            == amplitude.shape
+            == density.shape
+            == target.shape
+        ):
             raise ValueError("factorized predictions and targets must have identical shapes")
 
         support_target = (target > self.config.support_threshold).to(density.dtype)
@@ -105,7 +121,9 @@ class MorphologyAmplitudeObjective:
             / positive.sum().clamp_min(1.0)
         )
         component_loss = self._component_balanced_l1(
-            density, target, component_ids
+            density,
+            target,
+            component_ids,
         )
         total = (
             self.config.support_weight * support_loss
@@ -125,182 +143,228 @@ class MorphologyAmplitudeObjective:
         }
 
 
-def _build_support_decoder(
-    amplitude_decoder: SharedDensityLogitDecoder,
+def _last_linear(module: nn.Module) -> nn.Linear:
+    for child in reversed(list(module.modules())):
+        if isinstance(child, nn.Linear):
+            return child
+    raise TypeError("decoder head contains no Linear layer")
+
+
+def _build_support_head(
+    amplitude_head: nn.Module,
     support_init_logit: float,
-) -> SharedDensityLogitDecoder:
-    """Create a support decoder with the same input contract as the old Phase-A head."""
+) -> nn.Module:
+    """Clone the trained latent transform and initialize a neutral support output."""
 
-    feature_dim = int(amplitude_decoder.feat[0].in_features)
-    position_dim = int(amplitude_decoder.coord[0].in_features)
-    hidden_dim = int(amplitude_decoder.coord[0].out_features)
-    support_decoder = SharedDensityLogitDecoder(
-        feature_dim,
-        position_dim,
-        hidden_dim,
-        positive_ratio=0.5,
-        query_chunk_size=int(amplitude_decoder.query_chunk_size),
-        checkpoint_decoder=bool(amplitude_decoder.checkpoint_decoder),
-    )
-    nn.init.zeros_(support_decoder.fusion[-1].weight)
-    nn.init.constant_(support_decoder.fusion[-1].bias, float(support_init_logit))
-    reference_parameter = next(amplitude_decoder.parameters())
-    return support_decoder.to(
-        device=reference_parameter.device,
-        dtype=reference_parameter.dtype,
-    )
+    support_head = copy.deepcopy(amplitude_head)
+    output = _last_linear(support_head)
+    nn.init.zeros_(output.weight)
+    nn.init.constant_(output.bias, float(support_init_logit))
+    return support_head
 
 
-def _legacy_phase_a_forward(
-    self,
-    query_per_view: torch.Tensor,
-    query_view_valid: torch.Tensor,
-    points_mm: torch.Tensor,
-    norm_scale: torch.Tensor,
-    return_diagnostics: bool,
-) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
-    """Run the checkpoint-compatible Phase-A scalar path and optional factorization."""
+def attach_factorized_unified_output(net: nn.Module, factor_cfg: Any) -> None:
+    """Attach support prediction after loading the original Phase-A checkpoint.
 
-    shared, shared_weights = self.complementary_aggregation.aggregate_shared(
-        query_per_view,
-        query_view_valid,
-    )
-    encoded_points = self._encoded_query_points(points_mm)
-    amplitude_logits = self.shared_density_logit_decoder(shared, encoded_points)
-    amplitude = torch.sigmoid(amplitude_logits)
-
-    support_decoder = getattr(self, "factorized_support_decoder", None)
-    if support_decoder is None:
-        support_probability = torch.ones_like(amplitude)
-    else:
-        support_probability = torch.sigmoid(support_decoder(shared, encoded_points))
-    compose_density = bool(getattr(self, "factorized_compose_density", False))
-    density = support_probability * amplitude if compose_density else amplitude
-
-    self.last_factorized_outputs = {
-        "density": density,
-        "support_probability": support_probability,
-        "amplitude": amplitude,
-    }
-    empty_context = shared.new_zeros(shared.shape)
-    aux_outputs: dict[str, torch.Tensor] = {
-        "shared_density": density,
-        "support_probability": support_probability,
-        "amplitude": amplitude,
-        "amplitude_logits": amplitude_logits,
-        "candidate_context": empty_context,
-        "candidate_context_scale": density.new_zeros(()),
-        "decoder_pre_activation": amplitude_logits,
-        "measurement_supported": query_view_valid.any(dim=1),
-        "shared_view_weights": shared_weights,
-        "view_complementary_mode": torch.ones((), device=points_mm.device),
-        "clean_shared_ablation": torch.ones((), device=points_mm.device),
-        "legacy_phase_a_decoder": torch.ones((), device=points_mm.device),
-    }
-    out: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {
-        "density": density,
-        "aux_outputs": aux_outputs,
-    }
-    if return_diagnostics:
-        diagnostics = dict(aux_outputs)
-        diagnostics["normalization_scale"] = norm_scale
-        out["diagnostics"] = diagnostics
-    return out
-
-
-def activate_legacy_phase_a_decoder(net: nn.Module, factor_cfg: Any) -> None:
-    """Restore the decoder path used by the existing high-Dice Phase-A checkpoint.
-
-    The current refactor contains both the historical ``shared_density_logit_decoder``
-    and a newer ``unified_density_decoder``. The old checkpoint predates the latter.
-    This activation deliberately routes predictions through the historical decoder;
-    no parameter mapping into the newer decoder is performed.
+    The original ``UnifiedDensityDecoder.head`` remains the amplitude predictor. The
+    adapter consumes the same decoder pre-activation and is restricted to the exact
+    Phase-A shared-only call: ``ablation='shared_only', context_scale=0``. Any attempt
+    to use it in Phase B/C or candidate-conditioned decoding fails immediately.
     """
 
-    if not hasattr(net, "shared_density_logit_decoder"):
-        raise RuntimeError("model has no checkpoint-compatible shared density decoder")
-    if not hasattr(net, "_forward_clean_shared_ablation"):
-        raise RuntimeError("model has no clean shared Phase-A path to replace")
+    decoder = getattr(net, "unified_density_decoder", None)
+    if decoder is None:
+        raise RuntimeError("SSQ-FMT model has no UnifiedDensityDecoder")
+    if str(getattr(decoder, "fusion_mode", "")) != "joint_nonresidual":
+        raise ValueError("factorized Phase-A experiment requires joint_nonresidual fusion")
+    if getattr(decoder, "_morphology_amplitude_attached", False):
+        return
 
     enabled = bool(factor_cfg.get("enabled", False))
-    net.factorized_compose_density = bool(
+    decoder.factorized_output_enabled = enabled
+    decoder.factorized_compose_density = bool(
         enabled and factor_cfg.get("compose_density", True)
     )
-    net.last_factorized_outputs = {}
+    decoder.last_factorized_outputs = {}
     if enabled:
-        net.factorized_support_decoder = _build_support_decoder(
-            net.shared_density_logit_decoder,
+        decoder.factorized_support_head = _build_support_head(
+            decoder.head,
             support_init_logit=float(factor_cfg.get("support_init_logit", 8.0)),
         )
     else:
-        net.factorized_support_decoder = None
-    net._forward_clean_shared_ablation = MethodType(_legacy_phase_a_forward, net)
+        decoder.factorized_support_head = None
+
+    original_forward = decoder.forward
+
+    def factorized_forward(self, *args, **kwargs):
+        out = original_forward(*args, **kwargs)
+        amplitude = out["density"]
+        if not self.factorized_output_enabled:
+            self.last_factorized_outputs = {
+                "density": amplitude,
+                "support_probability": torch.ones_like(amplitude),
+                "amplitude": amplitude,
+            }
+            return out
+
+        ablation = kwargs.get("ablation", args[8] if len(args) > 8 else "full")
+        context_scale = kwargs.get(
+            "context_scale",
+            args[9] if len(args) > 9 else 1.0,
+        )
+        if str(ablation) not in {"shared_only", "a0"} or abs(float(context_scale)) > 1.0e-12:
+            raise RuntimeError(
+                "morphology-amplitude factorization is restricted to the reproduced "
+                "Phase-A shared-only path and cannot be used in Phase B/C"
+            )
+
+        pre_activation = out["decoder_pre_activation"]
+        support_probability = torch.sigmoid(
+            self.factorized_support_head(pre_activation)
+        )
+        density = (
+            support_probability * amplitude
+            if self.factorized_compose_density
+            else amplitude
+        )
+        updated = dict(out)
+        updated["density"] = density
+        updated["support_probability"] = support_probability
+        updated["amplitude"] = amplitude
+        if "shared_density" in updated:
+            updated["shared_density"] = density
+        if "branch_density" in updated and updated["branch_density"].shape[2] > 0:
+            branch_density = updated["branch_density"].clone()
+            branch_density[:, :, 0] = density
+            updated["branch_density"] = branch_density
+        self.last_factorized_outputs = {
+            "density": density,
+            "support_probability": support_probability,
+            "amplitude": amplitude,
+            "decoder_pre_activation": pre_activation,
+        }
+        return updated
+
+    decoder.forward = MethodType(factorized_forward, decoder)
+    decoder._morphology_amplitude_attached = True
 
 
-def load_legacy_phase_a_checkpoint(
-    net: nn.Module,
-    checkpoint_path: str | Path,
-    *,
-    allowed_missing_prefixes: tuple[str, ...] = ("unified_density_decoder.",),
-) -> dict[str, Any]:
-    """Load an old Phase-A checkpoint while rejecting active-path mismatches.
+_HISTORICAL_EXTENSION_PREFIXES = (
+    "unified_density_decoder.candidate_residual_head.",
+    "unified_density_decoder.candidate_branch_head.",
+)
 
-    ``strict=False`` is not used as a blanket escape hatch. Missing tensors are only
-    accepted for explicitly listed, inactive modules introduced after the checkpoint.
-    Every tensor belonging to the old active Phase-A path must match by name and shape.
-    """
 
-    checkpoint = torch.load(str(checkpoint_path), map_location="cpu", weights_only=False)
+def _net_state(checkpoint: dict[str, Any]) -> dict[str, torch.Tensor]:
     state = checkpoint.get("state_dict", checkpoint)
-    source = {
+    net_state = {
         key.removeprefix("net."): value
         for key, value in state.items()
         if key.startswith("net.")
     }
-    if not source:
-        source = dict(state)
-    current = net.state_dict()
-    matched: dict[str, torch.Tensor] = {}
-    unexpected: list[str] = []
-    shape_mismatches: list[tuple[str, tuple[int, ...], tuple[int, ...]]] = []
-    for key, value in source.items():
-        if key not in current:
-            unexpected.append(key)
-            continue
-        if tuple(value.shape) != tuple(current[key].shape):
-            shape_mismatches.append((key, tuple(value.shape), tuple(current[key].shape)))
-            continue
-        matched[key] = value
+    return net_state or dict(state)
 
-    missing = sorted(set(current) - set(matched))
+
+def load_historical_phase_a_checkpoint(
+    net: nn.Module,
+    checkpoint_path: str | Path,
+) -> dict[str, Any]:
+    """Load the reproduced 0.7507 checkpoint into the current refactor safely.
+
+    Missing tensors are accepted only for two candidate-only heads introduced after
+    the historical Phase-A run. All historical tensors, including the complete
+    UnifiedDensityDecoder shared path, must match by name and shape.
+    """
+
+    checkpoint = torch.load(
+        str(checkpoint_path),
+        map_location="cpu",
+        weights_only=False,
+    )
+    source = _net_state(checkpoint)
+    current = net.state_dict()
+    unexpected = sorted(key for key in source if key not in current)
+    mismatched = sorted(
+        (
+            key,
+            tuple(source[key].shape),
+            tuple(current[key].shape),
+        )
+        for key in source
+        if key in current and source[key].shape != current[key].shape
+    )
+    if unexpected or mismatched:
+        raise RuntimeError(
+            "historical Phase-A checkpoint has incompatible source tensors: "
+            f"unexpected={unexpected[:20]} mismatched={mismatched[:20]}"
+        )
+
+    matching = {key: value for key, value in source.items() if key in current}
+    missing = sorted(set(current) - set(matching))
     illegal_missing = [
-        key for key in missing if not key.startswith(allowed_missing_prefixes)
+        key
+        for key in missing
+        if not key.startswith(_HISTORICAL_EXTENSION_PREFIXES)
     ]
     required_prefixes = (
         "surface_encoder.",
         "surface_sampler.",
         "complementary_aggregation.",
-        "shared_density_logit_decoder.",
+        "unified_density_decoder.shared_norm.",
+        "unified_density_decoder.shared_input.",
+        "unified_density_decoder.head.",
     )
     absent_required = [
-        prefix for prefix in required_prefixes if not any(key.startswith(prefix) for key in matched)
+        prefix
+        for prefix in required_prefixes
+        if not any(key.startswith(prefix) for key in matching)
     ]
-    if unexpected or shape_mismatches or illegal_missing or absent_required:
+    if illegal_missing or absent_required:
         raise RuntimeError(
-            "Phase-A checkpoint is incompatible with the historical active path: "
-            f"unexpected={unexpected[:20]} shape_mismatches={shape_mismatches[:20]} "
+            "historical Phase-A checkpoint does not cover the active shared path: "
             f"illegal_missing={illegal_missing[:20]} absent_required={absent_required}"
         )
-    missing_after, unexpected_after = net.load_state_dict(matched, strict=False)
+
+    missing_after, unexpected_after = net.load_state_dict(matching, strict=False)
     if unexpected_after or sorted(missing_after) != missing:
         raise RuntimeError(
-            "controlled Phase-A checkpoint load returned inconsistent keys: "
+            "controlled historical checkpoint load returned inconsistent keys: "
             f"missing={missing_after[:20]} unexpected={unexpected_after[:20]}"
         )
     return {
         "checkpoint": str(Path(checkpoint_path).resolve()),
-        "matched_keys": len(matched),
-        "allowed_missing_keys": missing,
+        "matched_keys": len(matching),
+        "allowed_current_extensions": missing,
         "epoch": checkpoint.get("epoch"),
         "global_step": checkpoint.get("global_step"),
     }
+
+
+def load_factorized_or_historical_checkpoint(
+    net: nn.Module,
+    checkpoint_path: str | Path,
+) -> dict[str, Any]:
+    """Strictly load a factorized checkpoint, otherwise use historical compatibility."""
+
+    checkpoint = torch.load(
+        str(checkpoint_path),
+        map_location="cpu",
+        weights_only=False,
+    )
+    source = _net_state(checkpoint)
+    factorized_prefix = "unified_density_decoder.factorized_support_head."
+    if any(key.startswith(factorized_prefix) for key in source):
+        missing, unexpected = net.load_state_dict(source, strict=True)
+        if missing or unexpected:
+            raise RuntimeError(
+                f"strict factorized load failed: missing={missing[:20]} "
+                f"unexpected={unexpected[:20]}"
+            )
+        return {
+            "checkpoint": str(Path(checkpoint_path).resolve()),
+            "strict_factorized": True,
+            "matched_keys": len(source),
+            "epoch": checkpoint.get("epoch"),
+            "global_step": checkpoint.get("global_step"),
+        }
+    return load_historical_phase_a_checkpoint(net, checkpoint_path)
