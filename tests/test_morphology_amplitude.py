@@ -66,6 +66,10 @@ def test_factorized_unified_output_preserves_phase_a_amplitude_at_attachment():
         context_scale=0.0,
     )
     assert torch.equal(out["amplitude"], baseline)
+    assert torch.equal(
+        out["support_probability"],
+        torch.sigmoid(out["support_logits"]),
+    )
     assert torch.allclose(
         out["density"],
         out["support_probability"] * out["amplitude"],
@@ -168,6 +172,36 @@ def test_factorized_checkpoint_load_is_strict(tmp_path: Path):
         assert torch.equal(target.state_dict()[key], value)
 
 
+def test_factorized_objective_is_amp_safe_with_support_logits():
+    target = torch.tensor([[[0.0], [0.2], [0.8], [0.0]]])
+    support_logits = torch.tensor(
+        [[[-4.0], [4.0], [4.0], [-4.0]]],
+        requires_grad=True,
+    )
+    amplitude = target.detach().clone().requires_grad_(True)
+    objective = MorphologyAmplitudeObjective(
+        MorphologyAmplitudeLossConfig(
+            support_threshold=0.05,
+            support_weight=1.0,
+            amplitude_weight=1.0,
+        )
+    )
+    with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        support_probability = torch.sigmoid(support_logits)
+        result = objective(
+            support_logits=support_logits,
+            support_probability=support_probability,
+            amplitude=amplitude,
+            density=support_probability * amplitude,
+            target_density=target,
+        )
+    assert result["support_bce"].dtype == torch.float32
+    assert torch.isfinite(result["total"])
+    result["total"].backward()
+    assert support_logits.grad is not None
+    assert torch.isfinite(support_logits.grad).all()
+
+
 def test_factorized_objective_is_finite_and_rewards_correct_decomposition():
     target = torch.tensor([[[0.0], [0.2], [0.8], [0.0]]])
     component_ids = torch.tensor([[-1, 0, 1, -1]])
@@ -182,6 +216,7 @@ def test_factorized_objective_is_finite_and_rewards_correct_decomposition():
     good_support = torch.tensor([[[0.01], [0.99], [0.99], [0.01]]])
     bad_support = 1.0 - good_support
     good = objective(
+        support_logits=torch.logit(good_support),
         support_probability=good_support,
         amplitude=target,
         density=good_support * target,
@@ -189,6 +224,7 @@ def test_factorized_objective_is_finite_and_rewards_correct_decomposition():
         component_ids=component_ids,
     )
     bad = objective(
+        support_logits=torch.logit(bad_support),
         support_probability=bad_support,
         amplitude=1.0 - target,
         density=bad_support * (1.0 - target),
