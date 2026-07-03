@@ -5,19 +5,19 @@ defaults:
   - _self_
 
 name: fmt_simgen_v2_morphology_amplitude_phase_a
-description: Fair Phase-A ablation of morphology-amplitude factorized continuous reconstruction
+description: Fair continuation of the historical Phase-A scalar decoder with morphology-amplitude factorization
 
 model:
   ssq_fmt:
     view_complementary:
       training_phase: phase_a
-      # The clean shared path is functionally identical to the Phase-A density path
-      # while avoiding unused proposal/candidate computation during this experiment.
+      # The approximately 0.75 Phase-A checkpoint predates the unified decoder.
+      # Keep the original shared aggregation + shared logit decoder active.
       ablation: shared_only
       strong_shared_fusion: true
-      decoder_fusion_mode: joint_nonresidual
       phase_a_aux_loss_scale: 0.0
       factorized_reconstruction:
+        base_decoder: legacy_shared_logit
         enabled: false
         compose_density: true
         support_init_logit: 8.0
