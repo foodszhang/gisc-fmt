@@ -38,6 +38,14 @@ E15_EXPLICIT_KEY_MAP = {
     "density_head.mlp_out.3.bias": "shared_density_logit_decoder.fusion.6.bias",
 }
 
+SSQ_CHECKPOINT_EXTENSION_PREFIXES = (
+    "net.unified_density_decoder.candidate_residual_head.",
+    "net.unified_density_decoder.candidate_branch_head.",
+    "net.unified_density_decoder.support_head.",
+    "net.unified_density_decoder.intensity_head.",
+    "net.bounded_view_routing.gain_predictor.",
+)
+
 
 def load_e15_compatible_weights(model: torch.nn.Module, checkpoint_path: str) -> dict[str, list]:
     """Load only explicitly whitelisted, name- and shape-identical E15 tensors."""
@@ -112,6 +120,9 @@ class TrainingLightningModule(LightningModule):
         self._center_distance_weight: float = 0.1
         self._empty_slot_weight: float = 0.0
         self._backbone_logit_loss_weight: float = 0.0
+        self._support_intensity_cfg = {}
+        self._view_subset_cfg = {}
+        self._optical_invariance_cfg = {}
 
         # Create model and loss
         self._setup_model()
@@ -192,6 +203,16 @@ class TrainingLightningModule(LightningModule):
         finetune_cfg = getattr(self.cfg.model, "finetune", None)
         if finetune_cfg is None:
             return
+
+        def initialize_factorized_head_if_needed() -> None:
+            view_cfg = getattr(getattr(self.cfg.model, "ssq_fmt", {}), "view_complementary", {})
+            factorized_cfg = getattr(view_cfg, "support_intensity", None)
+            if factorized_cfg is None or not bool(getattr(factorized_cfg, "enabled", False)):
+                return
+            decoder = getattr(self.net, "unified_density_decoder", None)
+            if hasattr(decoder, "initialize_factorized_from_density_head"):
+                decoder.initialize_factorized_from_density_head()
+                print("[finetune] initialized support-intensity heads from phase-A density head")
 
         def apply_ssq_controls(initial_state: dict[str, torch.Tensor]) -> None:
             reset_modules = [str(name) for name in getattr(finetune_cfg, "reset_modules", []) or []]
@@ -281,6 +302,7 @@ class TrainingLightningModule(LightningModule):
                         f"new_keys={len(missing_current)}"
                     )
                     apply_ssq_controls(current_state)
+                    initialize_factorized_head_if_needed()
                     return
                 if all(
                     key in current_state and current_state[key].shape == value.shape
@@ -288,6 +310,7 @@ class TrainingLightningModule(LightningModule):
                 ):
                     self.net.load_state_dict(net_state, strict=True)
                     print(f"[finetune] strictly initialized SSQ-FMT net from {init_from}")
+                    initialize_factorized_head_if_needed()
                 else:
                     mapped_state = dict(current_state)
                     mapped = {}
@@ -313,6 +336,7 @@ class TrainingLightningModule(LightningModule):
                         f"[finetune] strictly initialized SSQ-FMT query backbone from "
                         f"{init_from}; mapped_backbone_keys={len(mapped)}"
                     )
+                    initialize_factorized_head_if_needed()
                 apply_ssq_controls(current_state)
                 return
             ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
@@ -412,6 +436,9 @@ class TrainingLightningModule(LightningModule):
         self._center_distance_weight = float(loss_cfg.get("distance_weight", 0.1))
         self._empty_slot_weight = float(loss_cfg.get("empty_slot_weight", 0.0))
         self._backbone_logit_loss_weight = float(loss_cfg.get("backbone_logit_loss_weight", 0.0))
+        self._support_intensity_cfg = dict(loss_cfg.get("support_intensity", {}) or {})
+        self._view_subset_cfg = dict(loss_cfg.get("view_subset_consistency", {}) or {})
+        self._optical_invariance_cfg = dict(loss_cfg.get("optical_invariance", {}) or {})
         self.loss_func = AuxProjectionLightLoss(
             init_scatter_weight=loss_cfg.get(
                 "aux_projection_weight", loss_cfg.get("scatter_weight", 1.0)
@@ -470,6 +497,129 @@ class TrainingLightningModule(LightningModule):
             lambda_res=loss_cfg.get("lambda_res", 0.0),
         )
 
+    def _support_intensity_losses(
+        self,
+        aux_outputs: dict,
+        pred_density: torch.Tensor,
+        target_density: torch.Tensor,
+        query_component_ids: torch.Tensor | None,
+    ) -> dict[str, torch.Tensor]:
+        cfg = self._support_intensity_cfg
+        if not bool(cfg.get("enabled", False)):
+            return {}
+        support = aux_outputs.get("support") if isinstance(aux_outputs, dict) else None
+        intensity = aux_outputs.get("intensity") if isinstance(aux_outputs, dict) else None
+        if not torch.is_tensor(support) or not torch.is_tensor(intensity):
+            return {}
+        support_logits = aux_outputs.get("support_logits")
+        target = target_density.to(device=pred_density.device, dtype=pred_density.dtype)
+        tau = float(cfg.get("support_threshold", 1.0e-6))
+        support_target = (target > tau).to(dtype=pred_density.dtype)
+        pred_support = support.to(dtype=pred_density.dtype).clamp(1.0e-6, 1.0 - 1.0e-6)
+        if torch.is_tensor(support_logits):
+            bce = F.binary_cross_entropy_with_logits(
+                support_logits.float(), support_target.float()
+            ).to(dtype=pred_density.dtype)
+        else:
+            bce = F.binary_cross_entropy(pred_support.float(), support_target.float()).to(
+                dtype=pred_density.dtype
+            )
+        pred_flat = pred_support.squeeze(-1)
+        target_flat = support_target.squeeze(-1)
+        eps = 1.0e-6
+        inter = (pred_flat * target_flat).sum(dim=1)
+        denom = pred_flat.sum(dim=1) + target_flat.sum(dim=1)
+        dice = 1.0 - ((2.0 * inter + eps) / (denom + eps)).mean()
+        fg = support_target
+        intensity_err = (intensity.to(dtype=pred_density.dtype) - target).abs() * fg
+        intensity_loss = intensity_err.sum() / fg.sum().clamp_min(1.0)
+        component_loss = pred_density.sum() * 0.0
+        if bool(cfg.get("component_balanced", False)) and torch.is_tensor(query_component_ids):
+            component_ids = query_component_ids.to(device=pred_density.device)
+            per_component = []
+            for sample in range(component_ids.shape[0]):
+                for component in torch.unique(component_ids[sample]):
+                    if int(component.item()) <= 0:
+                        continue
+                    member = component_ids[sample] == component
+                    if member.any():
+                        per_component.append(
+                            (pred_density[sample, member] - target[sample, member]).abs().mean()
+                        )
+            if per_component:
+                component_loss = torch.stack(per_component).mean()
+        total = (
+            float(cfg.get("lambda_sup", 0.1)) * (bce + float(cfg.get("lambda_sdice", 1.0)) * dice)
+            + float(cfg.get("lambda_int", 0.1)) * intensity_loss
+            + float(cfg.get("lambda_comp", 0.0)) * component_loss
+        )
+        return {
+            "support_bce_loss": bce,
+            "support_dice_loss": dice,
+            "intensity_loss": intensity_loss,
+            "component_balanced_density_loss": component_loss,
+            "support_intensity_aux_loss": total,
+            "support_target_positive_ratio": support_target.mean(),
+        }
+
+    def _view_subset_indices(self, view_count: int, device: torch.device) -> torch.Tensor:
+        cfg = self._view_subset_cfg
+        counts = list(cfg.get("view_counts", [3, 4, 5, 6]) or [3, 4, 5, 6])
+        counts = [max(1, min(int(count), view_count)) for count in counts]
+        gen = torch.Generator(device=device)
+        gen.manual_seed(int(cfg.get("seed", 20260703)) + int(self.global_step))
+        count_index = int(torch.randint(len(counts), (1,), generator=gen, device=device).item())
+        keep_count = counts[count_index]
+        mode = str(cfg.get("drop_mode", "mixed"))
+        if mode in {"adjacent", "mixed"} and (
+            mode == "adjacent" or bool(torch.randint(2, (1,), generator=gen, device=device))
+        ):
+            start = int(torch.randint(view_count, (1,), generator=gen, device=device).item())
+            return (torch.arange(keep_count, device=device) + start) % view_count
+        return torch.randperm(view_count, generator=gen, device=device)[:keep_count].sort().values
+
+    def _with_view_subset(self, batch: dict, keep: torch.Tensor) -> dict:
+        subset = dict(batch)
+        surface = batch.get("surface_measurements_packed", batch.get("projections_packed"))
+        if torch.is_tensor(surface):
+            subset["surface_measurements_packed"] = surface.clone()
+            drop = torch.ones(surface.shape[1], dtype=torch.bool, device=surface.device)
+            drop[keep] = False
+            subset["surface_measurements_packed"][:, drop] = 0.0
+            subset["projections_packed"] = subset["surface_measurements_packed"]
+        valid = batch.get("detector_valid_mask")
+        if torch.is_tensor(valid):
+            subset_valid = valid.clone()
+            drop = torch.ones(valid.shape[1], dtype=torch.bool, device=valid.device)
+            drop[keep] = False
+            subset_valid[:, drop] = False
+            subset["detector_valid_mask"] = subset_valid
+        return subset
+
+    def _paired_projection_batch(self, batch: dict) -> dict | None:
+        targets = batch.get("descatter_targets")
+        if not isinstance(targets, dict):
+            return None
+        angles = [str(int(v)) for v in self.cfg.data.get("view_angles", [])]
+        if not angles:
+            angles = sorted(str(key) for key in targets)
+        packed = []
+        for angle in angles:
+            value = targets.get(angle)
+            if not torch.is_tensor(value):
+                return None
+            if value.dim() == 3:
+                value = value.unsqueeze(1)
+            packed.append(value)
+        paired = dict(batch)
+        surface = torch.stack(packed, dim=1).to(
+            device=batch["projections_packed"].device,
+            dtype=batch["projections_packed"].dtype,
+        )
+        paired["surface_measurements_packed"] = surface
+        paired["projections_packed"] = surface
+        return paired
+
     def _is_ssq_model(self) -> bool:
         return str(getattr(self.cfg.model, "name", "")).lower() == "ssq_fmt"
 
@@ -479,18 +629,8 @@ class TrainingLightningModule(LightningModule):
         compatibility_keys = [
             key
             for key in current_state
-            if key.startswith(
-                (
-                    "net.unified_density_decoder.candidate_residual_head.",
-                    "net.unified_density_decoder.candidate_branch_head.",
-                )
-            )
+            if key.startswith(SSQ_CHECKPOINT_EXTENSION_PREFIXES)
         ]
-        compatibility_keys.extend(
-            key
-            for key in current_state
-            if key.startswith("net.bounded_view_routing.gain_predictor.")
-        )
         if routing_key in current_state:
             compatibility_keys.append(routing_key)
         if any(
@@ -996,6 +1136,89 @@ class TrainingLightningModule(LightningModule):
                 gt_component_centers_mm=batch.get("gt_component_centers_mm"),
                 gt_component_valid_mask=batch.get("gt_component_valid_mask"),
             )
+            support_losses = self._support_intensity_losses(
+                aux_outputs,
+                density_pred,
+                density,
+                batch.get("query_component_ids"),
+            )
+            if support_losses:
+                loss_dict.update(support_losses)
+                loss_dict["total_loss"] = (
+                    loss_dict["total_loss"] + support_losses["support_intensity_aux_loss"]
+                )
+            if bool(self._optical_invariance_cfg.get("enabled", False)):
+                paired_batch = self._paired_projection_batch(batch)
+                if paired_batch is None:
+                    raise RuntimeError(
+                        "loss.optical_invariance.enabled=true requires paired optical "
+                        "projection targets in batch.descatter_targets"
+                    )
+                paired_out = self._call_ssq_model(paired_batch, return_diagnostics=False)
+                paired_pred = paired_out["density"]
+                paired_aux = paired_out.get("aux_outputs", {})
+                paired_loss = self.ssq_loss_func(
+                    paired_pred,
+                    density,
+                    paired_aux,
+                    gt_voxels=batch.get("gt_voxels"),
+                    points_ijk=batch.get("points_ijk"),
+                    sdf_targets=batch.get("sdf_targets"),
+                    query_component_ids=batch.get("query_component_ids"),
+                    gt_component_centers_mm=batch.get("gt_component_centers_mm"),
+                    gt_component_valid_mask=batch.get("gt_component_valid_mask"),
+                )
+                inv_forward = (density_pred - paired_pred.detach()).abs().mean()
+                inv_backward = (paired_pred - density_pred.detach()).abs().mean()
+                invariance = 0.5 * (inv_forward + inv_backward)
+                loss_dict["optical_pair_density_loss"] = paired_loss["total_loss"]
+                loss_dict["optical_invariance_loss"] = invariance
+                loss_dict["total_loss"] = (
+                    loss_dict["total_loss"]
+                    + float(self._optical_invariance_cfg.get("density_weight", 1.0))
+                    * paired_loss["total_loss"]
+                    + float(self._optical_invariance_cfg.get("lambda_inv", 0.1)) * invariance
+                )
+            if bool(self._view_subset_cfg.get("enabled", False)):
+                surface = batch.get("surface_measurements_packed", batch.get("projections_packed"))
+                if torch.is_tensor(surface) and surface.shape[1] > 1:
+                    keep = self._view_subset_indices(surface.shape[1], surface.device)
+                    subset_batch = self._with_view_subset(batch, keep)
+                    subset_out = self._call_ssq_model(subset_batch, return_diagnostics=False)
+                    subset_pred = subset_out["density"]
+                    subset_aux = subset_out.get("aux_outputs", {})
+                    subset_loss = self.ssq_loss_func(
+                        subset_pred,
+                        density,
+                        subset_aux,
+                        gt_voxels=batch.get("gt_voxels"),
+                        points_ijk=batch.get("points_ijk"),
+                        sdf_targets=batch.get("sdf_targets"),
+                        query_component_ids=batch.get("query_component_ids"),
+                        gt_component_centers_mm=batch.get("gt_component_centers_mm"),
+                        gt_component_valid_mask=batch.get("gt_component_valid_mask"),
+                    )
+                    support_threshold = float(
+                        self._view_subset_cfg.get("support_threshold", 1.0e-6)
+                    )
+                    target_fg = (density > support_threshold).to(dtype=density_pred.dtype)
+                    bg = 1.0 - target_fg
+                    weights = target_fg / target_fg.sum().clamp_min(1.0)
+                    weights = weights + bg / bg.sum().clamp_min(1.0)
+                    consistency = (
+                        (subset_pred - density_pred.detach()).abs() * weights
+                    ).sum()
+                    loss_dict["view_subset_density_loss"] = subset_loss["total_loss"]
+                    loss_dict["view_subset_consistency_loss"] = consistency
+                    loss_dict["view_subset_keep_count"] = density_pred.new_tensor(
+                        float(keep.numel())
+                    )
+                    loss_dict["total_loss"] = (
+                        loss_dict["total_loss"]
+                        + float(self._view_subset_cfg.get("density_weight", 1.0))
+                        * subset_loss["total_loss"]
+                        + float(self._view_subset_cfg.get("lambda_sub", 0.1)) * consistency
+                    )
             density_logits = (
                 aux_outputs.get("density_logits") if isinstance(aux_outputs, dict) else None
             )
@@ -1229,7 +1452,9 @@ class TrainingLightningModule(LightningModule):
                 on_epoch=True,
                 sync_dist=True,
             )
-            if torch.is_tensor(diagnostics.get("candidate_centers_mm")):
+            if torch.is_tensor(diagnostics.get("candidate_centers_mm")) and torch.is_tensor(
+                diagnostics.get("candidate_view_support")
+            ):
                 self._log_view_candidate_metrics(diagnostics, batch)
             full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
             if full_grid:

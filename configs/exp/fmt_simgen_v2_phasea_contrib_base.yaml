@@ -1,0 +1,47 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_view_complementary
+  - _self_
+
+name: fmt_simgen_v2_phasea_contrib_base
+description: High-Dice phase-A PHSA baseline for third-contribution screening
+
+model:
+  finetune:
+    init_from_ckpt: outputs/view_complementary/phsa_conditional_view_gating_phase_a_init.ckpt
+    allow_missing_prefixes:
+      - unified_density_decoder.candidate_residual_head
+      - unified_density_decoder.candidate_branch_head
+      - unified_density_decoder.support_head
+      - unified_density_decoder.intensity_head
+  ssq_fmt:
+    view_complementary:
+      training_phase: phase_a
+      ablation: full
+      separability_mode: geometry_measurement
+      strong_shared_fusion: true
+      decoder_fusion_mode: joint_nonresidual
+      support_weighted_reliability: false
+      sample_level_hypotheses:
+        enabled: true
+        count: 4096
+        seed: 42
+      hypothesis_grid:
+        enabled: false
+      routing:
+        enabled: false
+      continuous_applicability: true
+      candidate_hidden_injection: true
+      context_warmup_enabled: true
+      phase_a_aux_loss_scale: 0.25
+      phase_b_aux_loss_scale: 0.02
+      full_aux_loss_scale: 0.0
+      phase_b_separability_loss_scale: 1.0
+      full_separability_loss_scale: 0.0
+
+optim:
+  lr: 0.0003
+  scheduler:
+    warmup_epochs: 5
+    warmup_start_factor: 0.2

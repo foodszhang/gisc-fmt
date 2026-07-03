@@ -1,0 +1,12 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_phasea_contrib_b_noscatter_aug
+  - _self_
+
+name: fmt_simgen_v2_phasea_contrib_b_noscatter_invariance
+description: Phase-A optical stress-pair invariance using existing mus=0 projections
+
+loss:
+  optical_invariance:
+    lambda_inv: 0.1

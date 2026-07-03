@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_phasea_contrib_base
+  - _self_
+
+name: fmt_simgen_v2_phasea_contrib_a_factorized
+description: Phase-A support-intensity factorized continuous reconstruction
+
+model:
+  ssq_fmt:
+    view_complementary:
+      support_intensity:
+        enabled: true
+
+loss:
+  support_intensity:
+    enabled: true
+    support_threshold: 1.0e-6
+    lambda_sup: 0.1
+    lambda_sdice: 1.0
+    lambda_int: 0.1
+    lambda_comp: 0.0
+    component_balanced: false

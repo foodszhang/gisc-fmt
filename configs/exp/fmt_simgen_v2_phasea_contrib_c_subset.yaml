@@ -1,0 +1,12 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_phasea_contrib_c_dropout
+  - _self_
+
+name: fmt_simgen_v2_phasea_contrib_c_subset
+description: Phase-A view-subset consistency reconstruction
+
+loss:
+  view_subset_consistency:
+    lambda_sub: 0.1

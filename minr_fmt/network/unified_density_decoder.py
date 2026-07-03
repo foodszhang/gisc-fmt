@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 import torch
 import torch.nn as nn
 
@@ -70,6 +72,18 @@ class UnifiedDensityDecoder(nn.Module):
             )
             nn.init.normal_(self.candidate_branch_head[-1].weight, std=1.0e-2)
             nn.init.constant_(self.candidate_branch_head[-1].bias, -4.595)
+        self.support_head = copy.deepcopy(self.head)
+        self.intensity_head = copy.deepcopy(self.head)
+        self.initialize_factorized_from_density_head()
+
+    def initialize_factorized_from_density_head(self) -> None:
+        self.intensity_head.load_state_dict(self.head.state_dict())
+        for parameter in self.support_head.parameters():
+            nn.init.zeros_(parameter)
+        last = self.support_head[-1]
+        if isinstance(last, nn.Linear):
+            nn.init.zeros_(last.weight)
+            nn.init.constant_(last.bias, 8.0)
 
     def forward(
         self,
@@ -158,11 +172,20 @@ class UnifiedDensityDecoder(nn.Module):
             density = torch.sigmoid(self.head(pre_activation))
             shared_density = density
             candidate_branch_density = density.new_zeros((b, n, m, 1))
+        support_logits = self.support_head(pre_activation)
+        intensity_logits = self.intensity_head(pre_activation)
+        support = torch.sigmoid(support_logits)
+        intensity = torch.sigmoid(intensity_logits)
         shared_prior = (1.0 - hypothesis_gate).clamp(0.0, 1.0)
         all_prior = torch.cat([shared_prior, applicability], dim=-1)
         all_prior = all_prior / all_prior.sum(dim=-1, keepdim=True).clamp_min(1.0e-8)
         return {
             "density": density,
+            "factorized_density": support * intensity,
+            "support": support,
+            "intensity": intensity,
+            "support_logits": support_logits,
+            "intensity_logits": intensity_logits,
             "shared_density": shared_density,
             "branch_density": torch.cat(
                 [shared_density[:, :, None], candidate_branch_density], dim=2

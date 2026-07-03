@@ -467,6 +467,9 @@ class SSQFMT(nn.Module):
         )
         view_cfg = ssq.get("view_complementary", {})
         self.view_complementary_ablation = str(view_cfg.get("ablation", "full"))
+        self.view_support_intensity_enabled = bool(
+            (view_cfg.get("support_intensity", {}) or {}).get("enabled", False)
+        )
         self.hypothesis_source = str(view_cfg.get("hypothesis_source", "learned"))
         if self.hypothesis_source not in {"learned", "gt"}:
             raise ValueError("view_complementary.hypothesis_source must be learned or gt")
@@ -1281,8 +1284,18 @@ class SSQFMT(nn.Module):
                 ablation="shared_only",
                 context_scale=0.0,
             )
+            density = (
+                decoded["factorized_density"]
+                if self.view_support_intensity_enabled
+                else decoded["density"]
+            )
             aux_outputs: dict[str, torch.Tensor] = {
-                "shared_density": decoded["density"],
+                "shared_density": density,
+                "support": decoded["support"],
+                "intensity": decoded["intensity"],
+                "support_logits": decoded["support_logits"],
+                "intensity_logits": decoded["intensity_logits"],
+                "factorized_density": decoded["factorized_density"],
                 "candidate_centers_mm": centers,
                 "candidate_covariances_mm": candidates["candidate_covariances_mm"],
                 "candidate_covariance_eigenvalues": candidates[
@@ -1361,7 +1374,7 @@ class SSQFMT(nn.Module):
                         )
                     )
             out: dict[str, torch.Tensor | dict[str, torch.Tensor]] = {
-                "density": decoded["density"],
+                "density": density,
                 "aux_outputs": aux_outputs,
             }
             if return_diagnostics:
@@ -1508,6 +1521,8 @@ class SSQFMT(nn.Module):
             context_scale=context_scale,
             continuous_applicability=self.continuous_applicability_enabled,
         )
+        if self.view_support_intensity_enabled:
+            decoded["density"] = decoded["factorized_density"]
         if self.hypothesis_aggregation_strategy == "oracle":
             if batch is None or not torch.is_tensor(batch.get("point_densities")):
                 raise RuntimeError("empirical oracle aggregation requires query GT")
@@ -1571,6 +1586,11 @@ class SSQFMT(nn.Module):
         )
         aux_outputs: dict[str, torch.Tensor] = {
             "shared_density": shared_decoded["density"],
+            "support": decoded["support"],
+            "intensity": decoded["intensity"],
+            "support_logits": decoded["support_logits"],
+            "intensity_logits": decoded["intensity_logits"],
+            "factorized_density": decoded["factorized_density"],
             "candidate_centers_mm": centers,
             "candidate_covariances_mm": candidates["candidate_covariances_mm"],
             "candidate_covariance_eigenvalues": candidates["candidate_covariance_eigenvalues"],

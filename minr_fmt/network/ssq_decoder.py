@@ -79,7 +79,12 @@ class _ImplicitDecoder(nn.Module):
         return self._forward_impl(z, encoded)
 
     def _forward_impl(self, z: torch.Tensor, encoded: torch.Tensor) -> torch.Tensor:
-        if self.checkpoint_decoder and self.training and (z.requires_grad or encoded.requires_grad):
+        use_checkpoint = (
+            self.checkpoint_decoder
+            and self.training
+            and (z.requires_grad or encoded.requires_grad)
+        )
+        if use_checkpoint:
             coord = checkpoint(self.coord, encoded, use_reentrant=False)
             feat = checkpoint(self.feat, z, use_reentrant=False)
             logits = checkpoint(

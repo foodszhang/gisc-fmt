@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_phasea_contrib_a_factorized
+  - _self_
+
+name: fmt_simgen_v2_phasea_contrib_a_factorized_comp
+description: Phase-A support-intensity factorization with component-balanced query loss
+
+loss:
+  support_intensity:
+    lambda_comp: 0.1
+    component_balanced: true

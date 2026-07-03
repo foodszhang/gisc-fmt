@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
 
 from minr_fmt.dataset.fmt_simgen_dataset import FmtSimGenProjDataset  # noqa: E402
 from minr_fmt.model_factory import ModelFactory  # noqa: E402
+from minr_fmt.module import SSQ_CHECKPOINT_EXTENSION_PREFIXES  # noqa: E402
 from minr_fmt.utils.utils import get_psnr_3d, get_ssim_3d  # noqa: E402
 
 
@@ -65,6 +66,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save_predictions", action="store_true")
     parser.add_argument("--prediction_dtype", default="float16", choices=["float16", "float32"])
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    parser.add_argument("--view_count", type=int, default=None)
+    parser.add_argument(
+        "--view_mode",
+        default="all",
+        choices=["all", "centered", "left", "right", "random"],
+    )
+    parser.add_argument("--view_seed", type=int, default=20260703)
     parser.add_argument("--min_region_size", type=int, default=10)
     parser.add_argument("--cc_connectivity", type=int, default=26)
     parser.add_argument("--voxel_spacing", nargs=3, type=float, default=[0.2, 0.2, 0.2])
@@ -109,6 +117,21 @@ def load_net(cfg, ckpt_path: Path | None, device: torch.device):
     if not net_state:
         net_state = state
     strict = str(cfg.model.name).lower() == "ssq_fmt"
+    if strict:
+        current_state = net.state_dict()
+        extension_prefixes = tuple(
+            prefix.removeprefix("net.") for prefix in SSQ_CHECKPOINT_EXTENSION_PREFIXES
+        )
+        compatible_missing = [
+            key
+            for key in current_state
+            if key.startswith(extension_prefixes)
+            and (key not in net_state or net_state[key].shape != current_state[key].shape)
+        ]
+        if compatible_missing:
+            net_state = dict(net_state)
+            for key in compatible_missing:
+                net_state[key] = current_state[key]
     missing, unexpected = net.load_state_dict(net_state, strict=strict)
     if unexpected:
         raise RuntimeError(f"Unexpected checkpoint keys: {unexpected[:10]}")
@@ -261,15 +284,19 @@ def points_to_norm(ijk: np.ndarray, shape: tuple[int, int, int]) -> torch.Tensor
 
 def source_hypotheses_batch(loader, cfg, sample_dir: Path, device: torch.device):
     source_cfg = getattr(cfg.data, "source_hypothesis", None)
-    if source_cfg is None or not bool(getattr(source_cfg, "enabled", False)):
+    ssq_cfg = getattr(cfg.data, "ssq_candidates", None)
+    source_enabled = source_cfg is not None and bool(getattr(source_cfg, "enabled", False))
+    ssq_enabled = ssq_cfg is not None and bool(getattr(ssq_cfg, "enabled", False))
+    if not source_enabled and not ssq_enabled:
         return None
     source_hyp = loader._load_source_hypotheses(sample_dir)
-    return {
+    out = {
         "centers": torch.from_numpy(source_hyp["centers"]).unsqueeze(0).to(device),
         "peak_scores": torch.from_numpy(source_hyp["peak_scores"]).unsqueeze(0).to(device),
         "scales": torch.from_numpy(source_hyp["scales"]).unsqueeze(0).to(device),
         "valid": torch.from_numpy(source_hyp["valid"]).unsqueeze(0).to(device),
     }
+    return out
 
 
 def predict_query_volume(
@@ -282,6 +309,7 @@ def predict_query_volume(
     chunk_size: int,
     device: torch.device,
     source_hypotheses: dict[str, torch.Tensor] | None = None,
+    view_indices: list[int] | None = None,
 ) -> np.ndarray:
     total = int(np.prod(shape))
     pred = np.empty(total, dtype=np.float32)
@@ -289,6 +317,14 @@ def predict_query_volume(
     surface = projections_packed.unsqueeze(0).to(device)
     depth_maps = depth_maps_tensor.unsqueeze(0).to(device)
     detector_valid_mask = torch.isfinite(depth_maps_tensor).unsqueeze(0).to(device)
+    if view_indices is not None:
+        keep = torch.as_tensor(view_indices, dtype=torch.long, device=device)
+        drop = torch.ones(surface.shape[1], dtype=torch.bool, device=device)
+        drop[keep] = False
+        surface = surface.clone()
+        surface[:, drop] = 0.0
+        detector_valid_mask = detector_valid_mask.clone()
+        detector_valid_mask[:, drop] = False
     is_ssq = str(getattr(cfg.model, "name", "")).lower() == "ssq_fmt"
     with torch.no_grad():
         for start in range(0, total, chunk_size):
@@ -298,17 +334,28 @@ def predict_query_volume(
             points_mm = torch.from_numpy((ijk.astype(np.float32) + 0.5) * voxel_size_mm)
             points_mm = points_mm.unsqueeze(0).to(device)
             if is_ssq:
+                ssq_batch = {
+                    "surface_measurements_packed": surface,
+                    "query_coordinates_mm": points_mm,
+                    "detector_valid_mask": detector_valid_mask,
+                    "depth_maps": depth_maps,
+                }
+                if source_hypotheses is not None:
+                    ssq_batch.update(
+                        {
+                            "candidate_centers_mm": source_hypotheses["centers"],
+                            "candidate_scores": source_hypotheses["peak_scores"],
+                            "candidate_support_scales_mm": source_hypotheses["scales"],
+                            "candidate_scales_mm": source_hypotheses["scales"],
+                            "candidate_valid_mask": source_hypotheses["valid"].bool(),
+                        }
+                    )
                 out = net(
                     surface,
                     points_mm,
                     detector_valid_mask=detector_valid_mask,
                     depth_maps=depth_maps,
-                    batch={
-                        "surface_measurements_packed": surface,
-                        "query_coordinates_mm": points_mm,
-                        "detector_valid_mask": detector_valid_mask,
-                        "depth_maps": depth_maps,
-                    },
+                    batch=ssq_batch,
                 )
                 values = out["density"].squeeze(0).squeeze(-1)
             else:
@@ -324,6 +371,23 @@ def predict_query_volume(
                 raise RuntimeError("Query model prediction contains NaN/Inf")
             pred[start:end] = values.detach().cpu().numpy().astype(np.float32)
     return pred.reshape(shape)
+
+
+def select_view_indices(
+    view_count: int, keep_count: int | None, mode: str, seed: int
+) -> list[int] | None:
+    if keep_count is None or keep_count >= view_count or mode == "all":
+        return None
+    keep_count = max(1, min(int(keep_count), view_count))
+    if mode == "left":
+        return list(range(keep_count))
+    if mode == "right":
+        return list(range(view_count - keep_count, view_count))
+    if mode == "centered":
+        start = max(0, (view_count - keep_count) // 2)
+        return list(range(start, start + keep_count))
+    rng = np.random.default_rng(seed)
+    return sorted(int(i) for i in rng.choice(view_count, size=keep_count, replace=False))
 
 
 def predict_voxel_volume(
@@ -609,6 +673,12 @@ def main() -> None:
     spacing = tuple(float(v) for v in args.voxel_spacing)
     rows = []
     flops_g = None
+    selected_view_indices = select_view_indices(
+        len(list(cfg.data.view_angles)),
+        args.view_count,
+        args.view_mode,
+        args.view_seed,
+    )
     for idx, sample_dir in enumerate(sample_dirs):
         gt = load_gt(sample_dir)
         gt_shape = tuple(int(v) for v in gt.shape)
@@ -666,6 +736,7 @@ def main() -> None:
                 args.chunk_size,
                 device,
                 source_hypotheses=source_hypotheses,
+                view_indices=selected_view_indices,
             )
         if device.type == "cuda":
             torch.cuda.synchronize(device)
@@ -715,6 +786,9 @@ def main() -> None:
             "threshold": float(args.threshold),
             "chunk_size": int(args.chunk_size),
             "voxel_model": bool(voxel_model),
+            "view_count": args.view_count,
+            "view_mode": args.view_mode,
+            "view_indices": selected_view_indices,
         },
     )
     print(json.dumps(summarize(rows), indent=2))

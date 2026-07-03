@@ -1,0 +1,14 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_phasea_contrib_base
+  - _self_
+
+name: fmt_simgen_v2_phasea_contrib_b_noscatter_aug
+description: Phase-A optical stress-pair augmentation using existing mus=0 projections
+
+loss:
+  optical_invariance:
+    enabled: true
+    density_weight: 1.0
+    lambda_inv: 0.0
