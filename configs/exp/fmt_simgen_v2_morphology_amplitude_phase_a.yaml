@@ -1,0 +1,35 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_view_complementary
+  - _self_
+
+name: fmt_simgen_v2_morphology_amplitude_phase_a
+description: Fair Phase-A ablation of morphology-amplitude factorized continuous reconstruction
+
+model:
+  ssq_fmt:
+    view_complementary:
+      training_phase: phase_a
+      # The clean shared path is functionally identical to the Phase-A density path
+      # while avoiding unused proposal/candidate computation during this experiment.
+      ablation: shared_only
+      strong_shared_fusion: true
+      decoder_fusion_mode: joint_nonresidual
+      phase_a_aux_loss_scale: 0.0
+      factorized_reconstruction:
+        enabled: false
+        compose_density: true
+        support_init_logit: 8.0
+        aux_warmup_steps: 500
+        support_threshold: 0.05
+        support_weight: 0.10
+        support_dice_weight: 1.0
+        amplitude_weight: 0.25
+        component_weight: 0.0
+        eps: 1.0e-6
+
+loss:
+  candidate_branch_density_weight: 0.0
+  candidate_branch_dice_weight: 0.0
+  candidate_assignment_weight: 0.0
