@@ -86,6 +86,7 @@ class MorphologyAmplitudeObjective:
         amplitude: torch.Tensor,
         density: torch.Tensor,
         target_density: torch.Tensor,
+        support_logits: torch.Tensor | None = None,
         component_ids: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         support_probability = self._as_scalar_field(
@@ -97,6 +98,10 @@ class MorphologyAmplitudeObjective:
             device=density.device,
             dtype=density.dtype,
         ).clamp(0.0, 1.0)
+        if support_logits is not None:
+            support_logits = self._as_scalar_field(
+                support_logits, "support_logits"
+            ).to(device=density.device)
         if not (
             support_probability.shape
             == amplitude.shape
@@ -104,11 +109,30 @@ class MorphologyAmplitudeObjective:
             == target.shape
         ):
             raise ValueError("factorized predictions and targets must have identical shapes")
+        if support_logits is not None and support_logits.shape != target.shape:
+            raise ValueError("support logits and targets must have identical shapes")
 
         support_target = (target > self.config.support_threshold).to(density.dtype)
-        support_bce = F.binary_cross_entropy(support_probability, support_target)
-        intersection = (support_probability * support_target).sum(dim=1)
-        denominator = support_probability.sum(dim=1) + support_target.sum(dim=1)
+        # BCE on sigmoid probabilities is explicitly unsafe under AMP. Preserve the
+        # support-head logits and evaluate BCEWithLogits in float32 instead.
+        if support_logits is None:
+            support_logits = torch.logit(
+                support_probability.float().clamp(
+                    self.config.eps,
+                    1.0 - self.config.eps,
+                )
+            )
+        support_bce = F.binary_cross_entropy_with_logits(
+            support_logits.float(),
+            support_target.float(),
+        )
+        support_probability_fp32 = support_probability.float()
+        support_target_fp32 = support_target.float()
+        intersection = (support_probability_fp32 * support_target_fp32).sum(dim=1)
+        denominator = (
+            support_probability_fp32.sum(dim=1)
+            + support_target_fp32.sum(dim=1)
+        )
         support_dice = 1.0 - (
             (2.0 * intersection + self.config.eps)
             / (denominator + self.config.eps)
@@ -137,9 +161,9 @@ class MorphologyAmplitudeObjective:
             "support_loss": support_loss,
             "amplitude_loss": amplitude_loss,
             "component_balanced_density_loss": component_loss,
-            "support_target_ratio": support_target.mean(),
-            "support_prediction_mean": support_probability.mean(),
-            "amplitude_prediction_mean": amplitude.mean(),
+            "support_target_ratio": support_target.float().mean(),
+            "support_prediction_mean": support_probability.float().mean(),
+            "amplitude_prediction_mean": amplitude.float().mean(),
         }
 
 
@@ -219,9 +243,8 @@ def attach_factorized_unified_output(net: nn.Module, factor_cfg: Any) -> None:
             )
 
         pre_activation = out["decoder_pre_activation"]
-        support_probability = torch.sigmoid(
-            self.factorized_support_head(pre_activation)
-        )
+        support_logits = self.factorized_support_head(pre_activation)
+        support_probability = torch.sigmoid(support_logits)
         density = (
             support_probability * amplitude
             if self.factorized_compose_density
@@ -229,6 +252,7 @@ def attach_factorized_unified_output(net: nn.Module, factor_cfg: Any) -> None:
         )
         updated = dict(out)
         updated["density"] = density
+        updated["support_logits"] = support_logits
         updated["support_probability"] = support_probability
         updated["amplitude"] = amplitude
         if "shared_density" in updated:
@@ -239,6 +263,7 @@ def attach_factorized_unified_output(net: nn.Module, factor_cfg: Any) -> None:
             updated["branch_density"] = branch_density
         self.last_factorized_outputs = {
             "density": density,
+            "support_logits": support_logits,
             "support_probability": support_probability,
             "amplitude": amplitude,
             "decoder_pre_activation": pre_activation,
