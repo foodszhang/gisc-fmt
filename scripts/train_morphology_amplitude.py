@@ -240,7 +240,7 @@ class MorphologyAmplitudeTrainingModule(BaseTrainingLightningModule):
             raise RuntimeError("factorized objective was not initialized")
 
         cached = self.net.unified_density_decoder.last_factorized_outputs
-        required = {"support_probability", "amplitude", "density"}
+        required = {"support_logits", "support_probability", "amplitude", "density"}
         missing = sorted(required - set(cached))
         if missing:
             raise RuntimeError(
@@ -249,6 +249,7 @@ class MorphologyAmplitudeTrainingModule(BaseTrainingLightningModule):
             )
         target = batch["point_densities"].to(cached["density"]).unsqueeze(-1)
         objective = self.factorized_objective(
+            support_logits=cached["support_logits"],
             support_probability=cached["support_probability"],
             amplitude=cached["amplitude"],
             density=cached["density"],
