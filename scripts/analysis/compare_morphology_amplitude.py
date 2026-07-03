@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 VARIANTS = (
+    "phase_a_reference",
     "scalar_control",
     "support_aux",
     "factorized_core",
