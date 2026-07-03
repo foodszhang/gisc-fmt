@@ -7,7 +7,7 @@ cd "$ROOT"
 export CUDA_VISIBLE_DEVICES="${GPU_ID:-0}"
 export PYTHONUNBUFFERED=1
 
-: "${PHASE_A_CKPT:?Set PHASE_A_CKPT to the audited Phase-A checkpoint (Dice approximately 0.75)}"
+: "${PHASE_A_CKPT:?Set PHASE_A_CKPT to the existing Phase-A checkpoint (Dice approximately 0.75)}"
 [[ -f "$PHASE_A_CKPT" ]] || { echo "Missing Phase-A checkpoint: $PHASE_A_CKPT" >&2; exit 2; }
 PHASE_A_CKPT="$(realpath "$PHASE_A_CKPT")"
 
@@ -74,7 +74,7 @@ COMMON=(
   "data.num_workers=${NUM_WORKERS}"
   "data.batch_size=${BATCH_SIZE}"
   data.eval_batch_size=1
-  "data.pin_memory=true"
+  data.pin_memory=true
   data.persistent_workers=false
   "data.prefetch_factor=${PREFETCH_FACTOR}"
   data.resample_queries_each_epoch=true
@@ -83,10 +83,9 @@ COMMON=(
   model.ssq_fmt.view_complementary.training_phase=phase_a
   model.ssq_fmt.view_complementary.ablation=shared_only
   "++model.ssq_fmt.view_complementary.strong_shared_fusion=true"
-  "++model.ssq_fmt.view_complementary.decoder_fusion_mode=joint_nonresidual"
   "++model.ssq_fmt.view_complementary.phase_a_aux_loss_scale=0.0"
+  "model.ssq_fmt.view_complementary.factorized_reconstruction.base_decoder=legacy_shared_logit"
   "++model.finetune.init_from_ckpt=${PHASE_A_CKPT}"
-  "++model.finetune.train_modules_only=[complementary_aggregation,unified_density_decoder]"
   "optim.lr=${LR}"
   "trainer.max_epochs=${FINETUNE_EPOCHS}"
   "trainer.check_val_every_n_epoch=${VAL_EVERY}"
@@ -127,6 +126,7 @@ evaluate_checkpoint() {
     "++data.load_stage1_mesh=false"
     model.ssq_fmt.view_complementary.training_phase=phase_a
     model.ssq_fmt.view_complementary.ablation=shared_only
+    "model.ssq_fmt.view_complementary.factorized_reconstruction.base_decoder=legacy_shared_logit"
     "model.ssq_fmt.view_complementary.factorized_reconstruction.enabled=${enabled}"
     "model.ssq_fmt.view_complementary.factorized_reconstruction.compose_density=${compose}"
   )
@@ -156,8 +156,8 @@ run_variant() {
     "model.ssq_fmt.view_complementary.factorized_reconstruction.component_weight=${component_w}"
   )
   if [[ -f "$last" ]]; then
-    # A resumed factorized checkpoint already contains the support head. Disable
-    # baseline initialization and let Lightning restore model/optimizer state.
+    # The resumed model is constructed with the same historical decoder path and,
+    # when enabled, the same support branch before Lightning restores its state.
     cmd+=("model.finetune.init_from_ckpt=null" "ckpt_path=$(realpath "$last")" ckpt_weights_only=false)
   fi
   "${cmd[@]}"
@@ -172,7 +172,7 @@ run_variant() {
   fi
 }
 
-log "Running matched continuations from ${PHASE_A_CKPT}"
+log "Running matched continuations from historical Phase-A checkpoint ${PHASE_A_CKPT}"
 if [[ "$RUN_FULL_EVAL" == "1" ]]; then
   evaluate_checkpoint phase_a_reference "$PHASE_A_CKPT" false true
 fi
