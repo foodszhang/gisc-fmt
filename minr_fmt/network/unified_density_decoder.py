@@ -18,7 +18,6 @@ class UnifiedDensityDecoder(nn.Module):
         if fusion_mode not in {"additive", "joint_nonresidual"}:
             raise ValueError(f"unknown unified decoder fusion mode: {fusion_mode}")
         self.fusion_mode = fusion_mode
-        self.hidden_dim = int(hidden_dim)
         context_in = representation_dim + 3 + 3 + 1
         self.candidate_context = nn.Sequential(
             nn.Linear(context_in, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, representation_dim)
@@ -43,7 +42,6 @@ class UnifiedDensityDecoder(nn.Module):
                 nn.SiLU(),
                 nn.Linear(hidden_dim, 1),
             )
-            self._head_input_dim = hidden_dim
         else:
             self.head = nn.Sequential(
                 nn.SiLU(),
@@ -53,7 +51,6 @@ class UnifiedDensityDecoder(nn.Module):
                 nn.SiLU(),
                 nn.Linear(hidden_dim, 1),
             )
-            self._head_input_dim = hidden_dim * 2
         self.candidate_residual_head = None
         self.candidate_branch_head = None
         if fusion_mode == "joint_nonresidual":
@@ -73,65 +70,6 @@ class UnifiedDensityDecoder(nn.Module):
             )
             nn.init.normal_(self.candidate_branch_head[-1].weight, std=1.0e-2)
             nn.init.constant_(self.candidate_branch_head[-1].bias, -4.595)
-
-        # Disabled by default so all existing checkpoints and experiments preserve
-        # their exact scalar-density behavior. The experimental training entrypoint
-        # enables this extension only after loading the Phase-A checkpoint.
-        self.factorized_output_enabled = False
-        self.factorized_compose_density = True
-        self.support_head: nn.Sequential | None = None
-        self.last_factorized_outputs: dict[str, torch.Tensor] = {}
-
-    def enable_factorized_output(
-        self,
-        *,
-        compose_density: bool = True,
-        support_init_logit: float = 8.0,
-    ) -> None:
-        """Add a support head while retaining the trained scalar head as amplitude.
-
-        The final layer is zero-initialized with a large positive bias. Therefore a
-        Phase-A scalar checkpoint initially changes by less than 0.04% when product
-        composition is enabled, rather than being destroyed by a randomly initialized
-        support branch.
-        """
-
-        self.factorized_output_enabled = True
-        self.factorized_compose_density = bool(compose_density)
-        if self.support_head is not None:
-            return
-        if self.fusion_mode == "additive":
-            head = nn.Sequential(
-                nn.SiLU(),
-                nn.Linear(self._head_input_dim, self.hidden_dim),
-                nn.SiLU(),
-                nn.Linear(self.hidden_dim, 1),
-            )
-        else:
-            head = nn.Sequential(
-                nn.SiLU(),
-                nn.Linear(self._head_input_dim, self._head_input_dim),
-                nn.SiLU(),
-                nn.Linear(self._head_input_dim, self.hidden_dim),
-                nn.SiLU(),
-                nn.Linear(self.hidden_dim, 1),
-            )
-        nn.init.zeros_(head[-1].weight)
-        nn.init.constant_(head[-1].bias, float(support_init_logit))
-        self.support_head = head
-
-    def _decode_factorized(
-        self, pre_activation: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        amplitude = torch.sigmoid(self.head(pre_activation))
-        if not self.factorized_output_enabled:
-            support = torch.ones_like(amplitude)
-            return amplitude, support, amplitude
-        if self.support_head is None:
-            raise RuntimeError("factorized output was enabled without a support head")
-        support = torch.sigmoid(self.support_head(pre_activation))
-        density = support * amplitude if self.factorized_compose_density else amplitude
-        return density, support, amplitude
 
     def forward(
         self,
@@ -197,7 +135,7 @@ class UnifiedDensityDecoder(nn.Module):
             torch.cat([self.shared_norm(shared), encoded_points], dim=-1)
         )
         candidate_hidden = self.candidate_input(self.candidate_norm(context))
-        # LayerNorm largely cancels a pre-normalization amplitude gate. Apply
+        # LayerNorm largely cancels a pre-normalization amplitude gate.  Apply
         # continuous existence/applicability after normalization instead.
         if continuous_applicability:
             candidate_hidden = candidate_hidden * hypothesis_gate.to(candidate_hidden.dtype)
@@ -208,38 +146,23 @@ class UnifiedDensityDecoder(nn.Module):
             pre_activation = torch.cat(
                 [shared_hidden, float(context_scale) * candidate_hidden], dim=-1
             )
-            shared_density, shared_support, shared_amplitude = self._decode_factorized(
-                shared_pre_activation
-            )
-            density, support_probability, amplitude = self._decode_factorized(pre_activation)
+            shared_density = torch.sigmoid(self.head(shared_pre_activation))
+            density = torch.sigmoid(self.head(pre_activation))
             candidate_delta_logit = torch.logit(
                 density.float().clamp(1.0e-6, 1.0 - 1.0e-6)
             ) - torch.logit(shared_density.float().clamp(1.0e-6, 1.0 - 1.0e-6))
             candidate_branch_density = density.new_zeros((b, n, m, 1))
         else:
             pre_activation = shared_hidden + float(context_scale) * candidate_hidden
-            density, support_probability, amplitude = self._decode_factorized(pre_activation)
             candidate_delta_logit = self.head(pre_activation) * 0.0
+            density = torch.sigmoid(self.head(pre_activation))
             shared_density = density
-            shared_support = support_probability
-            shared_amplitude = amplitude
             candidate_branch_density = density.new_zeros((b, n, m, 1))
         shared_prior = (1.0 - hypothesis_gate).clamp(0.0, 1.0)
         all_prior = torch.cat([shared_prior, applicability], dim=-1)
         all_prior = all_prior / all_prior.sum(dim=-1, keepdim=True).clamp_min(1.0e-8)
-        self.last_factorized_outputs = {
-            "density": density,
-            "support_probability": support_probability,
-            "amplitude": amplitude,
-            "shared_support_probability": shared_support,
-            "shared_amplitude": shared_amplitude,
-        }
         return {
             "density": density,
-            "support_probability": support_probability,
-            "amplitude": amplitude,
-            "shared_support_probability": shared_support,
-            "shared_amplitude": shared_amplitude,
             "shared_density": shared_density,
             "branch_density": torch.cat(
                 [shared_density[:, :, None], candidate_branch_density], dim=2
