@@ -24,18 +24,32 @@ class ComplementaryAggregation(nn.Module):
         candidate_view_valid: torch.Tensor | None = None,
         uniform_views: bool = False,
         geometry_only: bool = False,
+        aggregation_strategy: str | None = None,
     ) -> dict[str, torch.Tensor]:
         shared_weight = view_valid.to(shared_per_view.dtype)
         shared_weight = shared_weight / shared_weight.sum(dim=1, keepdim=True).clamp_min(1.0e-8)
         shared = self.shared_projection((shared_per_view * shared_weight[..., None]).sum(dim=1))
         if candidate_view_valid is None:
             candidate_view_valid = candidate_valid[:, None].expand_as(candidate_support)
-        reliability = candidate_view_valid.to(candidate_support.dtype)
-        if geometry_only:
-            reliability = reliability * (self.epsilon_s + separability)
-        elif not uniform_views:
-            reliability = reliability * candidate_support
-            reliability = reliability * (self.epsilon_s + separability)
+        valid_float = candidate_view_valid.to(candidate_support.dtype)
+        strategy = aggregation_strategy
+        if strategy is None or strategy == "legacy":
+            strategy = "uniform" if uniform_views else "geometry" if geometry_only else "full"
+        if strategy in {"uniform", "oracle"}:
+            reliability = valid_float
+        elif strategy == "support":
+            reliability = candidate_support * valid_float
+        elif strategy == "geometry":
+            reliability = (self.epsilon_s + separability) * valid_float
+        elif strategy == "full":
+            reliability = candidate_support * (self.epsilon_s + separability) * valid_float
+        elif strategy == "shuffled":
+            keys = torch.rand_like(separability).masked_fill(~candidate_view_valid, 2.0)
+            permutation = keys.argsort(dim=1)
+            shuffled = separability.gather(1, permutation)
+            reliability = (self.epsilon_s + shuffled) * valid_float
+        else:
+            raise ValueError(f"unknown aggregation strategy: {strategy}")
         weight = reliability / reliability.sum(dim=1, keepdim=True).clamp_min(1.0e-8)
         weight = weight * candidate_valid[:, None].to(weight.dtype)
         candidate = self.candidate_projection(

@@ -63,12 +63,17 @@ class Patch2ComplementaryAggregation(nn.Module):
         self,
         shared_per_view: torch.Tensor,
         view_valid: torch.Tensor,
+        attention_logit_residual: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         per_view = self.common_projection(self.feature_norm(shared_per_view))
         valid = view_valid.to(dtype=torch.bool, device=shared_per_view.device)
         uniform = self._normalize(valid.to(shared_per_view.dtype), dim=1)
         if self.strong_shared_fusion:
             logits = self.shared_attention(per_view).squeeze(-1)
+            if attention_logit_residual is not None:
+                if attention_logit_residual.shape != logits.shape:
+                    raise ValueError("attention_logit_residual must match [B,V,N]")
+                logits = logits + attention_logit_residual.to(logits.dtype)
             logits = logits.masked_fill(~valid, -1.0e4)
             has_valid = valid.any(dim=1, keepdim=True)
             logits = torch.where(has_valid, logits, torch.zeros_like(logits))
@@ -103,6 +108,7 @@ class Patch2ComplementaryAggregation(nn.Module):
         candidate_view_valid: torch.Tensor | None = None,
         uniform_views: bool = False,
         geometry_only: bool = False,
+        aggregation_strategy: str | None = None,
     ) -> dict[str, torch.Tensor]:
         shared, shared_weight = self.aggregate_shared(shared_per_view, view_valid)
         if candidate_view_valid is None:
@@ -119,18 +125,30 @@ class Patch2ComplementaryAggregation(nn.Module):
         )
         self.last_candidate_view_features = candidate_encoded
 
-        if uniform_views:
+        strategy = aggregation_strategy
+        if strategy is None or strategy == "legacy":
+            strategy = "uniform" if uniform_views else "geometry" if geometry_only else "full"
+            if strategy == "full" and not self.support_weighted_reliability:
+                strategy = "geometry"
+        if strategy in {"uniform", "oracle"}:
             reliability = valid_float
-        elif geometry_only or not self.support_weighted_reliability:
+        elif strategy == "support":
+            reliability = candidate_support * valid_float
+        elif strategy == "geometry":
             reliability = (self.epsilon_s + separability) * valid_float
-        else:
-            # With separability_mode=none, separability is one everywhere and this
-            # reduces to support-only weighting after normalization (A2-S).
+        elif strategy == "full":
             reliability = (
                 candidate_support
                 * (self.epsilon_s + separability)
                 * valid_float
             )
+        elif strategy == "shuffled":
+            keys = torch.rand_like(separability).masked_fill(~candidate_view_valid, 2.0)
+            permutation = keys.argsort(dim=1)
+            shuffled = separability.gather(1, permutation)
+            reliability = (self.epsilon_s + shuffled) * valid_float
+        else:
+            raise ValueError(f"unknown aggregation strategy: {strategy}")
         weight = self._normalize(reliability, dim=1)
         weight = weight * candidate_valid[:, None].to(weight.dtype)
         candidate = (candidate_encoded * weight[..., None]).sum(dim=1)

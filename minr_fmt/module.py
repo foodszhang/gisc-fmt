@@ -486,6 +486,11 @@ class TrainingLightningModule(LightningModule):
                 )
             )
         ]
+        compatibility_keys.extend(
+            key
+            for key in current_state
+            if key.startswith("net.bounded_view_routing.gain_predictor.")
+        )
         if routing_key in current_state:
             compatibility_keys.append(routing_key)
         if any(
@@ -1272,6 +1277,9 @@ class TrainingLightningModule(LightningModule):
                     on_epoch=True,
                     sync_dist=True,
                 )
+                self._log_conditional_routing_diagnostics(
+                    diagnostics, batch, point_densities, pred_prob, shared_prob
+                )
             if "proposal_gate" in diagnostics:
                 gate = diagnostics["proposal_gate"].detach().float().reshape(-1)
                 applicability = diagnostics["candidate_applicability"].detach().float()
@@ -1464,6 +1472,174 @@ class TrainingLightningModule(LightningModule):
             },
         }
         torch.save(payload, output_dir / f"step_{int(self.global_step):08d}.pt")
+
+    def _log_conditional_routing_diagnostics(
+        self,
+        diagnostics: dict,
+        batch: dict,
+        target: torch.Tensor,
+        final_prob: torch.Tensor,
+        shared_prob: torch.Tensor,
+    ) -> None:
+        """Log the causal chain from conditional routing to reconstruction changes."""
+        positive = diagnostics.get("routing_positive_density")
+        negative = diagnostics.get("routing_negative_density")
+        scale = diagnostics.get("routing_scale")
+        if not all(torch.is_tensor(value) for value in (positive, negative, scale)):
+            return
+
+        eps = 1.0e-6
+        target_bin = (target > 0).bool()
+        target_float = target_bin.float()
+        positive = positive.detach().float().squeeze(-1).clamp(eps, 1.0 - eps)
+        negative = negative.detach().float().squeeze(-1).clamp(eps, 1.0 - eps)
+        final = final_prob.detach().float().squeeze(-1)
+        shared = shared_prob.detach().float().squeeze(-1)
+        scale = scale.detach().float().squeeze(-1)
+
+        positive_error = -(
+            target_float * positive.log() + (1.0 - target_float) * (1.0 - positive).log()
+        )
+        negative_error = -(
+            target_float * negative.log() + (1.0 - target_float) * (1.0 - negative).log()
+        )
+        oracle_positive = positive_error < negative_error
+        oracle_margin = (positive_error - negative_error).abs()
+        decisive = oracle_margin > 1.0e-5
+        predicted_positive = scale >= 0
+        sign_correct = predicted_positive == oracle_positive
+        oracle_error = torch.minimum(positive_error, negative_error)
+        selected_error = torch.where(predicted_positive, positive_error, negative_error)
+
+        def log(name: str, value: torch.Tensor) -> None:
+            self.log(name, value, on_epoch=True, sync_dist=True, batch_size=target.shape[0])
+
+        if decisive.any():
+            log("val_gate_oracle_sign_accuracy", sign_correct[decisive].float().mean())
+            log("val_gate_oracle_regret", (selected_error - oracle_error)[decisive].mean())
+            log("val_gate_oracle_decisive_ratio", decisive.float().mean())
+            log("val_oracle_positive_direction_ratio", oracle_positive[decisive].float().mean())
+            positive_target = decisive & target_bin
+            negative_target = decisive & ~target_bin
+            if positive_target.any():
+                log(
+                    "val_gate_oracle_sign_accuracy_positive",
+                    sign_correct[positive_target].float().mean(),
+                )
+            if negative_target.any():
+                log(
+                    "val_gate_oracle_sign_accuracy_negative",
+                    sign_correct[negative_target].float().mean(),
+                )
+        log("val_routing_scale_mean", scale.mean())
+        log("val_routing_scale_std", scale.std(unbiased=False))
+        log("val_routing_scale_positive_ratio", (scale > 0).float().mean())
+        conditional_gain = diagnostics.get("conditional_gain_raw")
+        if torch.is_tensor(conditional_gain):
+            conditional_gain = conditional_gain.detach().float()
+            log("val_conditional_gain_std", conditional_gain.std(unbiased=False))
+
+        base_weights = diagnostics.get("base_view_weights")
+        routed_weights = diagnostics.get("view_weights")
+        weight_change = None
+        if torch.is_tensor(base_weights) and torch.is_tensor(routed_weights):
+            base = base_weights.detach().float().transpose(1, 2)
+            routed = routed_weights.detach().float().transpose(1, 2)
+            valid = base > 0
+            l1 = ((routed - base).abs() * valid).sum(dim=-1)
+            weight_change = l1
+            kl = (
+                routed.clamp_min(eps)
+                * (routed.clamp_min(eps).log() - base.clamp_min(eps).log())
+                * valid
+            ).sum(dim=-1)
+            rank_flip = routed.argmax(dim=-1) != base.argmax(dim=-1)
+            log("val_view_weight_l1", l1.mean())
+            log("val_view_weight_kl", kl.mean())
+            log("val_view_top_rank_flip_ratio", rank_flip.float().mean())
+
+        threshold = self._validation_pred_threshold
+        shared_pred = shared >= threshold
+        final_pred = final >= threshold
+        shared_correct = shared_pred == target_bin
+        final_correct = final_pred == target_bin
+        correct_crossing = (~shared_correct) & final_correct
+        wrong_crossing = shared_correct & (~final_correct)
+        log("val_correct_threshold_crossing_ratio", correct_crossing.float().mean())
+        log("val_wrong_threshold_crossing_ratio", wrong_crossing.float().mean())
+        log("val_threshold_crossing_net", (correct_crossing.sum() - wrong_crossing.sum()).float())
+        log(
+            "val_delta_tp",
+            ((final_pred & target_bin).sum() - (shared_pred & target_bin).sum()).float(),
+        )
+        log(
+            "val_delta_fp",
+            ((final_pred & ~target_bin).sum() - (shared_pred & ~target_bin).sum()).float(),
+        )
+        log(
+            "val_delta_fn",
+            ((~final_pred & target_bin).sum() - (~shared_pred & target_bin).sum()).float(),
+        )
+
+        overlap = diagnostics.get("projected_overlap")
+        num_foci = batch.get("num_foci")
+        improvement = final_correct.float() - shared_correct.float()
+        probability_change = (final - shared).abs()
+        if torch.is_tensor(overlap):
+            overlap = overlap.detach().float()
+            active = diagnostics["hypothesis_gate"].detach().float() > 0.05
+            if active.any():
+                cutoff = torch.quantile(overlap[active], 0.75)
+                high = active & (overlap >= cutoff)
+                low = active & (overlap < cutoff)
+                if high.any():
+                    log("val_high_overlap_net_correct_crossing", improvement[high].mean())
+                    high_decisive = high & decisive
+                    log(
+                        "val_high_overlap_oracle_sign_accuracy",
+                        sign_correct[high_decisive].float().mean()
+                        if high_decisive.any()
+                        else improvement.new_zeros(()),
+                    )
+                    log("val_high_overlap_probability_change", probability_change[high].mean())
+                    if weight_change is not None:
+                        log("val_high_overlap_view_weight_l1", weight_change[high].mean())
+                if low.any():
+                    log("val_low_overlap_net_correct_crossing", improvement[low].mean())
+                    log("val_low_overlap_probability_change", probability_change[low].mean())
+                    if weight_change is not None:
+                        log("val_low_overlap_view_weight_l1", weight_change[low].mean())
+        if torch.is_tensor(num_foci):
+            for count in (1, 2, 3):
+                samples = num_foci.to(target.device).reshape(-1) == count
+                if samples.any():
+                    log(f"val_foci{count}_net_correct_crossing", improvement[samples].mean())
+                    log(f"val_foci{count}_probability_change", probability_change[samples].mean())
+                    if weight_change is not None:
+                        log(f"val_foci{count}_view_weight_l1", weight_change[samples].mean())
+
+        component_ids = batch.get("query_component_ids")
+        if torch.is_tensor(component_ids):
+            component_ids = component_ids.to(target.device)
+            recall_delta = []
+            recovered = []
+            lost = []
+            for sample in range(component_ids.shape[0]):
+                for component in torch.unique(component_ids[sample]):
+                    if component <= 0:
+                        continue
+                    member = component_ids[sample] == component
+                    shared_hit = shared_pred[sample, member].any()
+                    final_hit = final_pred[sample, member].any()
+                    shared_recall = shared_pred[sample, member].float().mean()
+                    final_recall = final_pred[sample, member].float().mean()
+                    recall_delta.append(final_recall - shared_recall)
+                    recovered.append((~shared_hit & final_hit).float())
+                    lost.append((shared_hit & ~final_hit).float())
+            if recall_delta:
+                log("val_component_recall_delta", torch.stack(recall_delta).mean())
+                log("val_component_recovered_ratio", torch.stack(recovered).mean())
+                log("val_component_lost_ratio", torch.stack(lost).mean())
 
     def _log_view_candidate_metrics(self, diagnostics: dict, batch: dict) -> None:
         gt_centers = batch.get("gt_component_centers_mm")

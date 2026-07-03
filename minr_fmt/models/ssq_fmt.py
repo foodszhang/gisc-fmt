@@ -467,6 +467,12 @@ class SSQFMT(nn.Module):
         )
         view_cfg = ssq.get("view_complementary", {})
         self.view_complementary_ablation = str(view_cfg.get("ablation", "full"))
+        self.hypothesis_source = str(view_cfg.get("hypothesis_source", "learned"))
+        if self.hypothesis_source not in {"learned", "gt"}:
+            raise ValueError("view_complementary.hypothesis_source must be learned or gt")
+        self.hypothesis_aggregation_strategy = str(
+            view_cfg.get("aggregation_strategy", "legacy")
+        )
         self.view_candidate_loss_weights = {
             "candidate_covariance_loss": float(view_cfg.get("lambda_cov", 0.1)),
             "candidate_center_loss": float(view_cfg.get("lambda_center", 1.0)),
@@ -492,6 +498,10 @@ class SSQFMT(nn.Module):
         self.register_buffer("hypothesis_grid_points_mm", grid.reshape(-1, 3), persistent=False)
         routing_cfg = view_cfg.get("routing", {})
         self.a3v2_routing_enabled = bool(routing_cfg.get("enabled", False))
+        self.routing_counterfactual_diagnostics = bool(
+            routing_cfg.get("counterfactual_diagnostics", False)
+        )
+        self.routing_oracle_gain = float(routing_cfg.get("oracle_gain", 0.5))
         self.continuous_applicability_enabled = bool(
             view_cfg.get("continuous_applicability", False)
         )
@@ -1210,6 +1220,33 @@ class SSQFMT(nn.Module):
             grid_shape=evidence_grid_shape,
         )
         candidates = self.diverse_candidate_constructor(proposal)
+        if self.hypothesis_source == "gt":
+            if batch is None or not torch.is_tensor(batch.get("gt_component_centers_mm")):
+                raise RuntimeError("GT hypothesis study requires component supervision in batch")
+            gt_centers = batch["gt_component_centers_mm"].to(points_mm)
+            gt_covariance = batch["gt_component_covariances_mm"].to(points_mm)
+            gt_valid = batch["gt_component_valid_mask"].to(device=points_mm.device).bool()
+            if gt_centers.shape[1] != candidates["candidate_centers_mm"].shape[1]:
+                raise RuntimeError("GT and learned hypothesis slot counts must match")
+            gt_score = gt_valid.to(points_mm.dtype)
+            candidates.update(
+                {
+                    "candidate_centers_mm": gt_centers,
+                    "candidate_covariances_mm": gt_covariance,
+                    "candidate_covariance_eigenvalues": torch.linalg.eigvalsh(
+                        gt_covariance.float()
+                    ).to(points_mm.dtype),
+                    "covariance_lower_bound_hit": torch.zeros_like(gt_covariance[..., 0]),
+                    "covariance_upper_bound_hit": torch.zeros_like(gt_covariance[..., 0]),
+                    "candidate_scores": gt_score,
+                    "candidate_existence_probability": gt_score,
+                    "candidate_slot_valid_mask": gt_valid,
+                    "candidate_analysis_valid_mask": gt_valid,
+                    "candidate_view_support": gt_score[:, :, None].expand(
+                        -1, -1, len(self.geometry_mapper.view_angles)
+                    ),
+                }
+            )
         reconstruction_valid = candidates["candidate_slot_valid_mask"]
         centers = candidates["candidate_centers_mm"]
         active_phase = self.view_training_phase
@@ -1373,6 +1410,12 @@ class SSQFMT(nn.Module):
         )
         support = candidates["candidate_view_support"].transpose(1, 2)
         support = support * candidate_valid_by_view.to(support.dtype)
+        if self.hypothesis_aggregation_strategy == "support":
+            # A hypothesis-independent signal baseline. This remains meaningful
+            # for GT hypotheses, which do not have constructor-derived support.
+            support = candidate_per_view.float().norm(dim=-1).to(candidate_per_view.dtype)
+            support = support / support.amax(dim=1, keepdim=True).clamp_min(1.0e-8)
+            support = support * candidate_valid_by_view.to(support.dtype)
         aggregation = self.complementary_aggregation(
             query_per_view,
             candidate_per_view,
@@ -1384,7 +1427,10 @@ class SSQFMT(nn.Module):
             uniform_views=self.view_complementary_ablation
             in {"a2", "uniform_views", "isolated_bounded_routing", "fixed_grid_stabilized"},
             geometry_only=self.view_complementary_ablation == "a3_geometry_only",
+            aggregation_strategy=self.hypothesis_aggregation_strategy,
         )
+        ungated_shared = aggregation["shared"]
+        ungated_view_weights = aggregation.get("shared_view_weights")
         routing_diagnostics = None
         routing_modes = {"a3_v2_bounded_routing", "isolated_bounded_routing"}
         if self.view_complementary_ablation in routing_modes:
@@ -1411,18 +1457,22 @@ class SSQFMT(nn.Module):
                 separability["separability"],
                 samples["query_view_valid"],
             )
-            routed_weight = routing_diagnostics["view_weights"]
-            if hasattr(self.complementary_aggregation, "common_projection"):
-                per_view_encoded = self.complementary_aggregation.common_projection(
-                    self.complementary_aggregation.feature_norm(query_per_view)
+            if hasattr(self.complementary_aggregation, "aggregate_shared"):
+                routed_shared, routed_weight = self.complementary_aggregation.aggregate_shared(
+                    query_per_view,
+                    samples["query_view_valid"],
+                    attention_logit_residual=routing_diagnostics[
+                        "routing_residual"
+                    ].transpose(1, 2),
                 )
-                routed_shared = (per_view_encoded * routed_weight[..., None]).sum(dim=1)
-                aggregation["shared"] = self.complementary_aggregation.output_norm(routed_shared)
             else:
-                aggregation["shared"] = self.complementary_aggregation.shared_projection(
+                routed_weight = routing_diagnostics["view_weights"]
+                routed_shared = self.complementary_aggregation.shared_projection(
                     (query_per_view * routed_weight[..., None]).sum(dim=1)
                 )
+            aggregation["shared"] = routed_shared
             aggregation["query_view_weights"] = routed_weight
+            routing_diagnostics["routed_view_weights"] = routed_weight
         if (
             active_phase == "phase_b"
             and self.view_complementary_ablation not in routing_modes
@@ -1431,6 +1481,9 @@ class SSQFMT(nn.Module):
         decoder_ablation = self.view_complementary_ablation
         context_scale = 1.0
         if active_phase == "phase_a":
+            decoder_ablation = "shared_only"
+            context_scale = 0.0
+        elif self.view_complementary_ablation in routing_modes:
             decoder_ablation = "shared_only"
             context_scale = 0.0
         elif active_phase == "phase_b" and self.training and self.context_warmup_enabled:
@@ -1455,8 +1508,53 @@ class SSQFMT(nn.Module):
             context_scale=context_scale,
             continuous_applicability=self.continuous_applicability_enabled,
         )
+        if self.hypothesis_aggregation_strategy == "oracle":
+            if batch is None or not torch.is_tensor(batch.get("point_densities")):
+                raise RuntimeError("empirical oracle aggregation requires query GT")
+            per_view_candidate = aggregation["candidate_view_features"]
+            oracle_predictions = []
+            for view_index in range(per_view_candidate.shape[1]):
+                view_candidate = per_view_candidate[:, view_index]
+                view_valid = reconstruction_valid & candidate_valid_by_view[:, view_index]
+                view_decoded = self.unified_density_decoder(
+                    aggregation["shared"],
+                    view_candidate,
+                    points_mm,
+                    encoded_points,
+                    centers,
+                    candidates["candidate_covariances_mm"],
+                    candidates["candidate_scores"],
+                    view_valid,
+                    ablation=decoder_ablation,
+                    context_scale=context_scale,
+                    continuous_applicability=self.continuous_applicability_enabled,
+                )
+                oracle_predictions.append(view_decoded["density"])
+            stacked_oracle = torch.stack(oracle_predictions, dim=2)
+            target = batch["point_densities"].to(stacked_oracle)[:, :, None, None]
+            valid_view = samples["query_view_valid"].transpose(1, 2)[..., None]
+            oracle_error = (stacked_oracle - target).abs().masked_fill(~valid_view, 1.0e4)
+            selected_view = oracle_error.squeeze(-1).argmin(dim=2)
+            selected_density = stacked_oracle.gather(
+                2, selected_view[:, :, None, None]
+            ).squeeze(2)
+            decoded["density"] = selected_density
+            decoded["oracle_selected_view"] = selected_view
         shared_decoded = (
-            decoded
+            self.unified_density_decoder(
+                ungated_shared,
+                aggregation["candidate"].detach() * 0.0,
+                points_mm,
+                encoded_points,
+                centers,
+                candidates["candidate_covariances_mm"],
+                candidates["candidate_scores"] * 0.0,
+                reconstruction_valid & False,
+                ablation="shared_only",
+                context_scale=0.0,
+            )
+            if self.view_complementary_ablation in routing_modes
+            else decoded
             if decoder_ablation in {"shared_only", "a0"} and context_scale == 0.0
             else self.unified_density_decoder(
                 aggregation["shared"],
@@ -1529,7 +1627,38 @@ class SSQFMT(nn.Module):
             aux_outputs["candidate_context_scale"] = decoded["density"].new_tensor(0.0)
         if routing_diagnostics is not None:
             aux_outputs.update(routing_diagnostics)
-            aux_outputs["view_weights"] = routing_diagnostics["view_weights"]
+            aux_outputs["routing_residual_only_view_weights"] = routing_diagnostics[
+                "view_weights"
+            ]
+            aux_outputs["view_weights"] = routing_diagnostics["routed_view_weights"]
+            if ungated_view_weights is not None:
+                aux_outputs["base_view_weights"] = ungated_view_weights
+            if self.routing_counterfactual_diagnostics and not self.training:
+                for sign, name in ((1.0, "positive"), (-1.0, "negative")):
+                    cf_shared, cf_weights = self.complementary_aggregation.aggregate_shared(
+                        query_per_view,
+                        samples["query_view_valid"],
+                        attention_logit_residual=(
+                            sign
+                            * self.routing_oracle_gain
+                            * routing_diagnostics["routing_unit_residual"]
+                        ).transpose(1, 2),
+                    )
+                    cf_decoded = self.unified_density_decoder(
+                        cf_shared,
+                        aggregation["candidate"].detach() * 0.0,
+                        points_mm,
+                        encoded_points,
+                        centers,
+                        candidates["candidate_covariances_mm"],
+                        candidates["candidate_scores"] * 0.0,
+                        reconstruction_valid & False,
+                        ablation="shared_only",
+                        context_scale=0.0,
+                    )
+                    aux_outputs[f"routing_{name}_density"] = cf_decoded["density"].detach()
+                    aux_outputs[f"routing_{name}_view_weights"] = cf_weights.detach()
+                    del cf_decoded, cf_shared, cf_weights
         normalized_candidate_features = torch.nn.functional.normalize(
             candidate_per_view.float(), dim=-1
         )

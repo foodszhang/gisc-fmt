@@ -1,0 +1,49 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_view_complementary
+  - _self_
+
+name: fmt_simgen_v2_phsa_view_gating
+description: Candidate-conditioned bounded gating of the frozen strong shared view attention
+
+model:
+  finetune:
+    freeze_modules:
+      - surface_encoder
+      - surface_sampler
+  ssq_fmt:
+    view_complementary:
+      training_phase: phase_b
+      ablation: isolated_bounded_routing
+      strong_shared_fusion: true
+      decoder_fusion_mode: joint_nonresidual
+      support_weighted_reliability: false
+      candidate_hidden_injection: false
+      continuous_applicability: true
+      sample_level_hypotheses:
+        enabled: true
+        count: 4096
+        seed: 42
+      hypothesis_grid:
+        enabled: false
+      routing:
+        enabled: true
+        delta_logit_max: 1.0
+        zero_init: true
+        counterfactual_diagnostics: true
+        oracle_gain: 0.5
+      lr:
+        encoder: 0.0
+        constructor: 0.00001
+        candidate_encoder: 0.0
+        candidate_context: 0.0
+        decoder: 0.0
+        separability: 0.00001
+        routing: 0.0001
+        shared: 0.0
+
+loss:
+  candidate_branch_density_weight: 0.0
+  candidate_branch_dice_weight: 0.0
+  candidate_assignment_weight: 0.0

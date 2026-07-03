@@ -1,0 +1,82 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_view_complementary
+  - _self_
+
+name: fmt_simgen_v2_phsa_decisive
+description: Frozen-Phase-A decisive comparison of hypothesis-specific view aggregation
+
+data:
+  train_max_samples: 200
+  val_max_samples: 50
+  subset_policy: random
+  subset_seed: ${seed}
+  sample_num: 4096
+  num_queries: 4096
+  eval_sample_num: 4096
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  prefetch_factor: 1
+
+model:
+  finetune:
+    init_from_ckpt: outputs/view_complementary/phsa_conditional_view_gating_phase_a_init.ckpt
+    allow_missing_prefixes:
+      - unified_density_decoder.candidate_residual_head
+      - unified_density_decoder.candidate_branch_head
+    reset_modules:
+      - unified_density_decoder.candidate_input
+    train_modules_only:
+      - complementary_aggregation.candidate_projection
+      - unified_density_decoder.candidate_context
+      - unified_density_decoder.candidate_norm
+      - unified_density_decoder.candidate_input
+      - view_separability.correction
+  ssq_fmt:
+    view_complementary:
+      training_phase: phase_b
+      ablation: full
+      hypothesis_source: gt
+      aggregation_strategy: uniform
+      separability_mode: geometry_measurement
+      strong_shared_fusion: true
+      decoder_fusion_mode: joint_nonresidual
+      support_weighted_reliability: true
+      context_warmup_enabled: false
+      continuous_applicability: true
+      sample_level_hypotheses:
+        enabled: true
+        count: 4096
+        seed: 42
+      lr:
+        encoder: 0.0
+        constructor: 0.0
+        candidate_encoder: 0.00003
+        candidate_context: 0.00003
+        decoder: 0.00003
+        separability: 0.00001
+        routing: 0.0
+        shared: 0.0
+
+loss:
+  candidate_branch_density_weight: 0.0
+  candidate_branch_dice_weight: 0.0
+  candidate_assignment_weight: 0.0
+
+optim:
+  lr: 0.00003
+
+trainer:
+  max_epochs: 1
+  accumulate_grad_batches: 1
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: 0
+  enable_progress_bar: false
+
+callbacks:
+  progress_bar: null
+  early_stopping:
+    patience: 3
+    min_delta: 0.0

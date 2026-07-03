@@ -145,15 +145,15 @@ def test_joint_nonresidual_decoder_uses_candidates_and_has_exact_shared_fallback
     empty = decoder(
         shared, candidate, points, encoded, centers, covariance, scores, valid & False
     )
-    assert torch.allclose(full["density"], shared_only["density"], atol=1.0e-4)
+    assert torch.equal(full["density"], shared_only["density"])
     assert torch.equal(empty["density"], shared_only["density"])
     assert full["decoder_pre_activation"].shape[-1] == 24
     assert full["branch_density"].shape == (2, 7, 4, 1)
     with torch.no_grad():
-        decoder.candidate_branch_head[-1].bias.fill_(5.0)
+        decoder.candidate_input.weight.normal_(std=0.1)
     adapted = decoder(shared, candidate, points, encoded, centers, covariance, scores, valid)
     assert not torch.allclose(adapted["density"], shared_only["density"])
-    assert torch.all(adapted["density"] >= shared_only["density"])
+    assert torch.count_nonzero(adapted["branch_density"][:, :, 1:]) == 0
 
 
 def test_strong_shared_fusion_is_query_wise_and_masks_invalid_views():
@@ -167,6 +167,56 @@ def test_strong_shared_fusion_is_query_wise_and_masks_invalid_views():
     assert weights.shape == (2, 4, 7)
     assert torch.count_nonzero(weights[:, -1, :3]) == 0
     assert torch.allclose(weights.sum(dim=1), torch.ones(2, 7), atol=1.0e-6)
+
+    zero = torch.zeros_like(weights)
+    same, same_weights = aggregation.aggregate_shared(
+        per_view, valid, attention_logit_residual=zero
+    )
+    assert torch.equal(shared, same)
+    assert torch.equal(weights, same_weights)
+
+    residual = torch.zeros_like(weights)
+    residual[:, 0] = 0.5
+    changed, changed_weights = aggregation.aggregate_shared(
+        per_view, valid, attention_logit_residual=residual
+    )
+    assert not torch.allclose(shared, changed)
+    assert not torch.allclose(weights, changed_weights)
+
+
+def test_phsa_aggregation_strategies_change_only_candidate_view_weights():
+    torch.manual_seed(17)
+    aggregation = Patch2ComplementaryAggregation(8, 12, strong_shared_fusion=True)
+    shared = torch.randn(1, 3, 5, 8)
+    candidate = torch.randn(1, 3, 2, 8)
+    view_valid = torch.ones(1, 3, 5, dtype=torch.bool)
+    candidate_valid = torch.ones(1, 2, dtype=torch.bool)
+    candidate_view_valid = torch.ones(1, 3, 2, dtype=torch.bool)
+    support = torch.tensor([[[0.1, 0.8], [0.5, 0.1], [1.0, 0.4]]])
+    separability = torch.tensor([[[0.9, 0.2], [0.3, 0.7], [0.1, 0.4]]])
+    outputs = {
+        strategy: aggregation(
+            shared,
+            candidate,
+            view_valid,
+            support,
+            separability,
+            candidate_valid,
+            candidate_view_valid=candidate_view_valid,
+            aggregation_strategy=strategy,
+        )
+        for strategy in ("uniform", "support", "geometry", "full")
+    }
+    reference_shared = outputs["uniform"]["shared"]
+    for output in outputs.values():
+        assert torch.equal(output["shared"], reference_shared)
+        assert torch.allclose(output["view_weights"].sum(dim=1), torch.ones(1, 2))
+    assert not torch.allclose(
+        outputs["uniform"]["view_weights"], outputs["geometry"]["view_weights"]
+    )
+    assert not torch.allclose(
+        outputs["support"]["view_weights"], outputs["geometry"]["view_weights"]
+    )
 
 
 def test_candidate_support_changes_descriptor_but_not_view_reliability_when_decoupled():
@@ -227,3 +277,31 @@ def test_candidate_centers_change_detector_sampling_grid_and_no_residual_gate_is
     assert "proposal_gate" not in out["aux_outputs"]
     assert "residual_correction" not in out["aux_outputs"]
     assert out["density"].shape == (*batch["query_coordinates_mm"].shape[:2], 1)
+
+
+def test_gt_hypothesis_study_uses_batch_components_without_changing_slot_count():
+    cfg = _cfg()
+    cfg.model.ssq_fmt.view_complementary.hypothesis_source = "gt"
+    model = SSQFMT(cfg)
+    batch = make_batch(3)
+    gt_centers = torch.zeros(2, 3, 3)
+    gt_centers[:, 0] = torch.tensor([8.0, 12.0, 6.0])
+    gt_centers[:, 1] = torch.tensor([20.0, 25.0, 9.0])
+    batch["gt_component_centers_mm"] = gt_centers
+    batch["gt_component_covariances_mm"] = torch.eye(3)[None, None].repeat(2, 3, 1, 1)
+    batch["gt_component_valid_mask"] = torch.tensor(
+        [[True, True, False], [True, True, False]]
+    )
+    out = model(
+        batch["surface_measurements_packed"],
+        batch["query_coordinates_mm"],
+        detector_valid_mask=batch["detector_valid_mask"],
+        depth_maps=batch["depth_maps"],
+        batch=batch,
+        return_diagnostics=True,
+    )
+    diagnostics = out["diagnostics"]
+    assert torch.equal(diagnostics["candidate_centers_mm"], gt_centers)
+    assert torch.equal(
+        diagnostics["candidate_valid_mask"], batch["gt_component_valid_mask"]
+    )

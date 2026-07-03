@@ -47,6 +47,18 @@ def test_view_weights_are_finite_masked_and_normalized():
     assert torch.allclose(weight.sum(dim=1), torch.ones_like(weight[:, 0]), atol=1e-6)
 
 
+def test_conditional_gain_is_zero_initialized_and_can_change_routing():
+    module = BoundedHypothesisViewRouting()
+    inputs = _routing_inputs()
+    baseline = module(*inputs)
+    assert torch.count_nonzero(baseline["conditional_gain_raw"]) == 0
+    with torch.no_grad():
+        module.gain_predictor[-1].bias.fill_(0.5)
+    conditioned = module(*inputs)
+    assert torch.count_nonzero(conditioned["conditional_gain_raw"]) > 0
+    assert not torch.allclose(conditioned["view_weights"], baseline["view_weights"])
+
+
 def test_continuous_context_gate_vanishes_for_weak_hypotheses():
     decoder = UnifiedDensityDecoder(8, 10, 12)
     shared = torch.randn(1, 5, 8)

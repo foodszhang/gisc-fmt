@@ -14,6 +14,13 @@ class BoundedHypothesisViewRouting(nn.Module):
         initial = 0.0 if zero_init else 0.1
         self.delta_logit_max = float(delta_logit_max)
         self.routing_gain_raw = nn.Parameter(torch.tensor(initial))
+        self.gain_predictor = nn.Sequential(
+            nn.Linear(5, 16),
+            nn.SiLU(),
+            nn.Linear(16, 1),
+        )
+        nn.init.zeros_(self.gain_predictor[-1].weight)
+        nn.init.zeros_(self.gain_predictor[-1].bias)
 
     def forward(
         self,
@@ -61,8 +68,33 @@ class BoundedHypothesisViewRouting(nn.Module):
             1.0
         )
         centered = (routing - routing_mean) * valid_float
-        scale = self.delta_logit_max * torch.tanh(self.routing_gain_raw)
+        centered_abs_mean = (centered.abs() * valid_float).sum(dim=-1, keepdim=True)
+        centered_abs_mean = centered_abs_mean / valid_count.clamp_min(1.0)
+        centered_rms = (
+            (centered.square() * valid_float).sum(dim=-1, keepdim=True)
+            / valid_count.clamp_min(1.0)
+        ).clamp_min(1.0e-8).sqrt()
+        centered_max = centered.masked_fill(~valid_bnv, -1.0e4).amax(dim=-1, keepdim=True)
+        centered_min = centered.masked_fill(~valid_bnv, 1.0e4).amin(dim=-1, keepdim=True)
+        has_valid = valid_count > 0
+        centered_max = torch.where(has_valid, centered_max, torch.zeros_like(centered_max))
+        centered_min = torch.where(has_valid, centered_min, torch.zeros_like(centered_min))
+        gain_features = torch.cat(
+            [
+                hypothesis_gate[..., None],
+                centered_abs_mean,
+                centered_rms,
+                centered_max,
+                centered_min,
+            ],
+            dim=-1,
+        ).detach()
+        conditional_gain_raw = self.gain_predictor(gain_features)
+        scale = self.delta_logit_max * torch.tanh(
+            self.routing_gain_raw + conditional_gain_raw
+        )
         residual = hypothesis_gate[..., None] * scale * torch.tanh(centered)
+        unit_residual = hypothesis_gate[..., None] * torch.tanh(centered)
         logits = residual.masked_fill(~valid_bnv, -torch.inf)
         weights = torch.softmax(logits, dim=-1)
         weights = torch.where(valid_bnv, weights, torch.zeros_like(weights))
@@ -76,6 +108,16 @@ class BoundedHypothesisViewRouting(nn.Module):
             "applicability": applicability,
             "hypothesis_gate": hypothesis_gate,
             "routing_residual": residual,
+            "routing_unit_residual": unit_residual,
             "routing_scale": scale,
+            "conditional_gain_raw": conditional_gain_raw,
+            "gain_features": gain_features,
             "relative_evidence": relative,
+            # Query-level proxy for ambiguity caused by overlapping candidate
+            # projections.  Low separability means high projected overlap.
+            "projected_overlap": (
+                applicability
+                / applicability_sum[..., None].clamp_min(eps)
+                * (1.0 - geometry_separability.float()).mean(dim=1)[:, None]
+            ).sum(dim=-1),
         }
