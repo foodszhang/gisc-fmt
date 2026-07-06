@@ -1,5 +1,12 @@
-name: ssq_vsc_scratch_nocons
-description: Scratch SSQ-FMT Phase-A training with the same subset supervised branches as VSC but no consistency term.
+# @package _global_
+
+exp:
+  name: ssq_vsc_scratch_nocons
+  description: Scratch SSQ-FMT Phase-A training with the same subset supervised branches as VSC but no consistency term.
+  resume_from_checkpoint: null
+  test_after_training: false
+  log_config: true
+  log_git_info: true
 
 model:
   ssq_fmt:
