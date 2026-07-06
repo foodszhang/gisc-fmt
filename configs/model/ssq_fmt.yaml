@@ -158,6 +158,21 @@ ssq_fmt:
     target_filename: sdf_target.npy
     target_version: ssq_candidate_conditioned_sdf_v2
 
+  eaqo:
+    enabled: false
+    mode: loss_weight
+    lambda: 0.25
+    alpha_pred: 0.0
+    beta_view: 1.0
+    gamma_geo: 0.0
+    delta_comp: 0.0
+    weight_clip_min: 1.0
+    weight_clip_max: 3.0
+    detach_score: true
+    normalize_score: batch_minmax
+    eps: 1.0e-6
+    require_view_evidence: false
+
 gisc_fmt:
   use_adapter: true
   adapter_strategy: bottleneck_decoder

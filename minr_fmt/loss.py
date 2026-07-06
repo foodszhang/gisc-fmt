@@ -513,9 +513,30 @@ class MorphologyAwareDensityLoss(nn.Module):
         if aux_outputs is not None and torch.is_tensor(aux_outputs.get("measurement_supported")):
             support = aux_outputs["measurement_supported"].to(
                 device=pred.device, dtype=pred.dtype
-            ).unsqueeze(-1)
+            )
+            if support.dim() == 2:
+                support = support.unsqueeze(-1)
         else:
             support = torch.ones_like(pred)
+        if support.shape != pred.shape:
+            raise RuntimeError(
+                f"measurement_supported shape {tuple(support.shape)} does not match "
+                f"pred_density shape {tuple(pred.shape)}"
+            )
+        query_loss_weight = None
+        if aux_outputs is not None and torch.is_tensor(aux_outputs.get("query_loss_weight")):
+            query_loss_weight = aux_outputs["query_loss_weight"].to(
+                device=pred.device, dtype=pred.dtype
+            )
+            if query_loss_weight.dim() == 3 and query_loss_weight.shape[-1] == 1:
+                query_loss_weight = query_loss_weight.squeeze(-1)
+            if query_loss_weight.shape != pred.squeeze(-1).shape:
+                raise RuntimeError(
+                    "query_loss_weight must match pred_density.squeeze(-1), got "
+                    f"{tuple(query_loss_weight.shape)} vs {tuple(pred.squeeze(-1).shape)}"
+                )
+        if query_loss_weight is not None:
+            support = support * query_loss_weight.unsqueeze(-1)
         density_err = F.smooth_l1_loss(pred, target_density, reduction="none")
         density_weight = 1.0 + target_density.clamp(0.0, 1.0) * (self.pos_weight - 1.0)
         density_weight = density_weight * support

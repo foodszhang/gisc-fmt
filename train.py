@@ -26,6 +26,7 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 
 from minr_fmt.datamodule import TrainingDataModule
+from minr_fmt.eaqo_module import EAQOTrainingLightningModule
 from minr_fmt.module import TrainingLightningModule
 from minr_fmt.utils.hydra_utils import get_git_info
 from minr_fmt.utils.logging_utils import rank_zero_log, setup_logger
@@ -98,6 +99,9 @@ def _lightning_module_cls(cfg: DictConfig):
     vsc_cfg = ssq_cfg.get("view_subset_consistency", {}) if isinstance(ssq_cfg, DictConfig) else {}
     if str(model_cfg.get("name", "")).lower() == "ssq_fmt" and bool(vsc_cfg.get("enabled", False)):
         return VSCTrainingLightningModule
+    eaqo_cfg = ssq_cfg.get("eaqo", {}) if isinstance(ssq_cfg, DictConfig) else {}
+    if str(model_cfg.get("name", "")).lower() == "ssq_fmt" and bool(eaqo_cfg.get("enabled", False)):
+        return EAQOTrainingLightningModule
     return TrainingLightningModule
 
 

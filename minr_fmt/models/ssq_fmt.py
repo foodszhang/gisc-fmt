@@ -1301,6 +1301,7 @@ class SSQFMT(nn.Module):
                 "proposal_assignment": candidates["proposal_assignment"],
                 "proposal_compatibility": candidates["proposal_compatibility"],
                 "per_view_evidence": proposal["evidence"],
+                "query_view_valid": samples["query_view_valid"],
                 "proposal_offsets_mm": proposal["offsets_mm"],
                 "proposal_points_mm": proposal["proposal_points_mm"],
                 "proposal_valid_mask": proposal["proposal_valid_mask"],
@@ -1316,6 +1317,8 @@ class SSQFMT(nn.Module):
                 "pi": decoded["pi"],
                 "decoder_pre_activation": decoded["decoder_pre_activation"],
                 "candidate_context_scale": decoded["density"].new_zeros(()),
+                "final_density_path": "phase_a_shared_unified_decoder",
+                "decoder_ablation": "shared_only",
                 "candidate_alpha": decoded["alpha"],
                 "measurement_supported": samples["query_view_valid"].any(dim=1),
                 "view_complementary_mode": torch.ones((), device=points_mm.device),
@@ -1585,6 +1588,7 @@ class SSQFMT(nn.Module):
             "proposal_assignment": candidates["proposal_assignment"],
             "proposal_compatibility": candidates["proposal_compatibility"],
             "per_view_evidence": proposal["evidence"],
+            "query_view_valid": samples["query_view_valid"],
             "proposal_offsets_mm": proposal["offsets_mm"],
             "proposal_points_mm": proposal["proposal_points_mm"],
             "proposal_valid_mask": proposal["proposal_valid_mask"],
@@ -1607,6 +1611,12 @@ class SSQFMT(nn.Module):
             "pi": decoded["pi"],
             "decoder_pre_activation": decoded["decoder_pre_activation"],
             "candidate_context_scale": decoded["density"].new_tensor(context_scale),
+            "final_density_path": (
+                "phase_a_shared_unified_decoder"
+                if active_phase == "phase_a"
+                else "view_complementary_unified_decoder"
+            ),
+            "decoder_ablation": decoder_ablation,
             "candidate_alpha": decoded["alpha"],
             "measurement_supported": samples["query_view_valid"].any(dim=1),
             "view_complementary_mode": torch.ones((), device=points_mm.device),
