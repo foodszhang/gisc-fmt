@@ -1,5 +1,12 @@
-name: ssq_vsc_scratch_consonly
-description: Scratch SSQ-FMT Phase-A training with full-view supervision plus subset consistency only.
+# @package _global_
+
+exp:
+  name: ssq_vsc_scratch_consonly
+  description: Scratch SSQ-FMT Phase-A training with full-view supervision plus subset consistency only.
+  resume_from_checkpoint: null
+  test_after_training: false
+  log_config: true
+  log_git_info: true
 
 model:
   ssq_fmt:
