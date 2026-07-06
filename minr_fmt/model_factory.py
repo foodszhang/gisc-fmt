@@ -354,20 +354,8 @@ class SSQFMTPatch2(SSQFMT):
             ablation=decoder_ablation,
             context_scale=1.0,
         )
-        base_shared = self.unified_density_decoder(
-            shared,
-            empty_candidate,
-            points_mm,
-            encoded_points,
-            empty_centers,
-            empty_covariance,
-            empty_scores,
-            empty_valid,
-            ablation="shared_only",
-            context_scale=0.0,
-        )
         aux_outputs: dict[str, torch.Tensor] = {
-            "shared_density": base_shared["density"],
+            "shared_density": decoded["density"],
             "candidate_context": decoded["candidate_context"],
             "candidate_context_scale": decoded["density"].new_tensor(0.0),
             "decoder_pre_activation": decoded["decoder_pre_activation"],

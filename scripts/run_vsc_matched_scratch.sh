@@ -25,6 +25,12 @@ for seed in "${SEEDS[@]}"; do
     uv run python train.py fit \
       exp="${exp}" \
       data.dataset_type=fmt_simgen \
+      data.num_queries=16384 \
+      data.sample_num=16384 \
+      data.eval_sample_num=16384 \
+      data.query_sampling.num_queries=16384 \
+      data.num_workers=4 \
+      trainer.accumulate_grad_batches=1 \
       seed="${seed}" \
       paths.root_dir="${root}" \
       2>&1 | tee -a "${log}"
