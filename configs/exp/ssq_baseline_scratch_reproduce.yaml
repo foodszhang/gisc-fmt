@@ -1,0 +1,15 @@
+name: ssq_baseline_scratch_reproduce
+description: Matched scratch Phase-A baseline without view-subset consistency.
+
+model:
+  ssq_fmt:
+    density_output_mode: view_complementary
+    composition:
+      mode: view_complementary
+    view_complementary:
+      training_phase: phase_a
+      ablation: shared_only
+      strong_shared_fusion: true
+      candidate_hidden_injection: false
+    view_subset_consistency:
+      enabled: false
