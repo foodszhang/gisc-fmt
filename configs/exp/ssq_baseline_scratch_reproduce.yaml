@@ -1,5 +1,12 @@
-name: ssq_baseline_scratch_reproduce
-description: Matched scratch Phase-A baseline without view-subset consistency.
+# @package _global_
+
+exp:
+  name: ssq_baseline_scratch_reproduce
+  description: Matched scratch Phase-A baseline without view-subset consistency.
+  resume_from_checkpoint: null
+  test_after_training: false
+  log_config: true
+  log_git_info: true
 
 model:
   ssq_fmt:
