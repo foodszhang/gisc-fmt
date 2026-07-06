@@ -1,0 +1,24 @@
+name: ssq_vsc_scratch_consonly
+description: Scratch SSQ-FMT Phase-A training with full-view supervision plus subset consistency only.
+
+model:
+  ssq_fmt:
+    density_output_mode: view_complementary
+    composition:
+      mode: view_complementary
+    view_complementary:
+      training_phase: phase_a
+      ablation: shared_only
+      strong_shared_fusion: true
+      candidate_hidden_injection: false
+    view_subset_consistency:
+      enabled: true
+      num_subsets: 2
+      subset_sizes: [6, 5]
+      supervised_warmup_epochs: 5
+      subset_supervised_weight: 0.0
+      consistency_weight: 0.2
+      consistency_ramp_start_epoch: 5
+      consistency_ramp_epochs: 20
+      distance: logit_mse
+      include_aux_in_subset_supervision: false
