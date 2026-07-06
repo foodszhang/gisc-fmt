@@ -1,0 +1,9 @@
+defaults:
+  - fmt_simgen_v2_ssq_final
+  - _self_
+
+model:
+  ssq_fmt:
+    eaqo:
+      enabled: true
+      beta_view: 1.0
