@@ -1,5 +1,9 @@
 # @package _global_
 
+defaults:
+  - fmt_simgen_v2_3k_20k_common
+  - _self_
+
 exp:
   name: ssq_baseline_scratch_reproduce
   description: Matched scratch Phase-A baseline without view-subset consistency.

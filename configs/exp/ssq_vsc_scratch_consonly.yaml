@@ -1,5 +1,9 @@
 # @package _global_
 
+defaults:
+  - fmt_simgen_v2_3k_20k_common
+  - _self_
+
 exp:
   name: ssq_vsc_scratch_consonly
   description: Scratch SSQ-FMT Phase-A training with full-view supervision plus subset consistency only.
