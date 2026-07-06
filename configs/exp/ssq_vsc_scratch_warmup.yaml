@@ -1,5 +1,12 @@
-name: ssq_vsc_scratch_warmup
-description: Scratch SSQ-FMT Phase-A training with supervised warm-up, subset supervision, and ramped view-subset consistency.
+# @package _global_
+
+exp:
+  name: ssq_vsc_scratch_warmup
+  description: Scratch SSQ-FMT Phase-A training with supervised warm-up, subset supervision, and ramped view-subset consistency.
+  resume_from_checkpoint: null
+  test_after_training: false
+  log_config: true
+  log_git_info: true
 
 model:
   ssq_fmt:
