@@ -150,6 +150,13 @@ ssq_fmt:
   reliability:
     mode: evidence
 
+  view_complementary:
+    evidence_nms:
+      exact_threshold: 4096
+      pre_nms_topk: 2048
+      pre_nms_factor: 64
+      max_nms_candidates: 4096
+
   sdf:
     tau_s: 3.0
     lambda_sdf: 0.0

@@ -530,6 +530,7 @@ class SSQFMT(nn.Module):
         self.full_separability_loss_scale = float(
             view_cfg.get("full_separability_loss_scale", 1.0)
         )
+        evidence_nms_cfg = view_cfg.get("evidence_nms", {})
         self.view_candidate_evidence = ViewCandidateEvidence(
             sample_feature_dim,
             hidden_dim=int(view_cfg.get("hidden_dim", hidden_dim)),
@@ -537,6 +538,10 @@ class SSQFMT(nn.Module):
             delta_max_mm=float(view_cfg.get("delta_max_mm", 3.0)),
             topk_per_view=int(view_cfg.get("topk_per_view", 8)),
             nms_radius_mm=float(view_cfg.get("nms_radius_mm", 3.0)),
+            exact_nms_threshold=int(evidence_nms_cfg.get("exact_threshold", 4096)),
+            pre_nms_topk=int(evidence_nms_cfg.get("pre_nms_topk", 2048)),
+            pre_nms_factor=int(evidence_nms_cfg.get("pre_nms_factor", 64)),
+            max_nms_candidates=int(evidence_nms_cfg.get("max_nms_candidates", 4096)),
         )
         self.diverse_candidate_constructor = DiverseCandidateConstructor(
             mmax=int(view_cfg.get("mmax", 5)),

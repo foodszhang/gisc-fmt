@@ -18,11 +18,19 @@ class ViewCandidateEvidence(nn.Module):
         delta_max_mm: float = 3.0,
         topk_per_view: int = 8,
         nms_radius_mm: float = 3.0,
+        exact_nms_threshold: int = 4096,
+        pre_nms_topk: int = 2048,
+        pre_nms_factor: int = 64,
+        max_nms_candidates: int = 4096,
     ) -> None:
         super().__init__()
         self.delta_max_mm = float(delta_max_mm)
         self.topk_per_view = int(topk_per_view)
         self.nms_radius_mm = float(nms_radius_mm)
+        self.exact_nms_threshold = int(exact_nms_threshold)
+        self.pre_nms_topk = int(pre_nms_topk)
+        self.pre_nms_factor = int(pre_nms_factor)
+        self.max_nms_candidates = int(max_nms_candidates)
         self.position = nn.Sequential(nn.Linear(3, hidden_dim), nn.SiLU())
         self.trunk = nn.Sequential(
             nn.Linear(feature_dim + hidden_dim + 4, hidden_dim),
@@ -35,7 +43,11 @@ class ViewCandidateEvidence(nn.Module):
         self.offset = nn.Linear(hidden_dim, 3)
 
     @staticmethod
-    def _local_maxima(scores: torch.Tensor, points: torch.Tensor, radius: float) -> torch.Tensor:
+    def _local_maxima_exact(
+        scores: torch.Tensor,
+        points: torch.Tensor,
+        radius: float,
+    ) -> torch.Tensor:
         distance = torch.cdist(points.float(), points.float()).to(scores.dtype)
         neighbor = distance <= radius
         # A deterministic index tie-break prevents a plateau from producing duplicates.
@@ -45,6 +57,43 @@ class ViewCandidateEvidence(nn.Module):
             index[None, None, None, :] < index[None, None, :, None]
         )
         return ~((better | tied_later) & neighbor[:, None]).any(dim=-1)
+
+    @classmethod
+    def _local_maxima_topk_prefilter(
+        cls,
+        scores: torch.Tensor,
+        points: torch.Tensor,
+        radius: float,
+        valid_mask: torch.Tensor,
+        *,
+        topk_per_view: int,
+        pre_nms_topk: int,
+        pre_nms_factor: int,
+        max_nms_candidates: int,
+    ) -> torch.Tensor:
+        """Approximate local NMS with bounded pairwise memory for sampled large-N queries."""
+        b, v, n = scores.shape
+        local = torch.zeros_like(valid_mask, dtype=torch.bool)
+        candidate_budget = max(int(topk_per_view) * int(pre_nms_factor), int(pre_nms_topk))
+        candidate_budget = min(max(candidate_budget, int(topk_per_view)), int(max_nms_candidates))
+        candidate_budget = max(candidate_budget, 1)
+        masked_scores = scores.masked_fill(~valid_mask, -1.0)
+        for batch_index in range(b):
+            for view_index in range(v):
+                valid_count = int(valid_mask[batch_index, view_index].sum().item())
+                if valid_count <= 0:
+                    continue
+                k = min(n, valid_count, candidate_budget)
+                _, selected = masked_scores[batch_index, view_index].topk(k, dim=-1)
+                selected_scores = scores[batch_index, view_index, selected][None, None]
+                selected_points = points[batch_index, selected][None]
+                selected_local = cls._local_maxima_exact(
+                    selected_scores,
+                    selected_points,
+                    radius,
+                ).reshape(-1)
+                local[batch_index, view_index, selected] = selected_local
+        return local
 
     @staticmethod
     def _grid_local_maxima(scores: torch.Tensor, grid_shape: tuple[int, int, int]) -> torch.Tensor:
@@ -83,11 +132,22 @@ class ViewCandidateEvidence(nn.Module):
         offset = self.delta_max_mm * torch.tanh(self.offset(hidden))
         proposals = points_mm[:, None] + offset
 
-        local = (
-            self._grid_local_maxima(evidence, grid_shape)
-            if grid_shape is not None
-            else self._local_maxima(evidence, points_mm, self.nms_radius_mm)
-        ) & valid_mask
+        if grid_shape is not None:
+            local = self._grid_local_maxima(evidence, grid_shape)
+        elif n <= self.exact_nms_threshold:
+            local = self._local_maxima_exact(evidence, points_mm, self.nms_radius_mm)
+        else:
+            local = self._local_maxima_topk_prefilter(
+                evidence,
+                points_mm,
+                self.nms_radius_mm,
+                valid_mask,
+                topk_per_view=self.topk_per_view,
+                pre_nms_topk=self.pre_nms_topk,
+                pre_nms_factor=self.pre_nms_factor,
+                max_nms_candidates=self.max_nms_candidates,
+            )
+        local = local & valid_mask
         masked = evidence.masked_fill(~local, -1.0)
         k = min(self.topk_per_view, n)
         score, index = masked.topk(k, dim=-1)
