@@ -30,6 +30,7 @@ from minr_fmt.module import TrainingLightningModule
 from minr_fmt.utils.hydra_utils import get_git_info
 from minr_fmt.utils.logging_utils import rank_zero_log, setup_logger
 from minr_fmt.utils.seed_utils import set_seed
+from minr_fmt.vsc_module import VSCTrainingLightningModule
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,21 @@ def _instantiate_logger(cfg: DictConfig):
     return hydra.utils.instantiate(logger_cfg)
 
 
+def _lightning_module_cls(cfg: DictConfig):
+    """Select the trainer implementation from explicit config only.
+
+    VSC is a training-time reliability-calibration experiment. The network class
+    and inference path remain unchanged; enabling this flag only adds matched
+    view-subset losses during SSQ-FMT fitting.
+    """
+    model_cfg = cfg.get("model", {})
+    ssq_cfg = model_cfg.get("ssq_fmt", {}) if isinstance(model_cfg, DictConfig) else {}
+    vsc_cfg = ssq_cfg.get("view_subset_consistency", {}) if isinstance(ssq_cfg, DictConfig) else {}
+    if str(model_cfg.get("name", "")).lower() == "ssq_fmt" and bool(vsc_cfg.get("enabled", False)):
+        return VSCTrainingLightningModule
+    return TrainingLightningModule
+
+
 def run(cfg: DictConfig) -> Optional[float]:
     """Run one of: fit / validate / test (selected by cfg.task)."""
     _ensure_output_dirs(cfg)
@@ -103,7 +119,8 @@ def run(cfg: DictConfig) -> Optional[float]:
         _save_metadata(cfg)
 
     dm = TrainingDataModule(cfg)
-    model = TrainingLightningModule(cfg)
+    module_cls = _lightning_module_cls(cfg)
+    model = module_cls(cfg)
 
     callbacks = _instantiate_callbacks(cfg)
     logger_instance = _instantiate_logger(cfg)
