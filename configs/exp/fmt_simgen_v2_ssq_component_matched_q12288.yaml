@@ -1,0 +1,27 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_component_matched_finetune
+  - _self_
+
+name: fmt_simgen_v2_ssq_component_matched_q12288
+description: Component-matched Full SSQ fine-tuning with 12288 queries on 32GB
+
+data:
+  sample_num: 12288
+  num_queries: 12288
+  eval_sample_num: 12288
+  query_sampling:
+    num_queries: ${data.num_queries}
+
+model:
+  ssq_fmt:
+    routing:
+      query_chunk_size: 12288
+    representation:
+      query_chunk_size: 12288
+    fusion:
+      query_chunk_size: 12288
+    decoder:
+      query_chunk_size: 12288
+

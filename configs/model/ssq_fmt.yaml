@@ -1,0 +1,228 @@
+name: ssq_fmt
+num_views: 7
+in_channels: 1
+feature_dim: 64
+pos_enc_dim: 60
+output_type: point_probability
+
+geometry:
+  camera_distance: 200.0
+  fov_mm: 80.0
+  detector_resolution: [256, 256]
+  global_voxel_shape: [190, 200, 104]
+  volume_center_world: [19.0, 20.0, 10.4]
+
+ssq_fmt:
+  hidden_dim: 96
+  density_output_mode: candidate_scalar_composition
+
+  composition:
+    mode: legacy_branch_mixture
+    delta_l_max: 3.0
+    tau_u: 1.0
+
+  quotient:
+    temperature: 1.0
+    delta_r_max: 0.25
+    reliability_hidden_dim: 64
+    a_beta: 1.0
+    a_xi: 1.0
+    a_sigma: 0.5
+    a_center: 0.25
+    subset_consistency:
+      enabled: false
+      seed: 20260628
+      min_support: 1.0e-4
+
+  query_density_backbone:
+    enabled: false
+    normalization: per_view_max
+
+  normalization:
+    mode: per_view_max
+    percentile: 99.9
+    candidate_percentile: 99.9
+    eps: 1.0e-6
+
+  encoder:
+    type: residual_unet_pyramid_fusion
+    profile: base
+    norm: group
+    activation: silu
+    skip_fusion: concat
+    dropout: 0.0
+
+  fourier:
+    num_frequencies: 4
+
+  geometry:
+    camera_distance_mm: 200.0
+    fov_mm: 80.0
+    detector_resolution: [256, 256]
+    volume_center_world: [19.0, 20.0, 10.4]
+    jacobian_fd_step_mm: 0.2
+    depth_path_sign: query_minus_surface
+    depth_valid_weight_min: 1.0e-4
+
+  local_sampling:
+    template: grid3x3
+    sample_feature_dim: 128
+
+  footprint:
+    mode: query_dependent
+    path_normalization: fixed_max
+    path_max_mm: 20.0
+    sigma_min_px: 1.0
+    sigma_max_px: 8.0
+    alpha_xi: 0.67
+    alpha_beta: 0.33
+    delta_h_max: 0.25
+    fixed_sigma: 2.0
+    boundary_margin_radius_px: 8.0
+
+  candidates:
+    grid_spacing_mm: 1.0
+    smoothing_sigma_cells: 1.0
+    smoothing_sigma_mm: null
+    threshold: 0.05
+    nms_radius_mm: 3.0
+    support_moment_radius_mm: 4.0
+    mmax: 5
+    scale_min_mm: 1.0
+    scale_max_mm: 12.0
+    detector_scale_min_px: 0.5
+    detector_scale_max_px: 20.0
+    prior_density_weight: 0.0
+    trunk_size_mm: [38.0, 40.0, 20.8]
+
+  routing:
+    mode: pre_aggregation
+    tau_K: 1.0
+    delta_q: 1.0
+    temperature: 1.0
+    assignment_temperature: 1.0
+    residual_min: 0.0
+    residual_max: 1.0
+    k_min: 1.0e-6
+    p_min: 1.0e-4
+    support_mode: continuous
+    support_center: 0.10
+    support_temperature: 0.10
+    support_logit_weight: 1.0
+    tau0: 0.25
+    tau_p: 1.0
+    measurement_consistency_temperature: 0.15
+    measurement_consistency_logit_weight: 0.0
+    active_candidate_top_k: 0
+    occupancy_evidence_weight: 0.0
+    occupancy_evidence_floor: 0.05
+    compensation_routing_mode: joint
+    query_chunk_size: 4096
+    sample_embedding_dim: 64
+    candidate_embedding_dim: 16
+    query_coordinate_scale_mm: 40.0
+
+  representation:
+    hidden_dim: 96
+    blocks: 3
+    dropout: 0.0
+    query_chunk_size: 4096
+
+  decoder:
+    positive_ratio_init: 0.03
+    query_chunk_size: 4096
+
+  candidate_field:
+    mode: independent
+    support_envelope_power: 0.0
+
+  fusion:
+    mode: candidate_specific
+    query_chunk_size: 4096
+
+  memory:
+    checkpoint_encoder: true
+    checkpoint_routing: false
+    checkpoint_representation: false
+    checkpoint_fusion: false
+    checkpoint_decoder: false
+
+  reliability:
+    mode: evidence
+
+  view_complementary:
+    evidence_nms:
+      exact_threshold: 4096
+      pre_nms_topk: 2048
+      pre_nms_factor: 64
+      max_nms_candidates: 4096
+
+  sdf:
+    tau_s: 3.0
+    lambda_sdf: 0.0
+    boundary_weight: 1.0
+    target_subdir: morphology
+    target_filename: sdf_target.npy
+    target_version: ssq_candidate_conditioned_sdf_v2
+
+  eaqo:
+    enabled: false
+    mode: loss_weight
+    lambda: 0.25
+    alpha_pred: 0.0
+    beta_view: 1.0
+    gamma_geo: 0.0
+    delta_comp: 0.0
+    weight_clip_min: 1.0
+    weight_clip_max: 3.0
+    detach_score: true
+    normalize_score: batch_minmax
+    eps: 1.0e-6
+    require_view_evidence: false
+
+gisc_fmt:
+  use_adapter: true
+  adapter_strategy: bottleneck_decoder
+  adapter_mode: per_view
+  adapter_cond_dim: 4
+  adapter_r_ratio: 8
+  norm_type: group
+  implicit_field_hidden_dim: 128
+  implicit_field_d_x: 60
+  implicit_field_d_f: 64
+  view_weight_embed_dim: 16
+  view_weight_hidden_dim: 32
+  multiscale:
+    view_embed_dim: 16
+    depth_dim: 16
+    cross_view_hidden_dim: 64
+    scale_hidden_dim: 64
+    tau: 1.0
+    depth_max: 200.0
+  background:
+    enable_background: false
+    head:
+      hidden_dim: 64
+      d_x: 60
+      d_f: 64
+    guidance:
+      enable: false
+      dim: 16
+      mode: film
+      hidden_dim: 64
+      scale: 1.0
+      gate_init_bias: 4.0
+
+gisc:
+  footprint_mode: adaptive_constrained
+  use_footprint: true
+  use_adaptive_footprint: true
+  use_physical_constraint: true
+  fixed_sigma: 1.0
+  sigma_min: 0.6
+  sigma_max: 1.5
+  use_depth_cue: true
+  use_center_distance_cue: true
+  view_subset: null
+  log_footprint_stats: true
+  save_debug_predictions: true

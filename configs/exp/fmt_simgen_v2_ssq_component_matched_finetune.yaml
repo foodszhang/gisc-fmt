@@ -1,0 +1,53 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_full_refined_32gb
+  - _self_
+
+name: fmt_simgen_v2_ssq_component_matched_finetune
+description: Full SSQ candidate fields with permutation-invariant component matching
+
+data:
+  component_supervision:
+    enabled: true
+    max_components: 5
+  query_sampling:
+    type: nongt_mpb
+    num_queries: ${data.num_queries}
+    trunk_uniform_ratio: 0.30
+    meas_proposal_ratio: 0.40
+    peak_balanced_ratio: 0.30
+    peak_top_m: 5
+    peak_min_distance_cells: 3
+    peak_blur_sigma: 1.0
+    peak_min_value_ratio: 0.1
+    use_gt_bbox: false
+    use_gt_foreground_oversampling: false
+    use_body_mask: false
+    use_depth_silhouette_mask: false
+
+model:
+  ssq_fmt:
+    decoder:
+      positive_ratio_init: 0.015
+  finetune:
+    init_from_ckpt: outputs/ssq_fmt_full_refined_2400_300_q8192_e60/checkpoints/epoch=07-val_dice=0.5702.ckpt
+
+loss:
+  candidate_branch_target_mode: hungarian_component
+  candidate_branch_density_weight: 0.25
+  candidate_branch_dice_weight: 0.25
+  candidate_assignment_target_mode: hungarian_component
+  candidate_assignment_weight: 0.05
+  component_match_center_weight: 0.25
+  component_unmatched_weight: 0.10
+
+optim:
+  lr: 0.0001
+  scheduler:
+    warmup_epochs: 0
+
+trainer:
+  max_epochs: 12
+  check_val_every_n_epoch: 1
+

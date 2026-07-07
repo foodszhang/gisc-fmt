@@ -1,0 +1,14 @@
+[
+  {
+    "task": "analysis_mode_internal_exports",
+    "reason": "Actual PTFA, query-canonical reliability, and source-relative cue internal exports are unavailable; no mechanism figure is generated."
+  },
+  {
+    "task": "actual_source_relative_cue_export",
+    "reason": "Only measurement-derived proposal peaks are exported. Hypothesis confidence, query-relative distances, soft ownership, ownership entropy/margin, and actual cue vectors before feature refinement are unavailable."
+  },
+  {
+    "task": "controlled_perturbation_inference",
+    "reason": "No detector/view perturbation inference outputs exist; no robustness figure is generated."
+  }
+]

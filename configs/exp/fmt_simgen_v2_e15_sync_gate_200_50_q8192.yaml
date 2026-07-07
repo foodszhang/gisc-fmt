@@ -1,0 +1,38 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e15_center_distance
+  - _self_
+
+name: fmt_simgen_v2_e15_sync_gate_200_50_q8192
+description: E15 synchronized 200/50 gate with the SSQ query protocol
+
+seed: 42
+
+data:
+  center_distance_require_precomputed: false
+  sample_num: 8192
+  num_queries: 8192
+  eval_sample_num: 8192
+  query_sampling:
+    type: nongt_mixed
+    num_queries: ${data.num_queries}
+    trunk_uniform_ratio: 0.5
+    meas_proposal_ratio: 0.5
+    use_gt_bbox: false
+    use_gt_foreground_oversampling: false
+    use_body_mask: false
+    use_depth_silhouette_mask: false
+  train_max_samples: 200
+  val_max_samples: 50
+  subset_policy: first
+  subset_seed: ${seed}
+  batch_size: 1
+  eval_batch_size: 1
+  num_workers: 4
+  persistent_workers: true
+
+trainer:
+  max_epochs: 15
+  accumulate_grad_batches: 4
+  check_val_every_n_epoch: 1

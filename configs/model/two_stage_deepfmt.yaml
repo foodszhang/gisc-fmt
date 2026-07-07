@@ -1,0 +1,24 @@
+name: two_stage_deepfmt
+output_type: voxel
+num_views: 7
+in_channels: 1
+feature_dim: 64
+pos_enc_dim: 60
+geometry:
+  camera_distance: 200.0
+  detector_size: [256, 256]
+  global_voxel_shape: [190, 200, 104]
+two_stage_deepfmt:
+  base_channels: 16
+  profile_bins: 64
+  iradon_hidden_dim: 512
+  profile_axis: h
+  slice_axis: w
+  refine_channels: 16
+  refine_blocks: 2
+  loss_type: default
+  dice_weight: 0.5
+  lambda_proj: 0.0
+  output_mode: roi
+  paste_roi_to_full: true
+  full_output_shape: [190, 200, 104]

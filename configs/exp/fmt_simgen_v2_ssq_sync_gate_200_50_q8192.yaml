@@ -1,0 +1,42 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_refined_joint_scratch
+  - _self_
+
+name: fmt_simgen_v2_ssq_sync_gate_200_50_q8192
+description: Full SSQ synchronized 200/50 gate against E15
+
+seed: 42
+
+data:
+  sample_num: 8192
+  num_queries: 8192
+  eval_sample_num: 8192
+  query_sampling:
+    num_queries: ${data.num_queries}
+  train_max_samples: 200
+  val_max_samples: 50
+  subset_policy: first
+  subset_seed: ${seed}
+  batch_size: 1
+  eval_batch_size: 1
+  num_workers: 4
+  persistent_workers: true
+
+model:
+  ssq_fmt:
+    routing:
+      query_chunk_size: 8192
+    representation:
+      query_chunk_size: 8192
+    fusion:
+      query_chunk_size: 8192
+    decoder:
+      query_chunk_size: 8192
+
+trainer:
+  max_epochs: 15
+  accumulate_grad_batches: 4
+  check_val_every_n_epoch: 1
+

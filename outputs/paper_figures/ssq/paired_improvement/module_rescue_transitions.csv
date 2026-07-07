@@ -1,0 +1,4 @@
+ablation,label,num_samples,both_success,ssq_rescued,ablation_only_success,both_failure,net_rescued,net_rescued_ci95_low,net_rescued_ci95_high,mcnemar_exact_p,supports_main_claim
+w/o transport-aware footprint,No footprint,100,20,17,8,55,9,-1.0,19.0,0.10775214433670044,False
+w/o query-canonical reliability,No reliability,100,22,15,9,54,6,-4.0,16.0,0.30745625495910645,False
+w/o source-relative query cue,No source cue,100,25,12,9,54,3,-6.0,12.0,0.6636238098144531,False

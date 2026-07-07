@@ -294,12 +294,12 @@ class PointDensityNet(nn.Module):
             global_voxel_shape, range_x, range_y, range_z: 空间信息
         Returns:
             density: [B, N, 1] 预测光源密度
-            views_no_projections: 字典，各视图处理后的投影
+            aux_projections: 字典，各视图处理后的投影
         """
         view_list = ["-90", "-60", "-30", "0", "30", "60", "90"]
         view_features = {}
         view_specific_features = {}
-        views_no_projections = {}
+        aux_projections = {}
         for view_name, projection in view_projections.items():
             angle = view_name
             projection = projection.unsqueeze(1)  # [B, 1, H, W]
@@ -307,13 +307,13 @@ class PointDensityNet(nn.Module):
             view_features[view_name] = feat
             view_specific_feat = self.view_adaptors[view_list.index(str(angle))](feat)
             view_specific_features[view_name] = view_specific_feat
-            views_no_projections[view_name] = self.gate_adaptors[
+            aux_projections[view_name] = self.gate_adaptors[
                 view_list.index(str(angle))
             ](view_specific_feat)
-            views_no_projections[view_name] = views_no_projections[view_name].squeeze(1)
+            aux_projections[view_name] = aux_projections[view_name].squeeze(1)
         fused_feat = self.attention_fusion(x3d, view_specific_features)
         B, N, C = fused_feat.shape
         density = self.density_head(fused_feat, x3d, global_voxel_shape, range_x, range_y, range_z)  # [B*N, 1]
         density = density.view(B, N, 1)
-        return density, views_no_projections
+        return density, aux_projections
 

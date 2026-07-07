@@ -7,14 +7,76 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from omegaconf import DictConfig
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from .loss import ScatterLightLoss, dice_coefficient, compute_dice
+from .loss import (
+    AuxProjectionLightLoss,
+    MorphologyAwareDensityLoss,
+    VoxelReconstructionLoss,
+    compute_dice,
+    dice_coefficient,
+)
 from .model_factory import ModelFactory
 from .utils.utils import get_psnr_3d, get_ssim_3d
+
+E15_INIT_WHITELIST = (
+    "surface_encoder.",
+    "surface_sampler.context_net.",
+    "surface_sampler.sample_projection.",
+    "view_encoder.",
+    "shared_density_logit_decoder.",
+)
+
+E15_EXPLICIT_KEY_MAP = {
+    "shared_unet.feature_fusion.0.double_conv.0.weight": "surface_encoder.fuse.1.net.0.weight",
+    "shared_unet.feature_fusion.0.double_conv.1.weight": "surface_encoder.fuse.1.net.1.weight",
+    "shared_unet.feature_fusion.0.double_conv.1.bias": "surface_encoder.fuse.1.net.1.bias",
+    "density_head.mlp_out.3.weight": "shared_density_logit_decoder.fusion.6.weight",
+    "density_head.mlp_out.3.bias": "shared_density_logit_decoder.fusion.6.bias",
+}
+
+
+def load_e15_compatible_weights(model: torch.nn.Module, checkpoint_path: str) -> dict[str, list]:
+    """Load only explicitly whitelisted, name- and shape-identical E15 tensors."""
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    source = checkpoint.get("state_dict", checkpoint)
+    source = {key.removeprefix("net."): value for key, value in source.items()}
+    target = model.state_dict()
+    loaded: dict[str, torch.Tensor] = {}
+    mismatched: list[tuple[str, tuple[int, ...], tuple[int, ...]]] = []
+    intentionally_skipped: list[str] = []
+    for source_key, value in source.items():
+        key = E15_EXPLICIT_KEY_MAP.get(source_key, source_key)
+        explicitly_mapped = source_key in E15_EXPLICIT_KEY_MAP
+        if not key.startswith(E15_INIT_WHITELIST):
+            intentionally_skipped.append(source_key)
+            continue
+        if not explicitly_mapped and not source_key.startswith(E15_INIT_WHITELIST):
+            intentionally_skipped.append(key)
+            continue
+        if key in target and target[key].shape == value.shape:
+            loaded[key] = value
+        elif key in target:
+            mismatched.append((key, tuple(value.shape), tuple(target[key].shape)))
+        else:
+            intentionally_skipped.append(source_key)
+    missing = sorted(
+        key for key in target if key.startswith(E15_INIT_WHITELIST) and key not in loaded
+    )
+    model.load_state_dict(loaded, strict=False)
+    report = {
+        "loaded_keys": sorted(loaded),
+        "missing_keys": missing,
+        "shape_mismatched_keys": mismatched,
+        "intentionally_skipped_keys": sorted(intentionally_skipped),
+    }
+    print(f"[e15-init] checkpoint={checkpoint_path}")
+    for name, values in report.items():
+        print(f"[e15-init] {name} ({len(values)}): {values}")
+    return report
 
 
 class TrainingLightningModule(LightningModule):
@@ -45,6 +107,11 @@ class TrainingLightningModule(LightningModule):
         # Extract commonly used parameters
         self.learning_rate = cfg.optim.lr
         self.max_epochs = cfg.trainer.max_epochs
+        self._center_distance_sigma_mm: float = 0.5
+        self._center_distance_center_weight: float = 0.2
+        self._center_distance_weight: float = 0.1
+        self._empty_slot_weight: float = 0.0
+        self._backbone_logit_loss_weight: float = 0.0
 
         # Create model and loss
         self._setup_model()
@@ -52,6 +119,7 @@ class TrainingLightningModule(LightningModule):
 
         # Training metrics tracking
         self.best_dice = -1.0
+        self._last_gradient_norm_step = -1
 
         # Test-time state (initialized in on_test_start)
         self._test_out_dir: Path | None = None
@@ -67,6 +135,34 @@ class TrainingLightningModule(LightningModule):
         self._test_save_recon_roi: bool = True
         self._test_save_registered_seg: bool = True
         self._test_save_proj_comparisons: bool = True
+        validation_cfg = cfg.get("validation", None)
+        test_cfg = cfg.get("test", None)
+        if validation_cfg is not None and "pred_threshold" in validation_cfg:
+            self._validation_pred_threshold = float(validation_cfg.pred_threshold)
+        elif test_cfg is not None and "pred_threshold" in test_cfg:
+            self._validation_pred_threshold = float(test_cfg.pred_threshold)
+        else:
+            self._validation_pred_threshold = 0.5
+
+    @staticmethod
+    def _center_focal_loss(
+        logits: torch.Tensor,
+        target: torch.Tensor,
+        alpha: float = 2.0,
+        beta: float = 4.0,
+        eps: float = 1e-6,
+    ) -> torch.Tensor:
+        pred = torch.sigmoid(logits).clamp(eps, 1.0 - eps)
+
+        pos_mask = target >= 0.5
+        neg_mask = target < 0.5
+
+        pos_loss = -torch.log(pred) * torch.pow(1.0 - pred, alpha) * pos_mask.float()
+        neg_weight = torch.pow(1.0 - target, beta)
+        neg_loss = -torch.log(1.0 - pred) * torch.pow(pred, alpha) * neg_weight * neg_mask.float()
+
+        pos_count = pos_mask.float().sum().clamp_min(1.0)
+        return (pos_loss.sum() + neg_loss.sum()) / pos_count
 
     def _setup_model(self):
         """Create model from config using ModelFactory"""
@@ -74,12 +170,13 @@ class TrainingLightningModule(LightningModule):
             model_type=self.cfg.model.name,
             config=self.cfg,
         )
+        self._apply_finetune_setup()
 
         # Optional torch.compile for speed (PyTorch 2.x)
         if getattr(self.cfg.trainer, "torch_compile", False) and hasattr(torch, "compile"):
             mode = str(getattr(self.cfg.trainer, "torch_compile_mode", "reduce-overhead"))
 
-            # Inductor/Triton compilation can fail on some shapes/kernels (e.g., int32 indexing overflow).
+            # Inductor/Triton can fail on some shapes/kernels, e.g. int32 indexing overflow.
             # Suppress compile errors so Dynamo falls back to eager instead of crashing.
             try:
                 from torch import _dynamo  # type: ignore
@@ -90,22 +187,728 @@ class TrainingLightningModule(LightningModule):
 
             self.net = torch.compile(self.net, mode=mode)  # type: ignore[attr-defined]
 
+    def _apply_finetune_setup(self):
+        """Optional non-strict initialization/freezing for targeted fine-tuning configs."""
+        finetune_cfg = getattr(self.cfg.model, "finetune", None)
+        if finetune_cfg is None:
+            return
+
+        def apply_ssq_controls(initial_state: dict[str, torch.Tensor]) -> None:
+            reset_modules = [str(name) for name in getattr(finetune_cfg, "reset_modules", []) or []]
+            if reset_modules:
+                reset_prefixes = tuple(f"{name}." for name in reset_modules)
+                reset_state = {
+                    key: value
+                    for key, value in initial_state.items()
+                    if key.startswith(reset_prefixes)
+                }
+                missing, unexpected = self.net.load_state_dict(reset_state, strict=False)
+                if unexpected:
+                    raise RuntimeError(
+                        f"SSQ module reset produced unexpected keys: {unexpected[:20]}"
+                    )
+                print(
+                    f"[finetune] reset modules to fresh initialization: {reset_modules}; "
+                    f"keys={len(reset_state)}"
+                )
+            freeze_modules = [
+                str(name) for name in getattr(finetune_cfg, "freeze_modules", []) or []
+            ]
+            for module_name in freeze_modules:
+                for parameter in self.net.get_submodule(module_name).parameters():
+                    parameter.requires_grad = False
+            train_modules_only = [
+                str(name) for name in getattr(finetune_cfg, "train_modules_only", []) or []
+            ]
+            if train_modules_only:
+                for parameter in self.net.parameters():
+                    parameter.requires_grad = False
+                for module_name in train_modules_only:
+                    for parameter in self.net.get_submodule(module_name).parameters():
+                        parameter.requires_grad = True
+            if reset_modules or freeze_modules or train_modules_only:
+                trainable = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+                total = sum(p.numel() for p in self.net.parameters())
+                print(
+                    f"[finetune] SSQ controls: freeze={freeze_modules} "
+                    f"train_only={train_modules_only}; trainable={trainable}/{total}"
+                )
+
+        init_from = str(getattr(finetune_cfg, "init_from_ckpt", "") or "")
+        if init_from:
+            if self._is_ssq_model():
+                if bool(getattr(finetune_cfg, "e15_compatible_init", False)):
+                    initial_state = {
+                        key: value.detach().clone() for key, value in self.net.state_dict().items()
+                    }
+                    load_e15_compatible_weights(self.net, init_from)
+                    apply_ssq_controls(initial_state)
+                    return
+                ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
+                state = ckpt.get("state_dict", ckpt)
+                net_state = {
+                    key[len("net.") :]: value
+                    for key, value in state.items()
+                    if key.startswith("net.")
+                }
+                if not net_state:
+                    net_state = state
+                current_state = self.net.state_dict()
+                allow_missing_prefixes = tuple(
+                    str(prefix) for prefix in getattr(finetune_cfg, "allow_missing_prefixes", [])
+                )
+                matching_state = {
+                    key: value
+                    for key, value in net_state.items()
+                    if key in current_state and current_state[key].shape == value.shape
+                }
+                missing_current = sorted(set(current_state) - set(matching_state))
+                unexpected_source = sorted(set(net_state) - set(matching_state))
+                allowed_extension = (
+                    bool(allow_missing_prefixes)
+                    and not unexpected_source
+                    and all(key.startswith(allow_missing_prefixes) for key in missing_current)
+                )
+                if allowed_extension:
+                    missing, unexpected = self.net.load_state_dict(matching_state, strict=False)
+                    if unexpected or sorted(missing) != missing_current:
+                        raise RuntimeError(
+                            "SSQ extension initialization produced inconsistent keys: "
+                            f"missing={missing[:20]} unexpected={unexpected[:20]}"
+                        )
+                    print(
+                        f"[finetune] initialized SSQ-FMT extension from {init_from}; "
+                        f"new_keys={len(missing_current)}"
+                    )
+                    apply_ssq_controls(current_state)
+                    return
+                if all(
+                    key in current_state and current_state[key].shape == value.shape
+                    for key, value in net_state.items()
+                ):
+                    self.net.load_state_dict(net_state, strict=True)
+                    print(f"[finetune] strictly initialized SSQ-FMT net from {init_from}")
+                else:
+                    mapped_state = dict(current_state)
+                    mapped = {}
+                    for key, value in net_state.items():
+                        mapped_key = f"query_density_backbone.{key}"
+                        if (
+                            mapped_key in current_state
+                            and current_state[mapped_key].shape == value.shape
+                        ):
+                            mapped[mapped_key] = value
+                    backbone_keys = [
+                        key for key in current_state if key.startswith("query_density_backbone.")
+                    ]
+                    missing_backbone = [key for key in backbone_keys if key not in mapped]
+                    if missing_backbone:
+                        raise RuntimeError(
+                            "SSQ-FMT strict backbone init failed; missing mapped keys: "
+                            f"{missing_backbone[:20]}"
+                        )
+                    mapped_state.update(mapped)
+                    self.net.load_state_dict(mapped_state, strict=True)
+                    print(
+                        f"[finetune] strictly initialized SSQ-FMT query backbone from "
+                        f"{init_from}; mapped_backbone_keys={len(mapped)}"
+                    )
+                apply_ssq_controls(current_state)
+                return
+            ckpt = torch.load(init_from, map_location="cpu", weights_only=False)
+            state = ckpt.get("state_dict", ckpt)
+            net_state = {}
+            for key, value in state.items():
+                if key.startswith("net."):
+                    net_state[key[len("net.") :]] = value
+            if not net_state:
+                net_state = state
+            current_state = self.net.state_dict()
+            skipped = []
+            filtered_state = {}
+            for key, value in net_state.items():
+                current_value = current_state.get(key)
+                if current_value is not None and current_value.shape != value.shape:
+                    if (
+                        value.ndim == 2
+                        and current_value.ndim == 2
+                        and current_value.shape[0] == value.shape[0]
+                        and current_value.shape[1] > value.shape[1]
+                    ):
+                        adapted = torch.zeros_like(current_value)
+                        adapted[:, : value.shape[1]] = value.to(
+                            dtype=current_value.dtype, device=current_value.device
+                        )
+                        filtered_state[key] = adapted
+                        print(
+                            f"[finetune] expanded linear weight {key}: "
+                            f"{tuple(value.shape)} -> {tuple(current_value.shape)}"
+                        )
+                        continue
+                    skipped.append((key, tuple(value.shape), tuple(current_value.shape)))
+                    continue
+                filtered_state[key] = value
+            net_state = filtered_state
+            missing, unexpected = self.net.load_state_dict(net_state, strict=False)
+            print(
+                f"[finetune] initialized net from {init_from}; "
+                f"missing={len(missing)} unexpected={len(unexpected)} "
+                f"skipped_shape_mismatch={len(skipped)}"
+            )
+            if skipped:
+                print(f"[finetune] skipped shape-mismatched keys: {skipped}")
+            if missing:
+                print(f"[finetune] missing keys: {missing}")
+            if unexpected:
+                print(f"[finetune] unexpected keys: {unexpected}")
+
+        if bool(getattr(finetune_cfg, "freeze_except_mean_prior_gate", False)):
+            for param in self.net.parameters():
+                param.requires_grad = False
+            if not hasattr(self.net, "mean_prior_residual_gate"):
+                raise ValueError(
+                    "model.finetune.freeze_except_mean_prior_gate=true requires "
+                    "mean_prior_residual_gate"
+                )
+            for param in self.net.mean_prior_residual_gate.parameters():
+                param.requires_grad = True
+            trainable = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+            total = sum(p.numel() for p in self.net.parameters())
+            print(f"[finetune] trainable parameters: {trainable}/{total}")
+
+        freeze_modules = list(getattr(finetune_cfg, "freeze_modules", []) or [])
+        for module_name in freeze_modules:
+            module = self.net.get_submodule(str(module_name))
+            for param in module.parameters():
+                param.requires_grad = False
+        if freeze_modules:
+            trainable = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+            total = sum(p.numel() for p in self.net.parameters())
+            print(
+                f"[finetune] frozen modules: {freeze_modules}; "
+                f"trainable parameters: {trainable}/{total}"
+            )
+
+        train_modules_only = list(getattr(finetune_cfg, "train_modules_only", []) or [])
+        if train_modules_only:
+            for param in self.net.parameters():
+                param.requires_grad = False
+            for module_name in train_modules_only:
+                module = self.net.get_submodule(str(module_name))
+                for param in module.parameters():
+                    param.requires_grad = True
+            trainable = sum(p.numel() for p in self.net.parameters() if p.requires_grad)
+            total = sum(p.numel() for p in self.net.parameters())
+            print(
+                f"[finetune] trainable modules only: {train_modules_only}; "
+                f"trainable parameters: {trainable}/{total}"
+            )
+
     def _setup_loss(self):
         """Create loss function from config"""
         loss_cfg = self.cfg.loss
-        self.loss_func = ScatterLightLoss(
-            init_scatter_weight=loss_cfg.scatter_weight,
-            target_scatter_weight=loss_cfg.target_scatter_weight,
+        self._center_distance_sigma_mm = float(loss_cfg.get("center_sigma_mm", 0.5))
+        self._center_distance_center_weight = float(loss_cfg.get("center_weight", 0.2))
+        self._center_distance_weight = float(loss_cfg.get("distance_weight", 0.1))
+        self._empty_slot_weight = float(loss_cfg.get("empty_slot_weight", 0.0))
+        self._backbone_logit_loss_weight = float(loss_cfg.get("backbone_logit_loss_weight", 0.0))
+        self.loss_func = AuxProjectionLightLoss(
+            init_scatter_weight=loss_cfg.get(
+                "aux_projection_weight", loss_cfg.get("scatter_weight", 1.0)
+            ),
+            target_scatter_weight=loss_cfg.get(
+                "target_aux_projection_weight", loss_cfg.get("target_scatter_weight", 0.5)
+            ),
             start_decay_epoch=loss_cfg.start_decay_epoch,
             decay_epochs=loss_cfg.decay_epochs,
             pos_weight=loss_cfg.pos_weight,
             sparse_weight=loss_cfg.sparse_weight,
             lambda_dice=loss_cfg.dice_weight,
+            use_tversky=loss_cfg.get("use_tversky", True),
+            tversky_alpha=loss_cfg.get("tversky_alpha", 0.6),
+            tversky_beta=loss_cfg.get("tversky_beta", 0.4),
+            tversky_gamma=loss_cfg.get("tversky_gamma", 1.33),
+            tversky_weight=loss_cfg.get("tversky_weight", None),
+            light_weight=loss_cfg.get("light_weight", 1.0),
+        )
+        self.voxel_loss_func = VoxelReconstructionLoss(
+            pos_weight=loss_cfg.pos_weight,
+            sparse_weight=loss_cfg.sparse_weight,
+            lambda_dice=loss_cfg.dice_weight,
+            use_tversky=loss_cfg.get("use_tversky", True),
+            tversky_alpha=loss_cfg.get("tversky_alpha", 0.6),
+            tversky_beta=loss_cfg.get("tversky_beta", 0.4),
+            tversky_gamma=loss_cfg.get("tversky_gamma", 1.33),
+            tversky_weight=loss_cfg.get("tversky_weight", None),
+        )
+        self.ssq_loss_func = MorphologyAwareDensityLoss(
+            lambda_sdf=loss_cfg.get("lambda_sdf", 0.0),
+            tau_s=loss_cfg.get("tau_s", 3.0),
+            boundary_weight=loss_cfg.get("sdf_boundary_weight", 1.0),
+            pos_weight=loss_cfg.get("pos_weight", 1.0),
+            dice_weight=loss_cfg.get("dice_weight", 0.0),
+            sparse_weight=loss_cfg.get("sparse_weight", 0.0),
+            density_bce_weight=loss_cfg.get("density_bce_weight", 0.0),
+            tversky_weight=loss_cfg.get("tversky_weight", 0.0),
+            tversky_alpha=loss_cfg.get("tversky_alpha", 0.6),
+            tversky_beta=loss_cfg.get("tversky_beta", 0.4),
+            tversky_gamma=loss_cfg.get("tversky_gamma", 1.33),
+            candidate_branch_density_weight=loss_cfg.get("candidate_branch_density_weight", 0.0),
+            candidate_branch_dice_weight=loss_cfg.get("candidate_branch_dice_weight", 0.0),
+            candidate_branch_prior_power=loss_cfg.get("candidate_branch_prior_power", 1.0),
+            candidate_branch_min_prior=loss_cfg.get("candidate_branch_min_prior", 0.0),
+            candidate_branch_target_mode=loss_cfg.get("candidate_branch_target_mode", "soft_prior"),
+            candidate_assignment_weight=loss_cfg.get("candidate_assignment_weight", 0.0),
+            candidate_assignment_min_prior=loss_cfg.get("candidate_assignment_min_prior", 0.05),
+            candidate_assignment_target_mode=loss_cfg.get(
+                "candidate_assignment_target_mode", "best_prior"
+            ),
+            component_match_center_weight=loss_cfg.get("component_match_center_weight", 0.25),
+            component_unmatched_weight=loss_cfg.get("component_unmatched_weight", 0.25),
+            lambda_shared=loss_cfg.get("lambda_shared", 0.0),
+            lambda_quot=loss_cfg.get("lambda_quot", 0.0),
+            lambda_res=loss_cfg.get("lambda_res", 0.0),
         )
 
-    def forward(self, projections, points):
+    def _is_ssq_model(self) -> bool:
+        return str(getattr(self.cfg.model, "name", "")).lower() == "ssq_fmt"
+
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False):
+        current_state = self.state_dict()
+        routing_key = "net.bounded_view_routing.routing_gain_raw"
+        compatibility_keys = [
+            key
+            for key in current_state
+            if key.startswith(
+                (
+                    "net.unified_density_decoder.candidate_residual_head.",
+                    "net.unified_density_decoder.candidate_branch_head.",
+                )
+            )
+        ]
+        compatibility_keys.extend(
+            key
+            for key in current_state
+            if key.startswith("net.bounded_view_routing.gain_predictor.")
+        )
+        if routing_key in current_state:
+            compatibility_keys.append(routing_key)
+        if any(
+            key not in state_dict or state_dict[key].shape != current_state[key].shape
+            for key in compatibility_keys
+        ):
+            state_dict = dict(state_dict)
+            for key in compatibility_keys:
+                if key not in state_dict or state_dict[key].shape != current_state[key].shape:
+                    state_dict[key] = current_state[key]
+        if self._is_ssq_model() and not strict:
+            missing = sorted(set(current_state.keys()) - set(state_dict.keys()))
+            unexpected = sorted(set(state_dict.keys()) - set(current_state.keys()))
+            raise RuntimeError(
+                "SSQ-FMT checkpoint loading requires strict=True; "
+                f"missing_keys={missing[:20]} unexpected_keys={unexpected[:20]}"
+            )
+        return super().load_state_dict(state_dict, strict=strict, assign=assign)
+
+    def forward(
+        self,
+        projections,
+        points,
+        points_mm=None,
+        depth_maps=None,
+        source_hypotheses=None,
+        aux_only: bool = False,
+    ):
         """Forward pass."""
-        return self.net(projections, points)
+        return self.net(
+            projections,
+            points,
+            points_mm=points_mm,
+            depth_maps=depth_maps,
+            source_hypotheses=source_hypotheses,
+            aux_only=aux_only,
+        )
+
+    def _call_model(
+        self,
+        projections,
+        points,
+        points_mm=None,
+        depth_maps=None,
+        source_hypotheses=None,
+        aux_only: bool = False,
+    ):
+        if hasattr(self.net, "set_training_epoch"):
+            self.net.set_training_epoch(int(self.current_epoch))
+        out = self(
+            projections,
+            points,
+            points_mm=points_mm,
+            depth_maps=depth_maps,
+            source_hypotheses=source_hypotheses,
+            aux_only=aux_only,
+        )
+        if isinstance(out, tuple) and len(out) >= 2:
+            return out[0], out[1]
+        raise RuntimeError(f"Unexpected model output: {type(out)}")
+
+    def _call_ssq_model(self, batch, return_diagnostics: bool = False):
+        if hasattr(self.net, "set_training_epoch"):
+            self.net.set_training_epoch(int(self.current_epoch))
+        if hasattr(self.net, "set_training_step"):
+            self.net.set_training_step(int(self.global_step))
+        surface = batch.get("surface_measurements_packed", batch.get("projections_packed"))
+        if surface is None:
+            raise KeyError(
+                "SSQ-FMT requires batch.surface_measurements_packed or projections_packed"
+            )
+        query_mm = batch.get("query_coordinates_mm", batch.get("points_mm"))
+        if query_mm is None:
+            raise KeyError("SSQ-FMT requires batch.query_coordinates_mm or points_mm")
+        out = self.net(
+            surface,
+            query_mm,
+            detector_valid_mask=batch.get("detector_valid_mask"),
+            depth_maps=batch.get("depth_maps"),
+            batch=batch,
+            return_diagnostics=return_diagnostics,
+        )
+        if not isinstance(out, dict) or "density" not in out:
+            raise RuntimeError(f"Unexpected SSQ-FMT model output: {type(out)}")
+        return out
+
+    @staticmethod
+    def _source_hypotheses_from_batch(batch):
+        if "source_hypothesis_centers" not in batch:
+            return None
+        return {
+            "centers": batch["source_hypothesis_centers"],
+            "peak_scores": batch.get("source_hypothesis_peak_scores"),
+            "scales": batch.get("source_hypothesis_scales"),
+            "valid": batch.get("source_hypothesis_valid"),
+        }
+
+    def _log_source_cue_stats(self, prefix: str, batch, point_densities: torch.Tensor) -> None:
+        stats = getattr(self.net, "last_source_cue_stats", None)
+        if stats:
+            for key, value in stats.items():
+                if torch.is_tensor(value):
+                    self.log(
+                        f"{prefix}_source_cue_{key}",
+                        value.detach(),
+                        prog_bar=False,
+                        on_step=False,
+                        on_epoch=True,
+                        sync_dist=True,
+                    )
+        decoder_stats = getattr(self.net, "last_source_decoder_stats", None)
+        if decoder_stats:
+            for key, value in decoder_stats.items():
+                if torch.is_tensor(value):
+                    self.log(
+                        f"{prefix}_source_decoder_{key}",
+                        value.detach(),
+                        prog_bar=False,
+                        on_step=False,
+                        on_epoch=True,
+                        sync_dist=True,
+                    )
+        nearest_dist = getattr(self.net, "last_source_nearest_dist", None)
+        if torch.is_tensor(nearest_dist):
+            mask = point_densities > 0.0
+            if mask.any():
+                self.log(
+                    f"{prefix}_positive_query_nearest_peak_dist",
+                    nearest_dist.to(point_densities.device)[mask].mean().detach(),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+
+    def _is_voxel_model(self) -> bool:
+        return (
+            str(getattr(self.cfg.model, "output_type", "")).lower() == "voxel"
+            or str(getattr(self.net, "output_type", "")).lower() == "voxel"
+        )
+
+    def _call_voxel_model(self, projections, batch):
+        if hasattr(self.net, "set_training_epoch"):
+            self.net.set_training_epoch(int(self.current_epoch))
+        out = self.net(
+            projections,
+            points=batch.get("points"),
+            points_mm=batch.get("points_mm"),
+            depth_maps=batch.get("depth_maps"),
+            batch=batch,
+        )
+        if isinstance(out, dict) and "pred_voxel" in out:
+            return out["pred_voxel"], out.get("aux_outputs", {})
+        if torch.is_tensor(out):
+            return out, {}
+        raise RuntimeError(f"Unexpected voxel model output: {type(out)}")
+
+    def _voxel_target(self, batch) -> torch.Tensor:
+        if "gt_voxels" in batch:
+            return batch["gt_voxels"].float()
+        point_densities = batch["point_densities"]
+        voxel_shape = batch["feasible_voxel_shape"]
+        shape = self._shape_tuple_from_batch(voxel_shape, point_densities.shape[0])
+        if int(np.prod(shape[1:])) != point_densities.shape[1]:
+            raise ValueError("Voxel baseline requires batch.gt_voxels or full-grid point labels")
+        return point_densities.reshape(shape).float()
+
+    def _standardize_pred_voxel(self, pred_voxel, target_voxel):
+        if pred_voxel.dim() == 5 and pred_voxel.size(1) == 1:
+            pred_voxel = pred_voxel[:, 0]
+        if target_voxel.dim() == 5 and target_voxel.size(1) == 1:
+            target_voxel = target_voxel[:, 0]
+        if pred_voxel.shape[1:] != target_voxel.shape[1:]:
+            raise ValueError(
+                "Voxel prediction and target shapes differ during evaluation. "
+                f"pred={tuple(pred_voxel.shape)}, target={tuple(target_voxel.shape)}. "
+                "Use full-volume output, crop_target, paste_pred, or mesh_to_voxel alignment."
+            )
+        return pred_voxel, target_voxel
+
+    def _prepare_projection_input(self, batch):
+        projections = batch["projections"]
+        if (
+            self.cfg.model.name
+            in {
+                "minr_fmt",
+                "gisc_fmt",
+                "point_cqr",
+                "fixed_footprint_cqr",
+                "depth_footprint_cqr",
+                "unconstrained_adaptive_cqr",
+            }
+            and "projections_packed" in batch
+        ):
+            p = batch["projections_packed"]  # [B,V,1,H,W]
+            B, V = p.shape[0], p.shape[1]
+            # GISC-FMT expects view-major flattening: [V*B,1,H,W]
+            return projections, p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+        if self._is_ssq_model() and "surface_measurements_packed" in batch:
+            return batch["surface_measurements"], batch["surface_measurements_packed"]
+        return projections, projections
+
+    def _shape_tuple_from_batch(self, voxel_shape, batch_size: int) -> tuple[int, int, int, int]:
+        return (
+            batch_size,
+            int(voxel_shape[0][0].detach().cpu().numpy()),
+            int(voxel_shape[1][0].detach().cpu().numpy()),
+            int(voxel_shape[2][0].detach().cpu().numpy()),
+        )
+
+    @staticmethod
+    def _connected_components_from_voxels(
+        gt_voxels: torch.Tensor,
+    ) -> list[tuple[torch.Tensor, np.ndarray, float]]:
+        from scipy import ndimage
+
+        gt_np = gt_voxels.detach().to(dtype=torch.float32).cpu().numpy()
+        if gt_np.ndim == 4 and gt_np.shape[0] == 1:
+            gt_np = gt_np[0]
+        structure = ndimage.generate_binary_structure(3, 1)
+        labeled, num = ndimage.label(gt_np > 0.0, structure=structure)
+        comps: list[tuple[torch.Tensor, np.ndarray, float]] = []
+        for label_id in range(1, num + 1):
+            mask = labeled == label_id
+            if not mask.any():
+                continue
+            coords = np.argwhere(mask)
+            center = coords.astype(np.float32).mean(axis=0)
+            dist_map = ndimage.distance_transform_edt(mask).astype(np.float32)
+            radius = float(dist_map[mask].max())
+            comps.append((torch.tensor(center, dtype=torch.float32), dist_map, max(radius, 1.0)))
+        return comps
+
+    def _center_distance_query_targets(
+        self,
+        batch: dict,
+        points_mm: torch.Tensor,
+        points_ijk: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if (
+            "center_target" in batch
+            and "distance_target" in batch
+            and "center_distance_fg_mask" in batch
+        ):
+            return (
+                batch["center_target"],
+                batch["distance_target"],
+                batch["center_distance_fg_mask"],
+            )
+
+        gt_voxels = batch.get("gt_voxels")
+        if gt_voxels is None:
+            raise ValueError("Center-distance auxiliary supervision requires batch.gt_voxels")
+        voxel_size_mm = float(getattr(self.cfg.data, "voxel_size_mm", 0.2))
+        gt = gt_voxels.detach().to(device=points_mm.device, dtype=torch.float32)
+        B, N, _ = points_mm.shape
+        center_targets = torch.zeros((B, N, 1), device=points_mm.device, dtype=torch.float32)
+        distance_targets = torch.zeros((B, N, 1), device=points_mm.device, dtype=torch.float32)
+        fg_mask = torch.zeros((B, N, 1), device=points_mm.device, dtype=torch.float32)
+        for b in range(B):
+            comps = self._connected_components_from_voxels(gt[b])
+            if not comps:
+                continue
+            pts = points_ijk[b].detach().to(device=points_mm.device, dtype=torch.float32)
+            gt_b = gt[b]
+            center_vals = []
+            dist_vals = []
+            fg_vals = []
+            for center_ijk, dist_map_np, radius_vox in comps:
+                center_mm = (center_ijk.to(device=points_mm.device) + 0.5) * voxel_size_mm
+                diff = points_mm[b] - center_mm[None, :]
+                dist_sq = (diff * diff).sum(dim=-1, keepdim=True)
+                center_vals.append(
+                    torch.exp(-dist_sq / (2.0 * (self._center_distance_sigma_mm**2)))
+                )
+                x = pts[:, 0].round().long().clamp(0, gt_b.shape[0] - 1)
+                y = pts[:, 1].round().long().clamp(0, gt_b.shape[1] - 1)
+                z = pts[:, 2].round().long().clamp(0, gt_b.shape[2] - 1)
+                mask = gt_b[x, y, z] > 0.0
+                fg_vals.append(mask.unsqueeze(-1).float())
+                if mask.any():
+                    dist_map = torch.tensor(
+                        dist_map_np, device=points_mm.device, dtype=torch.float32
+                    )
+                    dist_to_boundary = dist_map[x, y, z].unsqueeze(-1) * voxel_size_mm
+                    dist_vals.append(
+                        (dist_to_boundary / (radius_vox * voxel_size_mm)).clamp(0.0, 1.0)
+                    )
+                else:
+                    dist_vals.append(
+                        torch.zeros((N, 1), device=points_mm.device, dtype=torch.float32)
+                    )
+            center_targets[b] = torch.stack(center_vals, dim=0).amax(dim=0)
+            distance_targets[b] = torch.stack(dist_vals, dim=0).amax(dim=0)
+            fg_mask[b] = torch.stack(fg_vals, dim=0).amax(dim=0)
+        return center_targets, distance_targets, fg_mask
+
+    def _center_distance_aux_losses(self, batch, aux_outputs, points_mm, points_ijk):
+        if not isinstance(aux_outputs, dict):
+            return {}
+        center_logits = aux_outputs.get("center_logits")
+        distance_logits = aux_outputs.get("distance_logits")
+        use_center_loss = center_logits is not None and self._center_distance_center_weight > 0.0
+        use_distance_loss = distance_logits is not None and self._center_distance_weight > 0.0
+        if not use_center_loss and not use_distance_loss:
+            return {}
+        center_target, distance_target, fg_mask = self._center_distance_query_targets(
+            batch, points_mm, points_ijk
+        )
+        losses = {}
+        if use_center_loss:
+            center_pred = torch.sigmoid(center_logits)
+            # center_loss = F.mse_loss(center_pred, center_target)
+            center_loss = self._center_focal_loss(center_logits, center_target)
+            losses["center_loss"] = center_loss
+            losses["center_target_pos_ratio"] = (center_target > 0.5).float().mean()
+            losses["center_target_mean"] = center_target.mean()
+            losses["pred_center_mean"] = center_pred.mean()
+        if use_distance_loss:
+            distance_pred = torch.sigmoid(distance_logits)
+            fg = fg_mask > 0.5
+            if fg.any():
+                distance_loss = F.smooth_l1_loss(distance_pred[fg], distance_target[fg])
+                losses["distance_loss"] = distance_loss
+                losses["distance_target_mean_fg"] = distance_target[fg].mean()
+                losses["pred_distance_mean"] = distance_pred[fg].mean()
+            else:
+                losses["distance_loss"] = torch.zeros((), device=points_mm.device)
+                losses["distance_target_mean_fg"] = torch.zeros((), device=points_mm.device)
+                losses["pred_distance_mean"] = torch.zeros((), device=points_mm.device)
+        return losses
+
+    def _empty_slot_suppression_loss(self, aux_outputs) -> torch.Tensor | None:
+        if self._empty_slot_weight <= 0.0 or not isinstance(aux_outputs, dict):
+            return None
+        component_logits = aux_outputs.get("source_component_logits")
+        component_valid = aux_outputs.get("source_component_valid")
+        if component_logits is None or component_valid is None:
+            return None
+        invalid = ~component_valid.to(device=component_logits.device, dtype=torch.bool)
+        invalid = invalid[:, None, :, None].expand_as(component_logits)
+        if invalid.any():
+            component_logits = torch.nan_to_num(
+                component_logits, nan=0.0, posinf=30.0, neginf=-30.0
+            ).clamp(-30.0, 30.0)
+            return torch.sigmoid(component_logits)[invalid].mean()
+        return torch.zeros((), dtype=component_logits.dtype, device=component_logits.device)
+
+    def _log_query_sampling_stats(self, prefix: str, batch, point_densities: torch.Tensor) -> None:
+        """Log sampled-query composition for stability audits."""
+        pos_ratio = (point_densities > 0.0).float().mean()
+        self.log(
+            f"{prefix}_pos_ratio",
+            pos_ratio,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log(
+            f"{prefix}_pos_count",
+            (point_densities > 0.0).float().sum().detach(),
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        query_src_tag = batch.get("query_src_tag")
+        if query_src_tag is None:
+            return
+        tags = query_src_tag.to(device=point_densities.device)
+        valid = tags >= 0
+        denom = valid.float().sum().clamp_min(1.0)
+        trunk_ratio = ((tags == 0).float().sum() / denom).detach()
+        proposal_ratio = ((tags == 1).float().sum() / denom).detach()
+        peak_ratio = ((tags == 2).float().sum() / denom).detach()
+        self.log(
+            f"{prefix}_query_trunk_ratio",
+            trunk_ratio,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log(
+            f"{prefix}_query_peak_balanced_ratio",
+            peak_ratio,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        for tag_value, tag_name in (
+            (0, "trunk"),
+            (1, "meas_proposal"),
+            (2, "peak_balanced"),
+        ):
+            mask = tags == tag_value
+            tag_denom = mask.float().sum().clamp_min(1.0)
+            tag_pos_ratio = ((point_densities > 0.0).float()[mask].sum() / tag_denom).detach()
+            self.log(
+                f"{prefix}_{tag_name}_pos_ratio",
+                tag_pos_ratio,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+        self.log(
+            f"{prefix}_query_proposal_ratio",
+            proposal_ratio,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
 
     def training_step(self, batch, batch_idx):
         """
@@ -124,23 +927,212 @@ class TrainingLightningModule(LightningModule):
         Returns:
             Loss value
         """
-        projections = batch["projections"]  # keep dict for scatter loss GT
-        proj_in = projections
-        if self.cfg.model.name == "minr_fmt" and "projections_packed" in batch:
-            p = batch["projections_packed"]  # [B,V,1,H,W]
-            B, V = p.shape[0], p.shape[1]
-            # minr_fmt expects view-major flattening: [V*B,1,H,W]
-            proj_in = p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+        projections, proj_in = self._prepare_projection_input(batch)
 
+        if self._is_voxel_model():
+            pred_voxel, aux_outputs = self._call_voxel_model(projections, batch)
+            if aux_outputs.get("training_space") == "mesh":
+                target_voxel = batch.get("gt_nodes")
+                if target_voxel is None:
+                    raise ValueError("Mesh-space training requires gt_nodes in the batch")
+            else:
+                target_voxel = self._voxel_target(batch)
+            loss_dict = self.voxel_loss_func(pred_voxel, target_voxel, aux_outputs)
+            total_loss = loss_dict["total_loss"]
+            self.log(
+                "train_loss",
+                total_loss,
+                prog_bar=True,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            for key, value in loss_dict.items():
+                if key != "total_loss" and isinstance(value, torch.Tensor):
+                    self.log(f"train_{key}", value, on_step=False, on_epoch=True, sync_dist=True)
+            self.loss_func.update_epoch(self.current_epoch)
+            return total_loss
+
+        if self._is_ssq_model():
+            points_mm = batch.get("query_coordinates_mm", batch.get("points_mm"))
+            density = batch["point_densities"].unsqueeze(-1)
+            self._log_query_sampling_stats("train", batch, batch["point_densities"])
+            out = self._call_ssq_model(batch, return_diagnostics=False)
+            density_pred = out["density"]
+            aux_outputs = out.get("aux_outputs", {})
+            if isinstance(aux_outputs, dict):
+                pi = aux_outputs.get("pi")
+                if torch.is_tensor(pi) and pi.numel() > 0:
+                    self.log(
+                        "train_ssq_pi0_mean",
+                        pi[..., 0].mean(),
+                        on_step=False,
+                        on_epoch=True,
+                        sync_dist=True,
+                    )
+                    if pi.shape[-1] > 1:
+                        self.log(
+                            "train_ssq_candidate_pi_mean",
+                            pi[..., 1:].sum(dim=-1).mean(),
+                            on_step=False,
+                            on_epoch=True,
+                            sync_dist=True,
+                        )
+                self.log(
+                    "train_ssq_density_mean",
+                    density_pred.detach().mean(),
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+            loss_dict = self.ssq_loss_func(
+                density_pred,
+                density,
+                aux_outputs,
+                gt_voxels=batch.get("gt_voxels"),
+                points_ijk=batch.get("points_ijk"),
+                sdf_targets=batch.get("sdf_targets"),
+                query_component_ids=batch.get("query_component_ids"),
+                gt_component_centers_mm=batch.get("gt_component_centers_mm"),
+                gt_component_valid_mask=batch.get("gt_component_valid_mask"),
+            )
+            density_logits = (
+                aux_outputs.get("density_logits") if isinstance(aux_outputs, dict) else None
+            )
+            if torch.is_tensor(density_logits) and self._backbone_logit_loss_weight > 0.0:
+                backbone_logit_loss = self.loss_func.sparse_light_loss(density_logits, density)
+                loss_dict["backbone_logit_loss"] = backbone_logit_loss
+                loss_dict["total_loss"] = (
+                    loss_dict["total_loss"] + self._backbone_logit_loss_weight * backbone_logit_loss
+                )
+            total_loss = loss_dict["total_loss"]
+            if not torch.isfinite(total_loss.detach()):
+                if getattr(self.net, "composition_mode", None) == "view_complementary":
+                    self._dump_view_nonfinite(batch, aux_outputs, loss_dict)
+                    raise FloatingPointError(
+                        "view_complementary produced a nonfinite training loss; "
+                        "diagnostics were dumped before optimizer.step"
+                    )
+                self.log(
+                    "train_nonfinite_loss_skip",
+                    torch.ones((), dtype=total_loss.dtype, device=total_loss.device),
+                    prog_bar=False,
+                    on_step=True,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+                total_loss = (
+                    torch.nan_to_num(density_pred, nan=0.0, posinf=0.0, neginf=0.0).sum() * 0.0
+                )
+                loss_dict["total_loss"] = total_loss
+            else:
+                self.log(
+                    "train_nonfinite_loss_skip",
+                    torch.zeros((), dtype=total_loss.dtype, device=total_loss.device),
+                    prog_bar=False,
+                    on_step=True,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+            self.log(
+                "train_loss",
+                total_loss,
+                prog_bar=True,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            for key, value in loss_dict.items():
+                if key != "total_loss" and isinstance(value, torch.Tensor):
+                    self.log(f"train_{key}", value, on_step=False, on_epoch=True, sync_dist=True)
+            if points_mm is not None:
+                self.log(
+                    "train_query_mm_abs_mean",
+                    points_mm.detach().abs().mean(),
+                    prog_bar=False,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+            return total_loss
+
+        aux_only = float(self.cfg.loss.get("light_weight", 1.0)) == 0.0
         points = batch["points"]
+        points_mm = batch.get("points_mm")
+        depth_maps = batch.get("depth_maps")
+        source_hypotheses = self._source_hypotheses_from_batch(batch)
         density = batch["point_densities"].unsqueeze(-1)
+        if not aux_only:
+            self._log_query_sampling_stats("train", batch, batch["point_densities"])
 
         # Forward pass (use packed tensor when available)
-        density_pred, aux_outputs = self(proj_in, points)
+        density_pred, aux_outputs = self._call_model(
+            proj_in,
+            points,
+            points_mm=points_mm,
+            depth_maps=depth_maps,
+            source_hypotheses=source_hypotheses,
+            aux_only=aux_only,
+        )
+        self._log_source_cue_stats("train", batch, batch["point_densities"])
 
         # Compute loss
-        loss_dict = self.loss_func(aux_outputs, projections, density_pred, density)
+        descatter_targets = batch.get("descatter_targets")
+        loss_dict = self.loss_func(aux_outputs, descatter_targets, density_pred, density)
+        center_distance_losses = self._center_distance_aux_losses(
+            batch, aux_outputs, points_mm, batch["points_ijk"]
+        )
+        if center_distance_losses:
+            total_center_distance = torch.zeros(
+                (), dtype=density_pred.dtype, device=density_pred.device
+            )
+            if "center_loss" in center_distance_losses:
+                total_center_distance = (
+                    total_center_distance
+                    + self._center_distance_center_weight * center_distance_losses["center_loss"]
+                )
+            if "distance_loss" in center_distance_losses:
+                total_center_distance = (
+                    total_center_distance
+                    + self._center_distance_weight * center_distance_losses["distance_loss"]
+                )
+            loss_dict.update(center_distance_losses)
+            loss_dict["center_distance_aux_loss"] = total_center_distance
+            loss_dict["total_loss"] = loss_dict["total_loss"] + total_center_distance
+        empty_slot_loss = self._empty_slot_suppression_loss(aux_outputs)
+        if empty_slot_loss is not None:
+            loss_dict["empty_slot_loss"] = empty_slot_loss
+            loss_dict["total_loss"] = (
+                loss_dict["total_loss"] + self._empty_slot_weight * empty_slot_loss
+            )
         total_loss = loss_dict["total_loss"]
+        anchor_loss = getattr(self.net, "last_feature_refinement_anchor_loss", None)
+        if isinstance(anchor_loss, torch.Tensor):
+            total_loss = total_loss + anchor_loss
+            loss_dict["total_loss"] = total_loss
+            loss_dict["feature_refinement_anchor_loss"] = anchor_loss.detach()
+
+        nonfinite_loss = ~torch.isfinite(total_loss.detach())
+        if bool(nonfinite_loss.item()):
+            self.log(
+                "train_nonfinite_loss_skip",
+                torch.ones((), dtype=total_loss.dtype, device=total_loss.device),
+                prog_bar=False,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            total_loss = torch.nan_to_num(density_pred, nan=0.0, posinf=0.0, neginf=0.0).sum() * 0.0
+            loss_dict["total_loss"] = total_loss
+        else:
+            self.log(
+                "train_nonfinite_loss_skip",
+                torch.zeros((), dtype=total_loss.dtype, device=total_loss.device),
+                prog_bar=False,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )
 
         # Log metrics
         self.log(
@@ -182,43 +1174,240 @@ class TrainingLightningModule(LightningModule):
         Returns:
             Dictionary with metrics
         """
-        projections = batch["projections"]
-        proj_in = projections
-        if self.cfg.model.name == "minr_fmt" and "projections_packed" in batch:
-            p = batch["projections_packed"]
-            B, V = p.shape[0], p.shape[1]
-            # minr_fmt expects view-major flattening: [V*B,1,H,W]
-            proj_in = p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+        _projections, proj_in = self._prepare_projection_input(batch)
+
+        if self._is_voxel_model():
+            projections = batch["projections"]
+            target_voxel = self._voxel_target(batch)
+            pred_voxel, _ = self._call_voxel_model(projections, batch)
+            pred_voxel, target_voxel = self._standardize_pred_voxel(pred_voxel, target_voxel)
+            dice = dice_coefficient(
+                torch.sigmoid(pred_voxel),
+                (target_voxel > 0.0).float(),
+            )
+            self.log(
+                "val_full_dice",
+                dice,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                "val_dice",
+                dice,
+                prog_bar=True,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            return {"dice": dice}
+
+        if self._is_ssq_model():
+            point_densities = batch["point_densities"]
+            voxel_shape = batch["feasible_voxel_shape"]
+            self._log_query_sampling_stats("val", batch, point_densities)
+            B = point_densities.shape[0]
+            voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
+            out = self._call_ssq_model(batch, return_diagnostics=False)
+            pred_prob = out["density"].clamp(0.0, 1.0)
+            diagnostics = out.get("diagnostics", out.get("aux_outputs", {}))
+            validation_loss = self.ssq_loss_func(
+                pred_prob,
+                point_densities.unsqueeze(-1),
+                diagnostics,
+                gt_voxels=batch.get("gt_voxels"),
+                points_ijk=batch.get("points_ijk"),
+                query_component_ids=batch.get("query_component_ids"),
+                gt_component_centers_mm=batch.get("gt_component_centers_mm"),
+                gt_component_valid_mask=batch.get("gt_component_valid_mask"),
+            )
+            self.log(
+                "val_formal_density_loss",
+                validation_loss["total_loss"],
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            if torch.is_tensor(diagnostics.get("candidate_centers_mm")):
+                self._log_view_candidate_metrics(diagnostics, batch)
+            full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+            if full_grid:
+                density_gt = point_densities.reshape(voxel_shape_tuple)
+                density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+                density_pred = pred_prob.reshape(voxel_shape_tuple)
+                dice = dice_coefficient(
+                    density_pred,
+                    density_gt_bin,
+                    threshold=self._validation_pred_threshold,
+                )
+                metric_name = "val_full_dice"
+            else:
+                pred_bin = (pred_prob.squeeze(-1) >= self._validation_pred_threshold).float()
+                gt_bin = (point_densities > 0.0).float()
+                intersection = (pred_bin * gt_bin).sum(dim=1)
+                dice = (
+                    (2.0 * intersection + 1e-8) / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+                ).mean()
+                metric_name = "val_query_dice"
+            if "shared_density" in diagnostics:
+                shared_prob = diagnostics["shared_density"].clamp(0.0, 1.0)
+                if full_grid:
+                    shared_dice = dice_coefficient(
+                        shared_prob.reshape(voxel_shape_tuple),
+                        density_gt_bin,
+                        threshold=self._validation_pred_threshold,
+                    )
+                else:
+                    shared_bin = (
+                        shared_prob.squeeze(-1) >= self._validation_pred_threshold
+                    ).float()
+                    shared_intersection = (shared_bin * gt_bin).sum(dim=1)
+                    shared_dice = (
+                        (2.0 * shared_intersection + 1e-8)
+                        / (shared_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+                    ).mean()
+                self.log(
+                    "val_shared_dice", shared_dice, on_step=False, on_epoch=True, sync_dist=True
+                )
+                self.log(
+                    "val_final_minus_shared_dice",
+                    dice - shared_dice,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+                self._log_conditional_routing_diagnostics(
+                    diagnostics, batch, point_densities, pred_prob, shared_prob
+                )
+            if "proposal_gate" in diagnostics:
+                gate = diagnostics["proposal_gate"].detach().float().reshape(-1)
+                applicability = diagnostics["candidate_applicability"].detach().float()
+                dispersion = diagnostics["quotient_dispersion"].detach().float()
+                residual = diagnostics["residual_correction"].detach().float()
+                diagnostic_scalars = {
+                    "val_proposal_gate_mean": gate.mean(),
+                    "val_proposal_gate_p10": torch.quantile(gate, 0.1),
+                    "val_proposal_gate_p90": torch.quantile(gate, 0.9),
+                    "val_candidate_applicability_mean": applicability.mean()
+                    if applicability.numel()
+                    else gate.new_zeros(()),
+                    "val_quotient_dispersion_mean": dispersion.mean()
+                    if dispersion.numel()
+                    else gate.new_zeros(()),
+                    "val_residual_correction_abs_mean": residual.abs().mean(),
+                }
+                for name, value in diagnostic_scalars.items():
+                    self.log(name, value, on_step=False, on_epoch=True, sync_dist=True)
+            self.log(
+                metric_name,
+                dice,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                "val_dice",
+                dice,
+                prog_bar=True,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                "val_pred_threshold",
+                torch.tensor(
+                    self._validation_pred_threshold,
+                    dtype=dice.dtype,
+                    device=dice.device,
+                ),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            return {"dice": dice}
 
         points = batch["points"]
+        points_mm = batch.get("points_mm")
+        depth_maps = batch.get("depth_maps")
+        source_hypotheses = self._source_hypotheses_from_batch(batch)
         point_densities = batch["point_densities"]
         voxel_shape = batch["feasible_voxel_shape"]
+        self._log_query_sampling_stats("val", batch, point_densities)
 
         B = points.shape[0]
 
         # Reconstruct voxel shape
-        voxel_shape_tuple = (
-            B,
-            int(voxel_shape[0][0].detach().cpu().numpy()),
-            int(voxel_shape[1][0].detach().cpu().numpy()),
-            int(voxel_shape[2][0].detach().cpu().numpy()),
-        )
-
-        density_gt = point_densities.reshape(voxel_shape_tuple)
-        density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+        voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
 
         # Inference
-        pred, _ = self(proj_in, points)
-        density_pred = pred.reshape(voxel_shape_tuple)
+        pred, aux_outputs = self._call_model(
+            proj_in,
+            points,
+            points_mm=points_mm,
+            depth_maps=depth_maps,
+            source_hypotheses=source_hypotheses,
+        )
+        self._log_source_cue_stats("val", batch, point_densities)
+        empty_slot_loss = self._empty_slot_suppression_loss(aux_outputs)
+        if empty_slot_loss is not None:
+            self.log(
+                "val_empty_slot_loss",
+                empty_slot_loss.detach(),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+        full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+        pred_prob = torch.sigmoid(pred)
+        if full_grid:
+            density_gt = point_densities.reshape(voxel_shape_tuple)
+            density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+            density_pred = pred_prob.reshape(voxel_shape_tuple)
+            dice = dice_coefficient(
+                density_pred,
+                density_gt_bin,
+                threshold=self._validation_pred_threshold,
+            )
+            metric_name = "val_full_dice"
+        else:
+            pred_bin = (pred_prob.squeeze(-1) >= self._validation_pred_threshold).float()
+            gt_bin = (point_densities > 0.0).float()
+            intersection = (pred_bin * gt_bin).sum(dim=1)
+            dice = (
+                (2.0 * intersection + 1e-8) / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+            ).mean()
+            metric_name = "val_query_dice"
 
-        # Compute DSC (Dice) on binary GT
-        dice = dice_coefficient(density_pred, density_gt_bin)
-
-        # Log metric
+        # FMT-SimGen regular validation uses sampled queries; val_dice is kept as a
+        # checkpoint-compatible alias and is usually equivalent to val_query_dice.
+        self.log(
+            metric_name,
+            dice,
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
         self.log(
             "val_dice",
             dice,
             prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log(
+            "val_pred_threshold",
+            torch.tensor(
+                self._validation_pred_threshold,
+                dtype=dice.dtype,
+                device=dice.device,
+            ),
+            prog_bar=False,
             on_step=False,
             on_epoch=True,
             sync_dist=True,
@@ -239,6 +1428,459 @@ class TrainingLightningModule(LightningModule):
         # Restore training mode after evaluation to keep behavior consistent
         self.net.train()
 
+    @staticmethod
+    def _module_gradient_norm(module: torch.nn.Module) -> torch.Tensor:
+        gradients = [
+            parameter.grad.detach()
+            for parameter in module.parameters()
+            if parameter.grad is not None
+        ]
+        if not gradients:
+            return next(module.parameters()).new_zeros(())
+        per_tensor = torch._foreach_norm(gradients, 2.0)
+        return torch.stack([value.float() for value in per_tensor]).norm(2.0)
+
+    def _dump_view_nonfinite(self, batch: dict, diagnostics: dict, losses: dict) -> None:
+        output_dir = Path(str(self.cfg.paths.output_dir)) / "nonfinite_diagnostics"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        keys = (
+            "per_view_evidence",
+            "proposal_offsets_mm",
+            "proposal_points_mm",
+            "proposal_compatibility",
+            "proposal_assignment",
+            "candidate_centers_mm",
+            "candidate_covariance_eigenvalues",
+            "candidate_view_support",
+            "candidate_detector_scales",
+            "separability",
+            "candidate_context",
+            "decoder_pre_activation",
+        )
+        payload = {
+            "global_step": int(self.global_step),
+            "sample_id": batch.get("sample_id"),
+            "diagnostics": {
+                key: diagnostics[key].detach().float().cpu()
+                for key in keys
+                if torch.is_tensor(diagnostics.get(key))
+            },
+            "losses": {
+                key: value.detach().float().cpu()
+                for key, value in losses.items()
+                if torch.is_tensor(value)
+            },
+        }
+        torch.save(payload, output_dir / f"step_{int(self.global_step):08d}.pt")
+
+    def _log_conditional_routing_diagnostics(
+        self,
+        diagnostics: dict,
+        batch: dict,
+        target: torch.Tensor,
+        final_prob: torch.Tensor,
+        shared_prob: torch.Tensor,
+    ) -> None:
+        """Log the causal chain from conditional routing to reconstruction changes."""
+        positive = diagnostics.get("routing_positive_density")
+        negative = diagnostics.get("routing_negative_density")
+        scale = diagnostics.get("routing_scale")
+        if not all(torch.is_tensor(value) for value in (positive, negative, scale)):
+            return
+
+        eps = 1.0e-6
+        target_bin = (target > 0).bool()
+        target_float = target_bin.float()
+        positive = positive.detach().float().squeeze(-1).clamp(eps, 1.0 - eps)
+        negative = negative.detach().float().squeeze(-1).clamp(eps, 1.0 - eps)
+        final = final_prob.detach().float().squeeze(-1)
+        shared = shared_prob.detach().float().squeeze(-1)
+        scale = scale.detach().float().squeeze(-1)
+
+        positive_error = -(
+            target_float * positive.log() + (1.0 - target_float) * (1.0 - positive).log()
+        )
+        negative_error = -(
+            target_float * negative.log() + (1.0 - target_float) * (1.0 - negative).log()
+        )
+        oracle_positive = positive_error < negative_error
+        oracle_margin = (positive_error - negative_error).abs()
+        decisive = oracle_margin > 1.0e-5
+        predicted_positive = scale >= 0
+        sign_correct = predicted_positive == oracle_positive
+        oracle_error = torch.minimum(positive_error, negative_error)
+        selected_error = torch.where(predicted_positive, positive_error, negative_error)
+
+        def log(name: str, value: torch.Tensor) -> None:
+            self.log(name, value, on_epoch=True, sync_dist=True, batch_size=target.shape[0])
+
+        if decisive.any():
+            log("val_gate_oracle_sign_accuracy", sign_correct[decisive].float().mean())
+            log("val_gate_oracle_regret", (selected_error - oracle_error)[decisive].mean())
+            log("val_gate_oracle_decisive_ratio", decisive.float().mean())
+            log("val_oracle_positive_direction_ratio", oracle_positive[decisive].float().mean())
+            positive_target = decisive & target_bin
+            negative_target = decisive & ~target_bin
+            if positive_target.any():
+                log(
+                    "val_gate_oracle_sign_accuracy_positive",
+                    sign_correct[positive_target].float().mean(),
+                )
+            if negative_target.any():
+                log(
+                    "val_gate_oracle_sign_accuracy_negative",
+                    sign_correct[negative_target].float().mean(),
+                )
+        log("val_routing_scale_mean", scale.mean())
+        log("val_routing_scale_std", scale.std(unbiased=False))
+        log("val_routing_scale_positive_ratio", (scale > 0).float().mean())
+        conditional_gain = diagnostics.get("conditional_gain_raw")
+        if torch.is_tensor(conditional_gain):
+            conditional_gain = conditional_gain.detach().float()
+            log("val_conditional_gain_std", conditional_gain.std(unbiased=False))
+
+        base_weights = diagnostics.get("base_view_weights")
+        routed_weights = diagnostics.get("view_weights")
+        weight_change = None
+        if torch.is_tensor(base_weights) and torch.is_tensor(routed_weights):
+            base = base_weights.detach().float().transpose(1, 2)
+            routed = routed_weights.detach().float().transpose(1, 2)
+            valid = base > 0
+            l1 = ((routed - base).abs() * valid).sum(dim=-1)
+            weight_change = l1
+            kl = (
+                routed.clamp_min(eps)
+                * (routed.clamp_min(eps).log() - base.clamp_min(eps).log())
+                * valid
+            ).sum(dim=-1)
+            rank_flip = routed.argmax(dim=-1) != base.argmax(dim=-1)
+            log("val_view_weight_l1", l1.mean())
+            log("val_view_weight_kl", kl.mean())
+            log("val_view_top_rank_flip_ratio", rank_flip.float().mean())
+
+        threshold = self._validation_pred_threshold
+        shared_pred = shared >= threshold
+        final_pred = final >= threshold
+        shared_correct = shared_pred == target_bin
+        final_correct = final_pred == target_bin
+        correct_crossing = (~shared_correct) & final_correct
+        wrong_crossing = shared_correct & (~final_correct)
+        log("val_correct_threshold_crossing_ratio", correct_crossing.float().mean())
+        log("val_wrong_threshold_crossing_ratio", wrong_crossing.float().mean())
+        log("val_threshold_crossing_net", (correct_crossing.sum() - wrong_crossing.sum()).float())
+        log(
+            "val_delta_tp",
+            ((final_pred & target_bin).sum() - (shared_pred & target_bin).sum()).float(),
+        )
+        log(
+            "val_delta_fp",
+            ((final_pred & ~target_bin).sum() - (shared_pred & ~target_bin).sum()).float(),
+        )
+        log(
+            "val_delta_fn",
+            ((~final_pred & target_bin).sum() - (~shared_pred & target_bin).sum()).float(),
+        )
+
+        overlap = diagnostics.get("projected_overlap")
+        num_foci = batch.get("num_foci")
+        improvement = final_correct.float() - shared_correct.float()
+        probability_change = (final - shared).abs()
+        if torch.is_tensor(overlap):
+            overlap = overlap.detach().float()
+            active = diagnostics["hypothesis_gate"].detach().float() > 0.05
+            if active.any():
+                cutoff = torch.quantile(overlap[active], 0.75)
+                high = active & (overlap >= cutoff)
+                low = active & (overlap < cutoff)
+                if high.any():
+                    log("val_high_overlap_net_correct_crossing", improvement[high].mean())
+                    high_decisive = high & decisive
+                    log(
+                        "val_high_overlap_oracle_sign_accuracy",
+                        sign_correct[high_decisive].float().mean()
+                        if high_decisive.any()
+                        else improvement.new_zeros(()),
+                    )
+                    log("val_high_overlap_probability_change", probability_change[high].mean())
+                    if weight_change is not None:
+                        log("val_high_overlap_view_weight_l1", weight_change[high].mean())
+                if low.any():
+                    log("val_low_overlap_net_correct_crossing", improvement[low].mean())
+                    log("val_low_overlap_probability_change", probability_change[low].mean())
+                    if weight_change is not None:
+                        log("val_low_overlap_view_weight_l1", weight_change[low].mean())
+        if torch.is_tensor(num_foci):
+            for count in (1, 2, 3):
+                samples = num_foci.to(target.device).reshape(-1) == count
+                if samples.any():
+                    log(f"val_foci{count}_net_correct_crossing", improvement[samples].mean())
+                    log(f"val_foci{count}_probability_change", probability_change[samples].mean())
+                    if weight_change is not None:
+                        log(f"val_foci{count}_view_weight_l1", weight_change[samples].mean())
+
+        component_ids = batch.get("query_component_ids")
+        if torch.is_tensor(component_ids):
+            component_ids = component_ids.to(target.device)
+            recall_delta = []
+            recovered = []
+            lost = []
+            for sample in range(component_ids.shape[0]):
+                for component in torch.unique(component_ids[sample]):
+                    if component <= 0:
+                        continue
+                    member = component_ids[sample] == component
+                    shared_hit = shared_pred[sample, member].any()
+                    final_hit = final_pred[sample, member].any()
+                    shared_recall = shared_pred[sample, member].float().mean()
+                    final_recall = final_pred[sample, member].float().mean()
+                    recall_delta.append(final_recall - shared_recall)
+                    recovered.append((~shared_hit & final_hit).float())
+                    lost.append((shared_hit & ~final_hit).float())
+            if recall_delta:
+                log("val_component_recall_delta", torch.stack(recall_delta).mean())
+                log("val_component_recovered_ratio", torch.stack(recovered).mean())
+                log("val_component_lost_ratio", torch.stack(lost).mean())
+
+    def _log_view_candidate_metrics(self, diagnostics: dict, batch: dict) -> None:
+        gt_centers = batch.get("gt_component_centers_mm")
+        gt_valid = batch.get("gt_component_valid_mask")
+        if not torch.is_tensor(gt_centers) or not torch.is_tensor(gt_valid):
+            return
+        centers = diagnostics["candidate_centers_mm"].detach().float()
+        valid = (
+            diagnostics.get("candidate_analysis_valid_mask", diagnostics["candidate_valid_mask"])
+            .detach()
+            .bool()
+        )
+        scores: dict[str, list[torch.Tensor]] = {
+            "coverage_6mm": [],
+            "coverage_8mm": [],
+            "coverage_10mm": [],
+            "duplicate_rate": [],
+            "unmatched_rate": [],
+            "matched_center_error_mm": [],
+        }
+        for sample in range(centers.shape[0]):
+            predicted = centers[sample, valid[sample]]
+            target = gt_centers[sample, gt_valid[sample]].float()
+            if predicted.numel() == 0 or target.numel() == 0:
+                zero = centers.new_zeros(())
+                for radius in (6, 8, 10):
+                    scores[f"coverage_{radius}mm"].append(zero)
+                scores["duplicate_rate"].append(zero)
+                scores["unmatched_rate"].append(centers.new_ones(()))
+                scores["matched_center_error_mm"].append(centers.new_tensor(float("nan")))
+                continue
+            distance = torch.cdist(predicted, target)
+            nearest_target = distance.amin(dim=0)
+            nearest_candidate = distance.amin(dim=1)
+            for radius in (6, 8, 10):
+                scores[f"coverage_{radius}mm"].append((nearest_target <= radius).float().mean())
+            assigned = distance.argmin(dim=1)
+            duplicate = torch.zeros(len(predicted), dtype=torch.bool, device=centers.device)
+            for target_index in range(len(target)):
+                members = torch.where((assigned == target_index) & (nearest_candidate <= 8.0))[0]
+                if len(members) > 1:
+                    duplicate[members] = True
+                    best = members[distance[members, target_index].argmin()]
+                    duplicate[best] = False
+            scores["duplicate_rate"].append(duplicate.float().mean())
+            scores["unmatched_rate"].append((nearest_candidate > 8.0).float().mean())
+            matched = nearest_candidate <= 8.0
+            scores["matched_center_error_mm"].append(
+                nearest_candidate[matched].mean()
+                if matched.any()
+                else centers.new_tensor(float("nan"))
+            )
+        for name, values in scores.items():
+            value = torch.stack(values)
+            finite = value[torch.isfinite(value)]
+            self.log(
+                f"val_candidate_{name}",
+                finite.mean() if finite.numel() else centers.new_zeros(()),
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+                batch_size=centers.shape[0],
+            )
+        count = valid.sum(dim=-1)
+        self.log(
+            "val_candidate_count_mean",
+            count.float().mean(),
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=centers.shape[0],
+        )
+        for number in range(1, centers.shape[1] + 1):
+            self.log(
+                f"val_candidate_count_{number}_ratio",
+                (count == number).float().mean(),
+                on_epoch=True,
+                sync_dist=True,
+                batch_size=centers.shape[0],
+            )
+        support = diagnostics["candidate_view_support"].detach()
+        support_count = ((support > 1.0e-4) & valid[:, :, None]).sum(dim=-1).float()
+        self.log(
+            "val_candidate_support_view_count",
+            support_count[valid].mean() if valid.any() else centers.new_zeros(()),
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=centers.shape[0],
+        )
+        if torch.is_tensor(diagnostics.get("routing_residual")):
+            residual = diagnostics["routing_residual"].detach().float().abs().flatten()
+            gate = diagnostics["hypothesis_gate"].detach().float().flatten()
+            self.log(
+                "val_routing_residual_abs_mean", residual.mean(), on_epoch=True, sync_dist=True
+            )
+            self.log(
+                "val_routing_residual_abs_p90",
+                torch.quantile(residual, 0.9),
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log("val_hypothesis_gate_mean", gate.mean(), on_epoch=True, sync_dist=True)
+            for q in (0.1, 0.5, 0.9):
+                self.log(
+                    f"val_hypothesis_gate_p{int(q * 100)}",
+                    torch.quantile(gate, q),
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+            self.log(
+                "val_routing_gain",
+                self.net.bounded_view_routing.routing_gain_raw.detach(),
+                on_epoch=True,
+                sync_dist=True,
+            )
+        eigen = (
+            diagnostics["candidate_covariance_eigenvalues"]
+            .detach()
+            .float()[valid[..., None].expand_as(diagnostics["candidate_covariance_eigenvalues"])]
+        )
+        if eigen.numel():
+            for quantile in (0.1, 0.5, 0.9):
+                self.log(
+                    f"val_covariance_eigenvalue_p{int(quantile * 100)}",
+                    torch.quantile(eigen, quantile),
+                    on_epoch=True,
+                    sync_dist=True,
+                )
+        for name in ("lower", "upper"):
+            hit = diagnostics[f"covariance_{name}_bound_hit"].detach()
+            self.log(
+                f"val_covariance_{name}_bound_hit_ratio",
+                hit[valid[..., None].expand_as(hit)].float().mean()
+                if valid.any()
+                else centers.new_zeros(()),
+                on_epoch=True,
+                sync_dist=True,
+            )
+
+    def on_after_backward(self) -> None:
+        if (
+            self._is_ssq_model()
+            and getattr(self.net, "composition_mode", None) == "view_complementary"
+        ):
+            modules = {
+                "2d_encoder": self.net.surface_encoder,
+                "view_evidence_head": self.net.view_candidate_evidence.evidence,
+                "offset_head": self.net.view_candidate_evidence.offset,
+                "descriptor_head": self.net.view_candidate_evidence.descriptor,
+                "cross_view_association": self.net.diverse_candidate_constructor,
+                "candidate_view_encoder": self.net.complementary_aggregation.candidate_projection,
+                "separability_correction": self.net.view_separability.correction,
+                "candidate_context": self.net.unified_density_decoder.candidate_context,
+                "shared_decoder": self.net.unified_density_decoder.head,
+            }
+            if self.net.unified_density_decoder.candidate_residual_head is not None:
+                modules["candidate_residual"] = (
+                    self.net.unified_density_decoder.candidate_residual_head
+                )
+            if self.net.unified_density_decoder.candidate_branch_head is not None:
+                modules["candidate_branch"] = self.net.unified_density_decoder.candidate_branch_head
+            norms = {name: self._module_gradient_norm(module) for name, module in modules.items()}
+            for name, value in norms.items():
+                self.log(
+                    f"train_grad_norm_{name}", value, on_step=False, on_epoch=True, sync_dist=True
+                )
+            candidate_norm = torch.stack(
+                [
+                    value
+                    for name, value in norms.items()
+                    if name not in {"2d_encoder", "shared_decoder"}
+                ]
+            ).norm()
+            self.log(
+                "train_candidate_to_shared_gradient_ratio",
+                candidate_norm / norms["shared_decoder"].clamp_min(1.0e-12),
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            nonfinite_gradients = [
+                name
+                for name, module in modules.items()
+                if any(
+                    parameter.grad is not None and not torch.isfinite(parameter.grad).all()
+                    for parameter in module.parameters()
+                )
+            ]
+            if nonfinite_gradients:
+                output_dir = Path(str(self.cfg.paths.output_dir)) / "nonfinite_diagnostics"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                gradient_stats = {}
+                for name, module in modules.items():
+                    gradients = [
+                        parameter.grad.detach().float()
+                        for parameter in module.parameters()
+                        if parameter.grad is not None
+                    ]
+                    total = sum(gradient.numel() for gradient in gradients)
+                    finite = sum(
+                        int(torch.isfinite(gradient).sum().item()) for gradient in gradients
+                    )
+                    gradient_stats[name] = {
+                        "norm": float(norms[name].detach().cpu()),
+                        "finite_ratio": finite / max(total, 1),
+                    }
+                torch.save(
+                    gradient_stats,
+                    output_dir / f"step_{int(self.global_step):08d}_gradients.pt",
+                )
+                raise FloatingPointError(
+                    "view_complementary produced nonfinite gradients before optimizer.step: "
+                    + ", ".join(nonfinite_gradients)
+                )
+            return
+        if (
+            not self._is_ssq_model()
+            or getattr(self.net, "composition_mode", None) != "quotient_residual"
+        ):
+            return
+        step = int(self.global_step)
+        diagnostics_cfg = self.cfg.get("diagnostics", {}) or {}
+        log_interval = max(int(diagnostics_cfg.get("gradient_norm_every_n_steps", 100)), 1)
+        if step == 0 or step == self._last_gradient_norm_step or step % log_interval != 0:
+            return
+        self._last_gradient_norm_step = step
+        modules = {
+            "surface_encoder": self.net.surface_encoder,
+            "shared_decoder": self.net.shared_density_logit_decoder,
+            "quotient_reliability": self.net.quotient_aggregator.reliability_residual,
+            "residual_decoder": self.net.source_hypothesis_residual_decoder,
+        }
+        for name, module in modules.items():
+            self.log(
+                f"train_grad_norm_{name}",
+                self._module_gradient_norm(module),
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+                sync_dist=True,
+            )
+
     def configure_optimizers(self):
         """
         Configure optimizer and learning rate scheduler
@@ -249,10 +1891,126 @@ class TrainingLightningModule(LightningModule):
         # Get optimizer config
         optim_cfg = self.cfg.optim
 
+        view_phase = getattr(self.net, "view_training_phase", None)
+        if (
+            self._is_ssq_model()
+            and getattr(self.net, "composition_mode", None) == "view_complementary"
+            and view_phase in {"phase_b", "full"}
+        ):
+            if view_phase == "phase_b":
+                # Keep the Phase-A shared reconstruction function fixed. Candidate-side
+                # adapters remain trainable against the frozen shared representation/head.
+                frozen_shared_modules = [
+                    self.net.complementary_aggregation.feature_norm,
+                    self.net.complementary_aggregation.common_projection,
+                    self.net.complementary_aggregation.output_norm,
+                    getattr(self.net.complementary_aggregation, "shared_attention", None),
+                    getattr(self.net.complementary_aggregation, "shared_set_fusion", None),
+                    self.net.unified_density_decoder.shared_norm,
+                    self.net.unified_density_decoder.shared_input,
+                    self.net.unified_density_decoder.head,
+                ]
+                for module in frozen_shared_modules:
+                    if module is not None:
+                        for parameter in module.parameters():
+                            parameter.requires_grad_(False)
+            lr_cfg = self.cfg.model.ssq_fmt.view_complementary.lr
+            grouped_modules = {
+                "encoder": [self.net.surface_encoder, self.net.surface_sampler],
+                "constructor": [
+                    self.net.view_candidate_evidence,
+                    self.net.diverse_candidate_constructor,
+                ],
+                "candidate_encoder": [
+                    self.net.complementary_aggregation,
+                ],
+                "candidate_context": [
+                    self.net.unified_density_decoder.candidate_context,
+                ],
+                "decoder": [
+                    self.net.unified_density_decoder.candidate_input,
+                    self.net.unified_density_decoder.head,
+                ]
+                + (
+                    [self.net.unified_density_decoder.candidate_residual_head]
+                    if self.net.unified_density_decoder.candidate_residual_head is not None
+                    else []
+                )
+                + (
+                    [self.net.unified_density_decoder.candidate_branch_head]
+                    if self.net.unified_density_decoder.candidate_branch_head is not None
+                    else []
+                ),
+                "separability": [self.net.view_separability],
+                "routing": [self.net.bounded_view_routing]
+                if self.net.bounded_view_routing is not None
+                else [],
+            }
+            optimizer_params = []
+            used: set[int] = set()
+            for name, modules in grouped_modules.items():
+                parameters = [
+                    parameter
+                    for module in modules
+                    for parameter in module.parameters()
+                    if parameter.requires_grad and id(parameter) not in used
+                ]
+                used.update(id(parameter) for parameter in parameters)
+                if parameters:
+                    optimizer_params.append(
+                        {
+                            "params": parameters,
+                            "lr": float(lr_cfg[name]),
+                            "name": name,
+                        }
+                    )
+            remaining = [
+                parameter
+                for parameter in self.parameters()
+                if parameter.requires_grad and id(parameter) not in used
+            ]
+            if remaining:
+                optimizer_params.append(
+                    {
+                        "params": remaining,
+                        "lr": float(lr_cfg.get("shared", 0.0)),
+                        "name": "shared_decoder",
+                    }
+                )
+        else:
+            optimizer_params = None
+
+        # Mean-prior residual view correction is intentionally conservative; train its
+        # gate with a smaller LR when configured, without changing older experiments.
+        gate_lr_mult = float(getattr(self.net, "mean_prior_gate_lr_mult", 1.0))
+        gate_params = []
+        gate_param_ids = set()
+        if gate_lr_mult != 1.0 and hasattr(self.net, "mean_prior_residual_gate"):
+            for param in self.net.mean_prior_residual_gate.parameters():
+                if param.requires_grad:
+                    gate_params.append(param)
+                    gate_param_ids.add(id(param))
+        base_params = [
+            param
+            for param in self.parameters()
+            if param.requires_grad and id(param) not in gate_param_ids
+        ]
+        if optimizer_params is not None:
+            pass
+        elif gate_params:
+            optimizer_params = []
+            if base_params:
+                optimizer_params.append({"params": base_params})
+            optimizer_params.append({"params": gate_params, "lr": optim_cfg.lr * gate_lr_mult})
+        else:
+            optimizer_params = [param for param in self.parameters() if param.requires_grad]
+        if not optimizer_params:
+            raise ValueError("No trainable parameters available for optimizer")
+
         # Create optimizer based on _target_
         if "adamw" in optim_cfg._target_.lower():
             optimizer = torch.optim.AdamW(
-                self.parameters(),
+                optimizer_params,
                 lr=optim_cfg.lr,
                 betas=optim_cfg.betas,
                 weight_decay=optim_cfg.weight_decay,
@@ -260,7 +2018,7 @@ class TrainingLightningModule(LightningModule):
             )
         elif "adam" in optim_cfg._target_.lower():
             optimizer = torch.optim.Adam(
-                self.parameters(),
+                optimizer_params,
                 lr=optim_cfg.lr,
                 betas=optim_cfg.betas,
                 weight_decay=optim_cfg.weight_decay,
@@ -268,7 +2026,7 @@ class TrainingLightningModule(LightningModule):
             )
         elif "sgd" in optim_cfg._target_.lower():
             optimizer = torch.optim.SGD(
-                self.parameters(),
+                optimizer_params,
                 lr=optim_cfg.lr,
                 momentum=optim_cfg.momentum,
                 weight_decay=optim_cfg.weight_decay,
@@ -284,6 +2042,8 @@ class TrainingLightningModule(LightningModule):
             scheduler_class_name = scheduler_cfg._target_.split(".")[-1]
 
             # Map scheduler target to class
+            warmup_epochs = int(scheduler_cfg.get("warmup_epochs", 0))
+            warmup_start_factor = float(scheduler_cfg.get("warmup_start_factor", 0.01))
             if "StepLR" in scheduler_class_name:
                 scheduler = torch.optim.lr_scheduler.StepLR(
                     optimizer,
@@ -293,7 +2053,7 @@ class TrainingLightningModule(LightningModule):
             elif "CosineAnnealingLR" in scheduler_class_name:
                 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                     optimizer,
-                    T_max=self.max_epochs,
+                    T_max=max(1, self.max_epochs - warmup_epochs),
                     eta_min=scheduler_cfg.eta_min,
                 )
             elif "ExponentialLR" in scheduler_class_name:
@@ -305,6 +2065,18 @@ class TrainingLightningModule(LightningModule):
                 scheduler = None
 
             if scheduler is not None:
+                if warmup_epochs > 0:
+                    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+                        optimizer,
+                        start_factor=warmup_start_factor,
+                        end_factor=1.0,
+                        total_iters=warmup_epochs,
+                    )
+                    scheduler = torch.optim.lr_scheduler.SequentialLR(
+                        optimizer,
+                        schedulers=[warmup_scheduler, scheduler],
+                        milestones=[warmup_epochs],
+                    )
                 config_dict["lr_scheduler"] = {
                     "scheduler": scheduler,
                     "interval": scheduler_cfg.interval,
@@ -315,7 +2087,34 @@ class TrainingLightningModule(LightningModule):
 
     def on_train_epoch_start(self):
         """Called at start of training epoch"""
-        if torch.cuda.is_available():
+        trainer = getattr(self, "trainer", None)
+        datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
+        if datamodule is not None and hasattr(datamodule, "set_epoch"):
+            datamodule.set_epoch(int(self.current_epoch))
+            train_dataset = getattr(datamodule, "train_dataset", None)
+            resample_enabled = bool(
+                getattr(train_dataset, "resample_queries_each_epoch", False)
+                and getattr(train_dataset, "is_training", False)
+            )
+            self.log(
+                "train_query_resample_enabled",
+                float(resample_enabled),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                "train_query_epoch",
+                float(self.current_epoch),
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+        if torch.cuda.is_available() and bool(
+            getattr(getattr(self.cfg, "trainer", {}), "empty_cache_each_epoch", False)
+        ):
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -371,7 +2170,7 @@ class TrainingLightningModule(LightningModule):
             else (1.0, 1.0, 1.0)
         )
 
-        # Connected components options for region counting (keeps defaults identical to scipy.ndimage)
+        # Connected components options for region counting.
         raw_conn = (
             int(getattr(test_cfg, "cc_connectivity"))
             if test_cfg is not None and "cc_connectivity" in test_cfg
@@ -540,6 +2339,49 @@ class TrainingLightningModule(LightningModule):
         hd95 = float(np.percentile(d, 95))
         return assd, hd95
 
+    def _volume_metrics(self, pred, gt, gt_bin, threshold: float) -> dict[str, torch.Tensor]:
+        pred_bin = (pred >= threshold).float()
+        intersection = (pred_bin * gt_bin).sum(dim=(1, 2, 3))
+        union = ((pred_bin + gt_bin) > 0).float().sum(dim=(1, 2, 3))
+        iou = ((intersection + 1e-8) / (union + 1e-8)).mean()
+
+        nrmse = (
+            torch.sqrt(torch.mean((pred - gt).square(), dim=(1, 2, 3)))
+            / (gt.amax(dim=(1, 2, 3)) - gt.amin(dim=(1, 2, 3))).clamp_min(1e-8)
+        ).mean()
+        volume_error = (
+            (pred_bin.sum(dim=(1, 2, 3)) - gt_bin.sum(dim=(1, 2, 3))).abs()
+            / gt_bin.sum(dim=(1, 2, 3)).clamp_min(1.0)
+        ).mean()
+
+        coords = torch.stack(
+            torch.meshgrid(
+                torch.arange(pred.shape[1], device=pred.device, dtype=pred.dtype),
+                torch.arange(pred.shape[2], device=pred.device, dtype=pred.dtype),
+                torch.arange(pred.shape[3], device=pred.device, dtype=pred.dtype),
+                indexing="ij",
+            ),
+            dim=-1,
+        )
+        flat_coords = coords.reshape(-1, 3)
+        pred_w = pred.reshape(pred.shape[0], -1).clamp_min(0.0)
+        gt_w = gt.reshape(gt.shape[0], -1).clamp_min(0.0)
+        pred_centroid = pred_w @ flat_coords / pred_w.sum(dim=1, keepdim=True).clamp_min(1e-8)
+        gt_centroid = gt_w @ flat_coords / gt_w.sum(dim=1, keepdim=True).clamp_min(1e-8)
+        cle = torch.linalg.norm(pred_centroid - gt_centroid, dim=1).mean()
+
+        pred_peak = flat_coords[pred.reshape(pred.shape[0], -1).argmax(dim=1)]
+        gt_peak = flat_coords[gt.reshape(gt.shape[0], -1).argmax(dim=1)]
+        ple = torch.linalg.norm(pred_peak - gt_peak, dim=1).mean()
+
+        return {
+            "iou": iou,
+            "nrmse": nrmse,
+            "volume_error": volume_error,
+            "cle": cle,
+            "ple": ple,
+        }
+
     @rank_zero_only
     def _save_proj_compare(self, gt_img, pred_img, out_path: Path, title: str):
         import matplotlib
@@ -573,31 +2415,71 @@ class TrainingLightningModule(LightningModule):
 
     def test_step(self, batch, batch_idx):
         projections = batch["projections"]
-        no_projections = batch.get("no_projections")
-        proj_in = projections
-        if self.cfg.model.name == "minr_fmt" and "projections_packed" in batch:
-            p = batch["projections_packed"]
-            B, V = p.shape[0], p.shape[1]
-            # minr_fmt expects view-major flattening: [V*B,1,H,W]
-            proj_in = p.permute(1, 0, 2, 3, 4).reshape(B * V, 1, p.shape[-2], p.shape[-1])
+        descatter_targets = batch.get("descatter_targets")
+        _projections, proj_in = self._prepare_projection_input(batch)
         points = batch["points"]
+        points_mm = batch.get("points_mm")
+        depth_maps = batch.get("depth_maps")
         point_densities = batch["point_densities"]
         voxel_shape = batch["feasible_voxel_shape"]
 
         B = points.shape[0]
-        voxel_shape_tuple = (
-            B,
-            int(voxel_shape[0][0].detach().cpu().numpy()),
-            int(voxel_shape[1][0].detach().cpu().numpy()),
-            int(voxel_shape[2][0].detach().cpu().numpy()),
-        )
+        if self._is_voxel_model():
+            target_voxel = self._voxel_target(batch)
+            pred_voxel, _aux_projections = self._call_voxel_model(projections, batch)
+            density_pred, density_gt = self._standardize_pred_voxel(pred_voxel, target_voxel)
+            density_pred = torch.sigmoid(density_pred)
+            density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+            full_grid = True
+            dice = dice_coefficient(
+                density_pred, density_gt_bin, threshold=self._test_pred_threshold
+            )
+        elif self._is_ssq_model():
+            out = self._call_ssq_model(batch, return_diagnostics=False)
+            pred_density = out["density"].clamp(0.0, 1.0)
+            _aux_projections = out.get("aux_outputs", {})
+            voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
+            full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+            if full_grid:
+                density_gt = point_densities.reshape(voxel_shape_tuple)
+                density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+                density_pred = pred_density.reshape(voxel_shape_tuple)
+                dice = dice_coefficient(
+                    density_pred, density_gt_bin, threshold=self._test_pred_threshold
+                )
+            else:
+                density_gt = None
+                density_gt_bin = None
+                density_pred = pred_density
+        else:
+            pred_density, _aux_projections = self._call_model(
+                proj_in,
+                points,
+                points_mm=points_mm,
+                depth_maps=depth_maps,
+                source_hypotheses=self._source_hypotheses_from_batch(batch),
+            )
+            voxel_shape_tuple = self._shape_tuple_from_batch(voxel_shape, B)
+            full_grid = int(np.prod(voxel_shape_tuple[1:])) == point_densities.shape[1]
+            if full_grid:
+                density_gt = point_densities.reshape(voxel_shape_tuple)
+                density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
+                density_pred = torch.sigmoid(pred_density).reshape(voxel_shape_tuple)
+                dice = dice_coefficient(
+                    density_pred, density_gt_bin, threshold=self._test_pred_threshold
+                )
+            else:
+                density_gt = None
+                density_gt_bin = None
+                density_pred = torch.sigmoid(pred_density)
 
-        density_gt = point_densities.reshape(voxel_shape_tuple)
-        density_gt_bin = (density_gt > 0.0).to(dtype=torch.float32)
-        pred_density, pred_views = self(proj_in, points)
-        density_pred = pred_density.reshape(voxel_shape_tuple)
-
-        dice = dice_coefficient(density_pred, density_gt_bin, threshold=self._test_pred_threshold)
+        if not full_grid:
+            pred_bin = (density_pred.squeeze(-1) >= self._test_pred_threshold).float()
+            gt_bin = (point_densities > 0.0).float()
+            intersection = (pred_bin * gt_bin).sum(dim=1)
+            dice = (
+                (2.0 * intersection + 1e-8) / (pred_bin.sum(dim=1) + gt_bin.sum(dim=1) + 1e-8)
+            ).mean()
         self.log(
             "test_dice",
             dice,
@@ -606,6 +2488,14 @@ class TrainingLightningModule(LightningModule):
             on_epoch=True,
             sync_dist=True,
         )
+        if not full_grid:
+            return {"dice": dice}
+
+        extra_metrics = self._volume_metrics(
+            density_pred, density_gt, density_gt_bin, self._test_pred_threshold
+        )
+        for name, value in extra_metrics.items():
+            self.log(f"test_{name}", value, on_step=False, on_epoch=True, sync_dist=True)
 
         # Reconstruction metrics (PSNR/SSIM) on [0,1] via gt-based min-max normalization.
         gt_min = density_gt.amin(dim=(1, 2, 3), keepdim=True)
@@ -634,7 +2524,7 @@ class TrainingLightningModule(LightningModule):
         prec_vals, rec_vals = [], []
         valid_pairs = 0
 
-        # pred_views contains predicted de-scatter per view (if provided by model)
+        # aux_projections contains predicted auxiliary per-view projections when provided.
 
         for i in range(B):
             pm = density_pred[i].detach().to(dtype=torch.float32).cpu().numpy() >= thr
@@ -675,6 +2565,36 @@ class TrainingLightningModule(LightningModule):
                     sid = str(sids[i])
                 else:
                     sid = f"{batch_idx:06d}_{i}"
+                pred_i = density_pred[i]
+                gt_i = density_gt[i]
+                gt_bin_i = density_gt_bin[i]
+                pred_bin_i = (pred_i >= thr).float()
+                intersection_i = (pred_bin_i * gt_bin_i).sum()
+                union_i = ((pred_bin_i + gt_bin_i) > 0).float().sum()
+                iou_i = float(((intersection_i + 1e-8) / (union_i + 1e-8)).detach().cpu())
+                nrmse_i = torch.sqrt(torch.mean((pred_i - gt_i).square())) / (
+                    gt_i.amax() - gt_i.amin()
+                ).clamp_min(1e-8)
+                volume_error_i = (
+                    pred_bin_i.sum() - gt_bin_i.sum()
+                ).abs() / gt_bin_i.sum().clamp_min(1.0)
+                coords_i = torch.stack(
+                    torch.meshgrid(
+                        torch.arange(pred_i.shape[0], device=pred_i.device, dtype=pred_i.dtype),
+                        torch.arange(pred_i.shape[1], device=pred_i.device, dtype=pred_i.dtype),
+                        torch.arange(pred_i.shape[2], device=pred_i.device, dtype=pred_i.dtype),
+                        indexing="ij",
+                    ),
+                    dim=-1,
+                ).reshape(-1, 3)
+                pred_w_i = pred_i.reshape(-1).clamp_min(0.0)
+                gt_w_i = gt_i.reshape(-1).clamp_min(0.0)
+                pred_centroid_i = pred_w_i @ coords_i / pred_w_i.sum().clamp_min(1e-8)
+                gt_centroid_i = gt_w_i @ coords_i / gt_w_i.sum().clamp_min(1e-8)
+                cle_i = torch.linalg.norm(pred_centroid_i - gt_centroid_i)
+                pred_peak_i = coords_i[pred_i.reshape(-1).argmax()]
+                gt_peak_i = coords_i[gt_i.reshape(-1).argmax()]
+                ple_i = torch.linalg.norm(pred_peak_i - gt_peak_i)
                 # Instance-level metrics (only when #lights>1)
                 mr = ms = delta_cc = None
                 if int(n_gt) > 1:
@@ -708,6 +2628,8 @@ class TrainingLightningModule(LightningModule):
                         "pred_regions": int(n_pred),
                         "gt_regions": int(n_gt),
                         "dice": float(compute_dice(pm_f, gm_f)),
+                        "iou": iou_i,
+                        "nrmse": float(nrmse_i.detach().cpu()),
                         "precision": float(prec),
                         "recall": float(rec),
                         "mr": mr,
@@ -717,6 +2639,11 @@ class TrainingLightningModule(LightningModule):
                         "hd95": float(h) if np.isfinite(h) else None,
                         "psnr": float(psnr_vals[i]),
                         "ssim": float(ssim_vals[i]),
+                        "cle": float(cle_i.detach().cpu()),
+                        "ple": float(ple_i.detach().cpu()),
+                        "volume_error": float(volume_error_i.detach().cpu()),
+                        "pred_positive_ratio": float(pred_bin_i.mean().detach().cpu()),
+                        "gt_positive_ratio": float(gt_bin_i.mean().detach().cpu()),
                     }
                 )
 
@@ -814,7 +2741,6 @@ class TrainingLightningModule(LightningModule):
                             }
                         )
                     else:
-                        print("!!!!!!!", batch["range_x"])
                         rx = self._as_pair(batch["range_x"][i])
                         ry = self._as_pair(batch["range_y"][i])
                         rz = self._as_pair(batch["range_z"][i])
@@ -826,13 +2752,13 @@ class TrainingLightningModule(LightningModule):
                         new_seg = self._test_base_seg.copy()
 
                         # IMPORTANT: keep ROI slicing consistent with MultiProjDataset:
-                        # new_seg[range_x[0]:range_x[1], range_y[0]:range_y[1], range_z[0]:range_z[1]]
+                        # Matches MultiProjDataset ROI slicing order.
                         x0, x1 = rx
                         y0, y1 = ry
                         z0, z1 = rz
                         roi_view = new_seg[x0:x1, y0:y1, z0:z1]
 
-                        # If shapes don't match, skip instead of clamping/truncating (prevents silent ROI misalignment).
+                        # Skip instead of truncating; shape mismatch means ROI misalignment.
                         if roi_view.shape != roi_mask.shape:
                             self._test_sample_metrics.append(
                                 {
@@ -855,7 +2781,7 @@ class TrainingLightningModule(LightningModule):
                 if (
                     self._test_save_proj_comparisons
                     and self._test_proj_dir is not None
-                    and no_projections is not None
+                    and descatter_targets is not None
                     and len(self._test_angles_to_save) > 0
                 ):
                     for angle in self._test_angles_to_save:
@@ -867,7 +2793,7 @@ class TrainingLightningModule(LightningModule):
                         out_path = self._test_proj_dir / f"{sid}_angle{angle}.png"
                         self._save_proj_compare(
                             projections[angle][i],
-                            no_projections[angle][i],
+                            descatter_targets[angle][i],
                             out_path,
                             title=f"{sid} angle={angle}",
                         )
@@ -909,6 +2835,12 @@ class TrainingLightningModule(LightningModule):
         try:
             import csv
 
+            with open(self._test_out_dir / "metrics_summary.csv", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["metric", "value"])
+                w.writeheader()
+                for key in sorted(metrics):
+                    w.writerow({"metric": key, "value": metrics[key]})
+
             rows = list(getattr(self, "_test_sample_metrics", []) or [])
             if rows:
                 # De-duplicate by sample_id (saving stage may append warning-only rows)
@@ -940,9 +2872,23 @@ class TrainingLightningModule(LightningModule):
                 # 1) per-sample csv
                 keys = [
                     "sample_id",
+                    "case_id",
+                    "Dice",
+                    "IoU",
+                    "NRMSE",
+                    "PSNR",
+                    "SSIM",
+                    "CLE",
+                    "LE",
+                    "PLE",
+                    "Volume Error",
+                    "pred_positive_ratio",
+                    "gt_positive_ratio",
                     "pred_regions",
                     "gt_regions",
                     "dice",
+                    "iou",
+                    "nrmse",
                     "precision",
                     "recall",
                     "mr",
@@ -952,8 +2898,27 @@ class TrainingLightningModule(LightningModule):
                     "hd95",
                     "psnr",
                     "ssim",
+                    "cle",
+                    "ple",
+                    "volume_error",
                     "warning",
                 ]
+                for r in rows:
+                    r["case_id"] = r.get("sample_id")
+                    r["Dice"] = r.get("dice")
+                    r["IoU"] = r.get("iou")
+                    r["NRMSE"] = r.get("nrmse")
+                    r["PSNR"] = r.get("psnr")
+                    r["SSIM"] = r.get("ssim")
+                    r["CLE"] = r.get("cle")
+                    r["LE"] = r.get("cle")
+                    r["PLE"] = r.get("ple")
+                    r["Volume Error"] = r.get("volume_error")
+                with open(self._test_out_dir / "metrics.csv", "w", newline="") as f:
+                    w = csv.DictWriter(f, fieldnames=keys)
+                    w.writeheader()
+                    for r in rows:
+                        w.writerow({k: r.get(k) for k in keys})
                 with open(self._test_out_dir / "metrics_per_sample.csv", "w", newline="") as f:
                     w = csv.DictWriter(f, fieldnames=keys)
                     w.writeheader()

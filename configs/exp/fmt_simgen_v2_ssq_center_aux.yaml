@@ -1,0 +1,24 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_main
+  - _self_
+
+name: fmt_simgen_v2_ssq_center_aux
+description: SSQ ablation with center auxiliary supervision enabled
+
+data:
+  center_distance_targets: true
+  center_distance_require_precomputed: true
+  center_distance_subdir: center_distance
+
+model:
+  aux_heads:
+    center:
+      enabled: true
+    distance:
+      enabled: false
+
+loss:
+  center_weight: 0.2
+  distance_weight: 0.0

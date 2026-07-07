@@ -8,6 +8,8 @@ enable_progress_bar: true
 enable_model_summary: true
 log_every_n_steps: 10
 accumulate_grad_batches: 1
+limit_train_batches: null
+limit_val_batches: null
 
 # PyTorch 2.x compile (best-effort). Turn off if it causes issues.
 torch_compile: false

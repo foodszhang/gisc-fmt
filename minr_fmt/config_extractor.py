@@ -64,10 +64,265 @@ class ConfigExtractor:
             raise KeyError("model.geometry must be provided in the config")
         required = ["camera_distance", "detector_size", "global_voxel_shape"]
         ConfigExtractor._require_keys(geometry, required, "geometry")
+        detector_resolution = geometry.get("detector_resolution", geometry["detector_size"])
         return {
             "camera_distance": float(geometry["camera_distance"]),
             "detector_size": tuple(geometry["detector_size"]),
+            "detector_resolution": tuple(detector_resolution),
+            "fov_mm": float(geometry.get("fov_mm", 80.0)),
             "global_voxel_shape": tuple(geometry["global_voxel_shape"]),
+            "volume_center_world": tuple(geometry.get("volume_center_world", (19.0, 20.0, 10.4))),
+            "use_fmt_simgen_projection": bool(geometry.get("use_fmt_simgen_projection", False)),
+            "transpose_feature_map_for_sampling": bool(
+                geometry.get("transpose_feature_map_for_sampling", False)
+            ),
+        }
+
+    @staticmethod
+    def extract_ptfa_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        ptfa = model_cfg.get("ptfa", {}) or {}
+        if not isinstance(ptfa, dict):
+            raise KeyError("model.ptfa must be a mapping when provided")
+        gisc = model_cfg.get("gisc", {}) or {}
+        if not isinstance(gisc, dict):
+            raise KeyError("model.gisc must be a mapping when provided")
+        pcfs = ptfa.get("pcfs", {}) or {}
+        if not isinstance(pcfs, dict):
+            raise KeyError("model.ptfa.pcfs must be a mapping when provided")
+        out = {
+            "enabled": bool(ptfa.get("enabled", False)),
+            "scales": [str(v) for v in ptfa.get("scales", [])],
+            "mode": str(ptfa.get("mode", "fixed_gaussian")),
+            "window": int(ptfa.get("window", 5)),
+            "sigma_px": float(ptfa.get("sigma_px", 1.0)),
+            "sigma_min": float(ptfa.get("sigma_min", 0.8)),
+            "sigma_max": float(ptfa.get("sigma_max", 2.5)),
+            "exit_depth_max_mm": float(ptfa.get("exit_depth_max_mm", 20.8)),
+            "invert_depth": bool(ptfa.get("invert_depth", False)),
+            "pcfs": {
+                "hidden_dim": int(pcfs.get("hidden_dim", 64)),
+                "delta_max": float(pcfs.get("delta_max", 0.1)),
+                "warmup_epochs": int(pcfs.get("warmup_epochs", 10)),
+                "norm": str(pcfs.get("norm", "layernorm")),
+                "zero_init": bool(pcfs.get("zero_init", True)),
+                "use_bounded_delta": bool(pcfs.get("use_bounded_delta", True)),
+                "use_sigma_bounds": bool(pcfs.get("use_sigma_bounds", True)),
+            },
+        }
+        mode = gisc.get("footprint_mode")
+        if mode is None:
+            return out
+
+        mode = str(mode)
+        use_footprint = bool(gisc.get("use_footprint", mode != "point"))
+        fixed_sigma = float(gisc.get("fixed_sigma", out["sigma_px"]))
+        sigma_min = float(gisc.get("sigma_min", out["sigma_min"]))
+        sigma_max = float(gisc.get("sigma_max", out["sigma_max"]))
+        physical = bool(gisc.get("use_physical_constraint", True))
+
+        if mode == "point" or not use_footprint:
+            out.update({"enabled": False, "scales": [], "mode": "fixed_gaussian", "window": 1})
+        elif mode == "fixed":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s3"],
+                    "mode": "fixed_gaussian",
+                    "sigma_px": fixed_sigma,
+                }
+            )
+        elif mode == "depth":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s3"],
+                    "mode": "exit_depth_gaussian",
+                    "sigma_min": sigma_min,
+                    "sigma_max": sigma_max,
+                    "invert_depth": False,
+                }
+            )
+        elif mode == "center_distance":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s1"],
+                    "mode": "corrected_exit_depth_gaussian",
+                    "sigma_min": sigma_min,
+                    "sigma_max": sigma_max,
+                    "invert_depth": True,
+                }
+            )
+        elif mode == "adaptive_unconstrained":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s1"],
+                    "mode": "pcfs_corrected_exit_depth_gaussian",
+                    "sigma_min": sigma_min,
+                    "sigma_max": sigma_max,
+                    "invert_depth": True,
+                }
+            )
+            out["pcfs"]["use_bounded_delta"] = False
+            out["pcfs"]["use_sigma_bounds"] = physical
+        elif mode == "adaptive_constrained":
+            out.update(
+                {
+                    "enabled": True,
+                    "scales": ["s1"],
+                    "mode": "pcfs_corrected_exit_depth_gaussian",
+                    "sigma_min": sigma_min,
+                    "sigma_max": sigma_max,
+                    "invert_depth": True,
+                }
+            )
+            out["pcfs"]["use_bounded_delta"] = True
+            out["pcfs"]["use_sigma_bounds"] = True
+        else:
+            raise ValueError(f"Unsupported model.gisc.footprint_mode: {mode}")
+        return out
+
+    @staticmethod
+    def extract_gisc_ablation_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        gisc = model_cfg.get("gisc", {}) or {}
+        if not isinstance(gisc, dict):
+            raise KeyError("model.gisc must be a mapping when provided")
+        subset = gisc.get("view_subset")
+        if subset is not None:
+            subset = [int(v) for v in subset]
+        return {
+            "footprint_mode": str(gisc.get("footprint_mode", "")),
+            "view_subset": subset,
+            "log_footprint_stats": bool(gisc.get("log_footprint_stats", False)),
+            "save_debug_predictions": bool(gisc.get("save_debug_predictions", False)),
+        }
+
+    @staticmethod
+    def extract_residual_scorer_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        scorer = model_cfg.get("residual_scorer", {}) or {}
+        if not isinstance(scorer, dict):
+            raise KeyError("model.residual_scorer must be a mapping when provided")
+        return {
+            "enabled": bool(scorer.get("enabled", False)),
+            "hidden_dim": int(scorer.get("hidden_dim", 128)),
+            "lambda_r": float(scorer.get("lambda_r", 0.0)),
+            "input_mode": str(scorer.get("input_mode", "bilinear_s3")),
+        }
+
+    @staticmethod
+    def extract_feature_refinement_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        refinement = model_cfg.get("feature_refinement", {}) or {}
+        if not isinstance(refinement, dict):
+            raise KeyError("model.feature_refinement must be a mapping when provided")
+        gate_cfg = refinement.get("reliability_gate", {}) or {}
+        if not isinstance(gate_cfg, dict):
+            raise KeyError("model.feature_refinement.reliability_gate must be a mapping")
+        mix_cfg = gate_cfg.get("residual_mix", {}) or {}
+        if not isinstance(mix_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.reliability_gate.residual_mix must be a mapping"
+            )
+        consensus_cfg = refinement.get("consensus_residual_gate", {}) or {}
+        if not isinstance(consensus_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.consensus_residual_gate must be a mapping"
+            )
+        mean_prior_cfg = refinement.get("mean_prior_residual_gate", {}) or {}
+        if not isinstance(mean_prior_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.mean_prior_residual_gate must be a mapping"
+            )
+        anchor_cfg = mean_prior_cfg.get("anchor_loss", {}) or {}
+        if not isinstance(anchor_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.mean_prior_residual_gate.anchor_loss "
+                "must be a mapping"
+            )
+        tca_cfg = refinement.get("transport_consensus_adapter", {}) or {}
+        if not isinstance(tca_cfg, dict):
+            raise KeyError(
+                "model.feature_refinement.transport_consensus_adapter must be a mapping"
+            )
+        canonical_cfg = refinement.get("canonical_reliability", {}) or {}
+        if not isinstance(canonical_cfg, dict):
+            raise KeyError("model.feature_refinement.canonical_reliability must be a mapping")
+        return {
+            "enabled": bool(refinement.get("enabled", False)),
+            "input_mode": str(refinement.get("input_mode", "s1_ptfa")),
+            "ptfa_view_aggregation": str(refinement.get("ptfa_view_aggregation", "masked_mean")),
+            "hidden_dim": int(refinement.get("hidden_dim", 128)),
+            "geom_dim": int(refinement.get("geom_dim", 5)),
+            "zero_init": bool(refinement.get("zero_init", True)),
+            "reliability_gate": {
+                "hidden_dim": int(gate_cfg.get("hidden_dim", 64)),
+                "temperature": float(gate_cfg.get("temperature", 1.5)),
+                "zero_init": bool(gate_cfg.get("zero_init", True)),
+                "norm": str(gate_cfg.get("norm", "none")),
+                "geom_set": str(gate_cfg.get("geom_set", "full")),
+                "residual_mix": {
+                    "enabled": bool(mix_cfg.get("enabled", False)),
+                    "gamma": float(mix_cfg.get("gamma", 1.0)),
+                },
+            },
+            "consensus_residual_gate": {
+                "hidden_dim": int(consensus_cfg.get("hidden_dim", 64)),
+                "gamma": float(consensus_cfg.get("gamma", 0.1)),
+                "norm": str(consensus_cfg.get("norm", "layernorm")),
+                "use_evidence_stats": bool(consensus_cfg.get("use_evidence_stats", True)),
+            },
+            "mean_prior_residual_gate": {
+                "hidden_dim": int(mean_prior_cfg.get("hidden_dim", 64)),
+                "norm": str(mean_prior_cfg.get("norm", "layernorm")),
+                "scale_max": float(mean_prior_cfg.get("scale_max", 0.5)),
+                "alpha_max": float(mean_prior_cfg.get("alpha_max", 0.1)),
+                "warmup_epochs": int(mean_prior_cfg.get("warmup_epochs", 10)),
+                "gate_lr_mult": float(mean_prior_cfg.get("gate_lr_mult", 1.0)),
+                "anchor_loss": {
+                    "enabled": bool(anchor_cfg.get("enabled", False)),
+                    "beta": float(anchor_cfg.get("beta", 0.0)),
+                },
+            },
+            "transport_consensus_adapter": {
+                "hidden_dim": int(tca_cfg.get("hidden_dim", 128)),
+                "epsilon": float(tca_cfg.get("epsilon", 0.1)),
+                "include_dev_norm": bool(tca_cfg.get("include_dev_norm", False)),
+                "zero_init": bool(tca_cfg.get("zero_init", True)),
+            },
+            "canonical_reliability": {
+                "hidden_dim": int(canonical_cfg.get("hidden_dim", 128)),
+                "temperature": float(canonical_cfg.get("temperature", 1.0)),
+                "residual_epsilon": float(canonical_cfg.get("residual_epsilon", 0.1)),
+                "zero_init": bool(canonical_cfg.get("zero_init", True)),
+            },
+        }
+
+    @staticmethod
+    def extract_query_aggregation_config(config: Any) -> Dict[str, Any]:
+        model_cfg = ConfigExtractor._model_cfg(config)
+        gisc_cfg = model_cfg.get("gisc_fmt")
+        if not isinstance(gisc_cfg, dict):
+            gisc_cfg = model_cfg.get("minr_fmt")
+        if not isinstance(gisc_cfg, dict):
+            return {
+                "aggregation_mode": "legacy_multiscale",
+                "hidden_dim": 64,
+                "temperature": 1.0,
+                "zero_init": True,
+            }
+
+        agg_cfg = gisc_cfg.get("query_aggregation", {}) or {}
+        if not isinstance(agg_cfg, dict):
+            raise KeyError("model.gisc_fmt.query_aggregation must be a mapping when provided")
+        return {
+            "aggregation_mode": str(gisc_cfg.get("aggregation_mode", "legacy_multiscale")),
+            "hidden_dim": int(agg_cfg.get("hidden_dim", 64)),
+            "temperature": float(agg_cfg.get("temperature", 1.0)),
+            "zero_init": bool(agg_cfg.get("zero_init", True)),
         }
 
     @staticmethod
@@ -243,7 +498,11 @@ class ConfigExtractor:
         bg = gisc_cfg.get("background")
         if not isinstance(bg, dict):
             raise KeyError(f"model.{section_key}.background must be a mapping")
-        ConfigExtractor._require_keys(bg, ["enable_background", "head", "guidance"], f"{section_key}.background")
+        ConfigExtractor._require_keys(
+            bg,
+            ["enable_background", "head", "guidance"],
+            f"{section_key}.background",
+        )
 
         head = bg.get("head")
         guidance = bg.get("guidance")
@@ -252,7 +511,11 @@ class ConfigExtractor:
         if not isinstance(guidance, dict):
             raise KeyError(f"model.{section_key}.background.guidance must be a mapping")
 
-        ConfigExtractor._require_keys(head, ["hidden_dim", "d_x", "d_f"], f"{section_key}.background.head")
+        ConfigExtractor._require_keys(
+            head,
+            ["hidden_dim", "d_x", "d_f"],
+            f"{section_key}.background.head",
+        )
         ConfigExtractor._require_keys(
             guidance,
             ["enable", "dim", "mode", "hidden_dim", "scale", "gate_init_bias"],
@@ -286,7 +549,19 @@ class ConfigExtractor:
             raise KeyError("model.uhr_deepfmt must be defined for UHR runs")
         required = ["base_channels", "num_levels", "se_reduction"]
         ConfigExtractor._require_keys(uhr_cfg, required, "uhr_deepfmt")
-        return {key: uhr_cfg[key] for key in required}
+        out = {key: uhr_cfg[key] for key in required}
+        optional_keys = (
+            "output_mode",
+            "lowres_shape",
+            "full_output_shape",
+            "upsample_to_full_for_eval",
+            "loss_type",
+            "dice_weight",
+        )
+        for key in optional_keys:
+            if key in uhr_cfg:
+                out[key] = uhr_cfg[key]
+        return out
 
     @staticmethod
     def extract_vox_dmrn_config(config: Any) -> Dict[str, Any]:

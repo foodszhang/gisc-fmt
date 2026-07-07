@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_assignment
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_responsibility
+description: Short Full SSQ-FMT gate with assignment and responsible-branch supervision
+
+loss:
+  candidate_assignment_weight: 0.25
+  candidate_assignment_min_prior: 0.05
+  candidate_branch_density_weight: 1.0
+  candidate_branch_dice_weight: 0.25
+  candidate_branch_target_mode: best_positive_prior

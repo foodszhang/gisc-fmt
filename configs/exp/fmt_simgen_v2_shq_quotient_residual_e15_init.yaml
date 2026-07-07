@@ -1,0 +1,32 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_shq_quotient_residual
+  - _self_
+
+name: fmt_simgen_v2_shq_quotient_residual_e15_init
+description: SHQ quotient residual with audited shape-compatible E15 initialization
+
+data:
+  load_stage1_prior: false
+  load_stage1_mesh: false
+  descatter_target_file: null
+  descatter_target_files: []
+  morphology:
+    enabled: false
+    require_precomputed: false
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+
+model:
+  finetune:
+    init_from_ckpt: outputs/fmt_simgen_v2_e15_center_distance_precomputed/checkpoints/epoch=52-val_dice=0.7414.ckpt
+    e15_compatible_init: true
+  ssq_fmt:
+    hidden_dim: 64
+    encoder:
+      profile: efficient
+    representation:
+      hidden_dim: 64

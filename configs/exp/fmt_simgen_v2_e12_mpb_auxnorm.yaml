@@ -1,0 +1,12 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e12_mpb
+  - _self_
+
+name: fmt_simgen_v2_e12_mpb_auxnorm
+description: GISC E12 MPB with descatter self-normalized auxiliary projection targets
+
+data:
+  descatter_target_scale: descatter_per_view_max
+

@@ -1,0 +1,31 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_refined_candidates
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_candidate_context
+description: Refined proposals with candidate-centric context and local field calibration
+
+model:
+  ssq_fmt:
+    candidate_context:
+      enabled: true
+      hidden_dim: 64
+      field_hidden_dim: 64
+  finetune:
+    init_from_ckpt: outputs/ssq_fmt_32gb_full12288_e18_default_lr1e5_betas095_e20/checkpoints/epoch=10-val_dice=0.6411.ckpt
+    allow_missing_prefixes:
+      - candidate_context_encoder.
+      - candidate_field_calibrator.
+    train_modules_only:
+      - candidate_context_encoder
+      - candidate_field_calibrator
+      - candidate_density_decoder
+      - assignment_head
+
+optim:
+  lr: 0.00005
+
+trainer:
+  max_epochs: 6

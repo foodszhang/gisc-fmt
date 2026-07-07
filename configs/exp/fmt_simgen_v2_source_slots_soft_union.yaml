@@ -1,0 +1,41 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e15_center_distance
+  - _self_
+
+name: fmt_simgen_v2_source_slots_soft_union
+description: Source-separable query-canonical FMT with over-complete source slots, evidence-aware ownership, and soft-union density composition
+
+data:
+  source_hypothesis:
+    enabled: true
+    top_m: 5
+    blur_sigma: 1.0
+    min_distance_cells: 3
+    min_value_ratio: 0.1
+
+model:
+  source_instance_decoder:
+    enabled: true
+    use_all_slots: true
+    top_k: null
+    merge: soft_union
+    output_components: true
+    ownership_mode: evidence_aware
+    ownership_hidden_dim: 64
+    ownership_temperature: 1.0
+    detach_ownership_feature: false
+    hidden_dim: 64
+    local_dim: 8
+    empty_slot_suppression: true
+    empty_slot_weight: 0.02
+
+  aux_heads:
+    hidden_dim: 64
+
+loss:
+  empty_slot_weight: 0.02
+
+optim:
+  lr: 0.0001

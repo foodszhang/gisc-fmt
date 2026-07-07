@@ -1,0 +1,44 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e9_stable_v2_mean_prior_residual_ced_s1_ptfa_feature_refine
+  - _self_
+
+name: fmt_simgen_e9_ft_from_e8ced_gate_only
+description: Fine-tune only mean-prior residual gate from E8-cED best checkpoint
+
+model:
+  finetune:
+    init_from_ckpt: outputs/gisc_fmt/fit/2026-05-14/09-08-20/checkpoints/epoch=27-val_dice=0.6048.ckpt
+    freeze_except_mean_prior_gate: true
+
+  residual_scorer:
+    enabled: false
+
+  feature_refinement:
+    enabled: true
+    input_mode: s1_ptfa
+    hidden_dim: 128
+    geom_dim: 5
+    zero_init: true
+    ptfa_view_aggregation: mean_prior_residual_gate
+    mean_prior_residual_gate:
+      hidden_dim: 64
+      norm: layernorm
+      scale_max: 0.5
+      alpha_max: 0.05
+      warmup_epochs: 5
+      gate_lr_mult: 1.0
+      anchor_loss:
+        enabled: true
+        beta: 0.01
+
+  ptfa:
+    enabled: true
+    scales: ["s1"]
+    mode: corrected_exit_depth_gaussian
+    window: 5
+    sigma_min: 0.6
+    sigma_max: 1.5
+    exit_depth_max_mm: 20.8
+    invert_depth: true

@@ -30,3 +30,4 @@ early_stopping:
   mode: max
   verbose: true
   check_finite: true
+  check_on_train_epoch_end: false

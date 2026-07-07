@@ -1,0 +1,19 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e13_msq
+  - _self_
+
+name: fmt_simgen_v2_e14_source_field
+description: E14 source-instance field decoder on FMT-SimGen v2
+
+data:
+  load_stage1_prior: false
+  load_stage1_mesh: false
+
+model:
+  source_instance_decoder:
+    enabled: true
+    top_k: 2
+    hidden_dim: 64
+    merge: weighted_sum

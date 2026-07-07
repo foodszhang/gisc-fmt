@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Low-memory entrypoint for the PHSA paired full-volume evaluator."""
+
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+import torch
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from minr_fmt.phsa_sample_level import activate_phsa_sample_level_hypotheses  # noqa: E402
+from scripts import eval_view_complementary_full_volume_paired as base  # noqa: E402
+
+# The runtime patch is parameter-free. During full-volume evaluation the evaluator
+# supplies its own fixed proposal cache, so only the removal of the unused candidate
+# quantile normalization is active.
+activate_phsa_sample_level_hypotheses()
+
+_original_load_model = base.load_model
+
+
+def load_model_respecting_configured_phase(run_dir: Path, device: torch.device):
+    cfg, module, checkpoint = _original_load_model(run_dir, device)
+    configured_phase = str(cfg.model.ssq_fmt.view_complementary.get("training_phase", "phase_b"))
+    if hasattr(module.net, "set_view_training_phase"):
+        module.net.set_view_training_phase(configured_phase)
+    return cfg, module, checkpoint
+
+
+def predict_full_volume_low_memory(
+    net,
+    surface: torch.Tensor,
+    detector_valid_mask: torch.Tensor,
+    depth_maps: torch.Tensor,
+    shape: tuple[int, int, int],
+    voxel_size_mm: float,
+    proposal_points_mm: torch.Tensor,
+    chunk_size: int,
+    equivalence_atol: float,
+) -> tuple[np.ndarray, dict[str, float]]:
+    cache_start = time.perf_counter()
+    cache, equivalence_error = base.build_sample_cache(
+        net,
+        surface,
+        proposal_points_mm,
+        detector_valid_mask,
+        depth_maps,
+        equivalence_atol,
+    )
+    cache_time_ms = (time.perf_counter() - cache_start) * 1000.0
+    total = int(np.prod(shape))
+    prediction = np.empty(total, dtype=np.float32)
+    decode_start = time.perf_counter()
+    with base.frozen_sample_cache(net, cache), torch.inference_mode():
+        for start in range(0, total, int(chunk_size)):
+            end = min(start + int(chunk_size), total)
+            points_mm = base.chunk_points_mm(shape, start, end, voxel_size_mm).to(surface.device)
+            output = base.call_net(
+                net,
+                surface,
+                points_mm,
+                detector_valid_mask,
+                depth_maps,
+                return_diagnostics=False,
+            )
+            values = output["density"].squeeze(0).squeeze(-1)
+            if not torch.isfinite(values).all():
+                raise RuntimeError("Full-volume prediction contains NaN/Inf")
+            prediction[start:end] = values.float().cpu().numpy()
+    decode_time_ms = (time.perf_counter() - decode_start) * 1000.0
+    return prediction.reshape(shape), {
+        "cache_equivalence_max_abs": equivalence_error,
+        "candidate_center_drift_max_mm": 0.0,
+        "cache_build_time_ms": cache_time_ms,
+        "volume_decode_time_ms": decode_time_ms,
+    }
+
+
+base.load_model = load_model_respecting_configured_phase
+base.predict_full_volume = predict_full_volume_low_memory
+
+if __name__ == "__main__":
+    base.main()

@@ -1,0 +1,18 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e2_ptfa_s3_fixed
+  - _self_
+
+name: fmt_simgen_e3_ptfa_s3_exit_depth
+description: FMT-SimGen E3 s3-only exit-depth Gaussian PTFA over E1b mixed sampler
+
+model:
+  ptfa:
+    enabled: true
+    scales: ["s3"]
+    mode: exit_depth_gaussian
+    window: 5
+    sigma_min: 0.8
+    sigma_max: 2.5
+    exit_depth_max_mm: 20.8

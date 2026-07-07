@@ -1,0 +1,43 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_a3v2_fast
+  - _self_
+
+name: fmt_simgen_v2_fixed_grid_stabilized_stage_a
+
+data:
+  num_workers: 0
+  persistent_workers: false
+  subset_policy: random
+  subset_seed: 42
+
+model:
+  ssq_fmt:
+    view_complementary:
+      ablation: fixed_grid_stabilized
+      continuous_applicability: true
+      candidate_hidden_injection: true
+      context_warmup_enabled: false
+      hypothesis_grid:
+        enabled: true
+        spacing_mm: 3.0
+        chunk_size: 4096
+        use_reconstruction_bounds: true
+      routing:
+        enabled: false
+      lr:
+        encoder: 0.0
+        constructor: 0.00001
+        candidate_encoder: 0.0
+        candidate_context: 0.0
+        decoder: 0.0
+        separability: 0.0
+        shared: 0.0
+  finetune:
+    train_modules_only:
+      - view_candidate_evidence
+      - diverse_candidate_constructor
+
+trainer:
+  max_epochs: 1

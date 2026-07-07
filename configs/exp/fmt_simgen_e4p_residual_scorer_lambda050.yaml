@@ -1,0 +1,17 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e4_residual_scorer_lambda020
+  - _self_
+
+name: fmt_simgen_e4p_residual_scorer_lambda050
+description: FMT-SimGen E4 prime residual scorer lambda 0.5
+
+model:
+  ptfa:
+    enabled: false
+    scales: []
+  residual_scorer:
+    enabled: true
+    hidden_dim: 128
+    lambda_r: 0.5

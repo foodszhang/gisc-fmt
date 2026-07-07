@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_evidence_competition_gate
+  - _self_
+
+name: fmt_simgen_v2_ssq_compact_field_gate
+description: Compact anisotropic candidate fields with occupancy-evidence competition
+
+model:
+  ssq_fmt:
+    candidate_field:
+      support_envelope_power: 1.0

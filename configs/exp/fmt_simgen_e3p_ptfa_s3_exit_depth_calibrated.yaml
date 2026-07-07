@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e3_ptfa_s3_exit_depth
+  - _self_
+
+name: fmt_simgen_e3p_ptfa_s3_exit_depth_calibrated
+description: FMT-SimGen E3 prime calibrated s3 exit-depth Gaussian PTFA
+
+model:
+  ptfa:
+    sigma_min: 0.6
+    sigma_max: 1.2

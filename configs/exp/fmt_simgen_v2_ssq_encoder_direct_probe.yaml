@@ -1,0 +1,37 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_component_matched_q12288
+  - _self_
+
+name: fmt_simgen_v2_ssq_encoder_direct_probe
+description: Diagnostic direct-density probe over frozen SSQ representation
+
+data:
+  train_max_samples: 200
+  val_max_samples: 50
+  component_supervision:
+    enabled: false
+
+model:
+  ssq_fmt:
+    density_output_mode: compensation_direct_probe
+  finetune:
+    init_from_ckpt: outputs/ssq_fmt_full_refined_2400_300_q8192_e60/checkpoints/epoch=07-val_dice=0.5702.ckpt
+    train_modules_only:
+      - compensation_density_decoder
+
+loss:
+  candidate_branch_density_weight: 0.0
+  candidate_branch_dice_weight: 0.0
+  candidate_assignment_weight: 0.0
+
+optim:
+  lr: 0.0005
+  scheduler:
+    warmup_epochs: 0
+
+trainer:
+  max_epochs: 5
+  check_val_every_n_epoch: 1
+

@@ -1,0 +1,65 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_3k_20k_common
+  - override /model: ssq_fmt
+  - _self_
+
+name: fmt_simgen_v2_ssq_final
+description: Final SSQ-FMT candidate scalar composition with measurement-derived candidates
+
+data:
+  projection_norm: raw
+  center_distance_targets: false
+  center_distance_require_precomputed: false
+  source_hypothesis:
+    enabled: false
+  ssq_candidates:
+    enabled: true
+    top_m: 5
+    candidate_cache_version: ssq_candidate_anchors_v2
+    smoothing_sigma_cells: 1.0
+    nms_radius_mm: 3.0
+    support_moment_radius_mm: 4.0
+    min_value_ratio: 0.1
+  morphology:
+    enabled: true
+    require_precomputed: true
+    subdir: morphology
+    target_filename: sdf_target.npy
+    target_version: ssq_candidate_conditioned_sdf_v2
+
+model:
+  ssq_fmt:
+    density_output_mode: candidate_scalar_composition
+    query_density_backbone:
+      enabled: false
+    routing:
+      mode: pre_aggregation
+    fusion:
+      mode: candidate_specific
+    reliability:
+      mode: evidence
+    footprint:
+      mode: query_dependent
+
+loss:
+  light_weight: 1.0
+  pos_weight: 50.0
+  sparse_weight: 0.1
+  dice_weight: 0.5
+  backbone_logit_loss_weight: 0.0
+  lambda_sdf: 0.0
+  tau_s: 3.0
+  sdf_boundary_weight: 1.0
+
+optim:
+  lr: 0.0005
+  weight_decay: 0.0001
+  scheduler:
+    warmup_epochs: 5
+    warmup_start_factor: 0.2
+
+trainer:
+  max_epochs: 80
+  gradient_clip_val: 1.0

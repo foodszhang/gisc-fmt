@@ -1,0 +1,8 @@
+name: fem_coarse
+output_type: voxel
+num_views: 7
+fem:
+  shared_dir: /home/foods/pro/FMT-SimGen/output/shared_mesh_20k
+fem_coarse:
+  uses_prior: true
+  prior_source: fem_mesh_or_fem_voxel

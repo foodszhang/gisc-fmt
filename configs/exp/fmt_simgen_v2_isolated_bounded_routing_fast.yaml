@@ -1,0 +1,42 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_a3v2_fast
+  - _self_
+
+name: fmt_simgen_v2_isolated_bounded_routing_fast
+
+data:
+  num_workers: 0
+  persistent_workers: false
+  subset_policy: random
+  subset_seed: 42
+
+model:
+  ssq_fmt:
+    view_complementary:
+      ablation: isolated_bounded_routing
+      continuous_applicability: false
+      candidate_hidden_injection: true
+      context_warmup_enabled: false
+      hypothesis_grid:
+        enabled: false
+      routing:
+        enabled: true
+        delta_logit_max: 1.0
+        zero_init: true
+      lr:
+        encoder: 0.0
+        constructor: 0.0
+        candidate_encoder: 0.0
+        candidate_context: 0.0
+        decoder: 0.0
+        separability: 0.0
+        routing: 0.00003
+        shared: 0.0
+  finetune:
+    train_modules_only:
+      - bounded_view_routing
+
+trainer:
+  max_epochs: 1

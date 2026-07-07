@@ -1,0 +1,48 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_3k_20k_common
+  - override /model: ssq_fmt
+  - _self_
+
+name: fmt_simgen_v2_ssq_main
+description: Deprecated alias of final SSQ-FMT candidate scalar composition mainline
+
+data:
+  projection_norm: raw
+  center_distance_targets: false
+  center_distance_require_precomputed: false
+  source_hypothesis:
+    enabled: false
+  ssq_candidates:
+    enabled: true
+    top_m: 5
+    blur_sigma: 1.0
+    min_distance_cells: 3
+    min_value_ratio: 0.1
+
+loss:
+  light_weight: 1.0
+  pos_weight: 200.0
+  sparse_weight: 0.1
+  dice_weight: 1.0
+  backbone_logit_loss_weight: 0.0
+  lambda_sdf: 0.0
+  tau_s: 3.0
+  sdf_boundary_weight: 1.0
+
+optim:
+  lr: 0.001
+  scheduler:
+    warmup_epochs: 2
+    warmup_start_factor: 0.2
+
+trainer:
+  max_epochs: 80
+  gradient_clip_val: 1.0
+
+model:
+  ssq_fmt:
+    density_output_mode: candidate_scalar_composition
+    query_density_backbone:
+      enabled: false

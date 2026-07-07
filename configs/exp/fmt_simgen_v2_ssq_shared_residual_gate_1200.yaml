@@ -1,0 +1,28 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_evidence_competition_gate
+  - _self_
+
+name: fmt_simgen_v2_ssq_shared_residual_gate_1200
+description: Legacy GT-refiner development gate; not valid for formal SHQ-FMT evaluation
+
+data:
+  train_max_samples: 1200
+  val_max_samples: 150
+  num_workers: 4
+  persistent_workers: true
+  ssq_candidates:
+    top_m: 5
+    candidate_filename: candidate_anchors_refiner_full_v1.npz
+    reextract_candidates: false
+
+model:
+  ssq_fmt:
+    candidate_field:
+      mode: shared_residual
+      support_envelope_power: 0.5
+
+trainer:
+  max_epochs: 10
+  check_val_every_n_epoch: 1

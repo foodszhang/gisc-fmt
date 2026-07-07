@@ -1,0 +1,18 @@
+name: fem2vox_unet
+output_type: voxel
+num_views: 7
+in_channels: 1
+feature_dim: 64
+pos_enc_dim: 60
+geometry:
+  camera_distance: 200.0
+  detector_size: [256, 256]
+  global_voxel_shape: [256, 256, 256]
+fem2vox_unet:
+  base_channels: 16
+  refine_channels: 8
+  refine_blocks: 2
+  uses_prior: true
+  prior_source: fem_prior_or_coarse_prior
+  residual_prior: true
+  allow_projection_fallback: false

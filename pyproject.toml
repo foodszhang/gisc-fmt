@@ -23,6 +23,10 @@ dependencies = [
     "timm>=1.0.0",
     "tensorboard>=2.16.0",
     "torchvision>=0.20.0",
+    "pytest>=9.0.2",
+    "pyvista>=0.48.4",
+    "nibabel>=5.4.2",
+    "pandas>=2.2.0",
 ]
 
 [project.optional-dependencies]

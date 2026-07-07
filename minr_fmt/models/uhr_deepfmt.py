@@ -11,7 +11,6 @@ import torch.nn.functional as F
 
 from ..config_extractor import ConfigExtractor
 
-
 # ===== 核心模块 =====
 
 
@@ -182,7 +181,7 @@ class Decoder3D(nn.Module):
 
 class UHRDeepFMT3DUNet(nn.Module):
     """3D U-Net体素重建网络
-    
+
     架构流程：
     1. 投影到3D体积（自动处理H/W不匹配）
     2. 3D编码器下采样
@@ -197,7 +196,7 @@ class UHRDeepFMT3DUNet(nn.Module):
             config: 配置对象，包含所有网络参数
         """
         super().__init__()
-        
+
         if config is None:
             raise ValueError("config 参数为必需项，不能为 None")
 
@@ -210,20 +209,38 @@ class UHRDeepFMT3DUNet(nn.Module):
         num_views = net_params["num_views"]
         base_channels = uhr_params["base_channels"]
         num_levels = uhr_params["num_levels"]
-        
+
         # 几何参数
         self.camera_distance = geo_params["camera_distance"]
         self.detector_size = geo_params["detector_size"]
         self.global_voxel_shape = geo_params["global_voxel_shape"]
         self.config = config
-        
+
         # ROI体积参数：UHR 只回归 ROI（由 data.voxel_ranges 决定）
         vr = config.data.voxel_ranges
         self.roi_x = int(vr.x[1] - vr.x[0])
         self.roi_y = int(vr.y[1] - vr.y[0])
         self.roi_z = int(vr.z[1] - vr.z[0])
         self.voxel_depth = self.roi_z
-        
+        self.output_mode = str(uhr_params.get("output_mode", "fullres"))
+        self.full_output_shape = tuple(
+            int(v)
+            for v in uhr_params.get(
+                "full_output_shape",
+                (self.roi_x, self.roi_y, self.roi_z),
+            )
+        )
+        self.lowres_shape = tuple(
+            int(v) for v in uhr_params.get("lowres_shape", self.full_output_shape)
+        )
+        self.upsample_to_full = bool(uhr_params.get("upsample_to_full_for_eval", True))
+        self.loss_type = str(uhr_params.get("loss_type", "default"))
+        self.dice_weight = float(uhr_params.get("dice_weight", 0.5))
+        if self.output_mode == "lowres":
+            self.compute_shape = self.lowres_shape
+        else:
+            self.compute_shape = self.full_output_shape
+
         # 网络参数
         self.in_channels = num_views
         self.base_channels = base_channels
@@ -242,7 +259,7 @@ class UHRDeepFMT3DUNet(nn.Module):
 
     def _reshape_projections_to_3d(self, projections_dict, target_hw=None):
         """将2D投影转换为3D体积张量
-        
+
         自动处理相机H/W与ROI H/W的不匹配
         """
         view_order = ["-90", "-60", "-30", "0", "30", "60", "90"]
@@ -269,12 +286,12 @@ class UHRDeepFMT3DUNet(nn.Module):
 
         volume = torch.stack(proj_list, dim=1)
         B, V, H, W = volume.shape
-        D = self.voxel_depth
+        D = self.compute_shape[2]
         volume_3d = volume.unsqueeze(2).repeat(1, 1, D, 1, 1)
 
         return volume_3d
 
-    def forward(self, projections_dict, points=None, target_proj_hw=None):
+    def forward(self, projections_dict, points=None, target_proj_hw=None, **kwargs):
         """
         Args:
             projections_dict: dict {view_name: [B, H, W]}
@@ -286,8 +303,11 @@ class UHRDeepFMT3DUNet(nn.Module):
             aux_output: dict
         """
         # 转换投影到3D（默认对齐 ROI 的 x/y 尺寸）
-        if target_proj_hw is None and points is not None:
-            target_proj_hw = (self.roi_x, self.roi_y)
+        if target_proj_hw is None and (
+            points is not None
+            or str(getattr(self.config.model, "output_type", "query")).lower() == "voxel"
+        ):
+            target_proj_hw = self.compute_shape[:2]
         x = self._reshape_projections_to_3d(projections_dict, target_hw=target_proj_hw)
 
         # 编码-Bottleneck-解码
@@ -296,9 +316,38 @@ class UHRDeepFMT3DUNet(nn.Module):
         x = self.bottleneck(x)
         skip_features_reversed = skip_features[::-1]
         output = self.decoder(x, skip_features_reversed)
+        target_dhw = (self.compute_shape[2], self.compute_shape[0], self.compute_shape[1])
+        if tuple(output.shape[2:]) != target_dhw:
+            output = F.interpolate(
+                output,
+                size=target_dhw,
+                mode="trilinear",
+                align_corners=False,
+            )
 
         # 激活和重塑
         output = self.output_activation(output)
+        if str(getattr(self.config.model, "output_type", "query")).lower() == "voxel":
+            if self.output_mode == "lowres" and self.upsample_to_full:
+                output = F.interpolate(
+                    output,
+                    size=(
+                        self.full_output_shape[2],
+                        self.full_output_shape[0],
+                        self.full_output_shape[1],
+                    ),
+                    mode="trilinear",
+                    align_corners=False,
+                )
+            # Decoder is [B,1,z,x,y]; FMT-SimGen GT is indexed [x,y,z].
+            pred_voxel = output.permute(0, 1, 3, 4, 2).contiguous()
+            aux_output = {
+                "output_space": "lowres_to_full" if self.output_mode == "lowres" else "fullres",
+                "internal_shape": self.compute_shape,
+                "voxel_loss_type": self.loss_type,
+                "dice_weight": self.dice_weight,
+            }
+            return {"pred_voxel": pred_voxel, "aux_outputs": aux_output}
         B, _, D, H, W = output.shape
         output_flat = output.view(B, -1, 1)
 
@@ -306,7 +355,11 @@ class UHRDeepFMT3DUNet(nn.Module):
         if points is not None:
             # points are normalized in global voxel coordinates (x,y,z in [0,1])
             vr = self.config.data.voxel_ranges
-            global_shape = torch.tensor(self.global_voxel_shape, device=points.device, dtype=points.dtype)
+            global_shape = torch.tensor(
+                self.global_voxel_shape,
+                device=points.device,
+                dtype=points.dtype,
+            )
             pts_global = torch.round(points * (global_shape - 1)).long()  # [B,N,3] as (x,y,z)
 
             x0, y0, z0 = int(vr.x[0]), int(vr.y[0]), int(vr.z[0])

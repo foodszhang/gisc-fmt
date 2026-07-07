@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e1b_nongt_mixed
+  - _self_
+
+name: fmt_simgen_e2_ptfa_s3_fixed
+description: FMT-SimGen E2 s3-only fixed Gaussian PTFA over E1b mixed sampler
+
+model:
+  ptfa:
+    enabled: true
+    scales: ["s3"]
+    mode: fixed_gaussian
+    window: 5
+    sigma_px: 1.0

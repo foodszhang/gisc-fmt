@@ -1,0 +1,901 @@
+sample_id,ablation,label,delta_dice
+sample_0002,w/o transport-aware footprint,No footprint,0.008109027727208673
+sample_0006,w/o transport-aware footprint,No footprint,0.04698829787934167
+sample_0022,w/o transport-aware footprint,No footprint,0.12315748256373804
+sample_0032,w/o transport-aware footprint,No footprint,0.020791138392244557
+sample_0038,w/o transport-aware footprint,No footprint,0.09268521179072287
+sample_0079,w/o transport-aware footprint,No footprint,0.10072654548485815
+sample_0096,w/o transport-aware footprint,No footprint,0.07149919471067745
+sample_0100,w/o transport-aware footprint,No footprint,0.13360459300319188
+sample_0108,w/o transport-aware footprint,No footprint,-0.20885357892480716
+sample_0113,w/o transport-aware footprint,No footprint,0.09955721784932314
+sample_0122,w/o transport-aware footprint,No footprint,-0.0005320378987027086
+sample_0128,w/o transport-aware footprint,No footprint,0.08955373518862209
+sample_0130,w/o transport-aware footprint,No footprint,0.0505347269865325
+sample_0158,w/o transport-aware footprint,No footprint,0.03188543960309287
+sample_0163,w/o transport-aware footprint,No footprint,0.09768295136143756
+sample_0180,w/o transport-aware footprint,No footprint,0.11620010404243286
+sample_0187,w/o transport-aware footprint,No footprint,0.06777728461434529
+sample_0189,w/o transport-aware footprint,No footprint,0.03298067743066213
+sample_0192,w/o transport-aware footprint,No footprint,0.01754920062675014
+sample_0207,w/o transport-aware footprint,No footprint,-0.0113841697127125
+sample_0234,w/o transport-aware footprint,No footprint,0.025328344622650656
+sample_0240,w/o transport-aware footprint,No footprint,0.0037844488758140837
+sample_0248,w/o transport-aware footprint,No footprint,0.0719292529192338
+sample_0260,w/o transport-aware footprint,No footprint,-0.16263615058920589
+sample_0276,w/o transport-aware footprint,No footprint,0.0037040053006506257
+sample_0280,w/o transport-aware footprint,No footprint,0.1135653876168719
+sample_0290,w/o transport-aware footprint,No footprint,-0.011041664991833011
+sample_0297,w/o transport-aware footprint,No footprint,-0.06681771428374217
+sample_0300,w/o transport-aware footprint,No footprint,-0.018644717490345575
+sample_0308,w/o transport-aware footprint,No footprint,0.03382320977381481
+sample_0322,w/o transport-aware footprint,No footprint,0.13003361743140385
+sample_0328,w/o transport-aware footprint,No footprint,0.05185849448804969
+sample_0335,w/o transport-aware footprint,No footprint,0.005600737862420768
+sample_0347,w/o transport-aware footprint,No footprint,-0.1252850173506735
+sample_0350,w/o transport-aware footprint,No footprint,0.010257128360723122
+sample_0378,w/o transport-aware footprint,No footprint,0.055218314313232764
+sample_0382,w/o transport-aware footprint,No footprint,0.136670622805646
+sample_0386,w/o transport-aware footprint,No footprint,-0.011915189229343981
+sample_0396,w/o transport-aware footprint,No footprint,0.045495352823419766
+sample_0397,w/o transport-aware footprint,No footprint,-0.12093691700304499
+sample_0401,w/o transport-aware footprint,No footprint,0.1103200266512272
+sample_0409,w/o transport-aware footprint,No footprint,0.1923709447531603
+sample_0418,w/o transport-aware footprint,No footprint,0.06505642927142313
+sample_0436,w/o transport-aware footprint,No footprint,0.028816853241568685
+sample_0438,w/o transport-aware footprint,No footprint,-0.12938209144531998
+sample_0447,w/o transport-aware footprint,No footprint,0.05913100568704044
+sample_0449,w/o transport-aware footprint,No footprint,0.06260800454568505
+sample_0456,w/o transport-aware footprint,No footprint,0.07045894197643299
+sample_0458,w/o transport-aware footprint,No footprint,0.11793392943563685
+sample_0469,w/o transport-aware footprint,No footprint,-0.0032629278843852028
+sample_0472,w/o transport-aware footprint,No footprint,-0.03019540920553121
+sample_0473,w/o transport-aware footprint,No footprint,0.11682014187713452
+sample_0511,w/o transport-aware footprint,No footprint,0.017705079464400142
+sample_0521,w/o transport-aware footprint,No footprint,0.08861242696423577
+sample_0525,w/o transport-aware footprint,No footprint,-0.038216281079002656
+sample_0535,w/o transport-aware footprint,No footprint,0.039365581132335126
+sample_0536,w/o transport-aware footprint,No footprint,-0.0005551175378174511
+sample_0541,w/o transport-aware footprint,No footprint,0.1859395904188914
+sample_0566,w/o transport-aware footprint,No footprint,0.08701016135995665
+sample_0585,w/o transport-aware footprint,No footprint,-0.16070466940173467
+sample_0603,w/o transport-aware footprint,No footprint,0.058154088493119094
+sample_0610,w/o transport-aware footprint,No footprint,0.16647331156253764
+sample_0626,w/o transport-aware footprint,No footprint,0.006641368220760502
+sample_0633,w/o transport-aware footprint,No footprint,0.19665274792051646
+sample_0646,w/o transport-aware footprint,No footprint,0.06978216028512219
+sample_0647,w/o transport-aware footprint,No footprint,0.07992512827799192
+sample_0652,w/o transport-aware footprint,No footprint,-0.02706749433181621
+sample_0661,w/o transport-aware footprint,No footprint,0.26837619760077347
+sample_0666,w/o transport-aware footprint,No footprint,0.31808975381570337
+sample_0674,w/o transport-aware footprint,No footprint,0.07390852309326479
+sample_0676,w/o transport-aware footprint,No footprint,0.021097774041820894
+sample_0681,w/o transport-aware footprint,No footprint,0.03020537796111733
+sample_0712,w/o transport-aware footprint,No footprint,0.25130529634917975
+sample_0751,w/o transport-aware footprint,No footprint,0.031568791331416435
+sample_0761,w/o transport-aware footprint,No footprint,0.13477576953912485
+sample_0777,w/o transport-aware footprint,No footprint,0.02812530950783143
+sample_0778,w/o transport-aware footprint,No footprint,0.040283834301041765
+sample_0791,w/o transport-aware footprint,No footprint,-0.011145482532752049
+sample_0796,w/o transport-aware footprint,No footprint,0.03996106122715937
+sample_0807,w/o transport-aware footprint,No footprint,0.14901409997359427
+sample_0817,w/o transport-aware footprint,No footprint,0.2378862823546437
+sample_0823,w/o transport-aware footprint,No footprint,-0.15637289143449007
+sample_0858,w/o transport-aware footprint,No footprint,0.008484634644181588
+sample_0860,w/o transport-aware footprint,No footprint,-0.015125691768228866
+sample_0867,w/o transport-aware footprint,No footprint,-0.007015027413906916
+sample_0870,w/o transport-aware footprint,No footprint,0.046772844345762954
+sample_0875,w/o transport-aware footprint,No footprint,0.0776947762659621
+sample_0881,w/o transport-aware footprint,No footprint,-0.01915373954114985
+sample_0895,w/o transport-aware footprint,No footprint,-0.0724579713039133
+sample_0911,w/o transport-aware footprint,No footprint,-0.16775767959119225
+sample_0913,w/o transport-aware footprint,No footprint,0.20499073934226247
+sample_0914,w/o transport-aware footprint,No footprint,-0.08433091011673338
+sample_0920,w/o transport-aware footprint,No footprint,0.05185714018397625
+sample_0932,w/o transport-aware footprint,No footprint,-0.05480250636593664
+sample_0942,w/o transport-aware footprint,No footprint,-0.11341979361295584
+sample_0953,w/o transport-aware footprint,No footprint,0.05026038577761616
+sample_0960,w/o transport-aware footprint,No footprint,0.14930366279911922
+sample_0974,w/o transport-aware footprint,No footprint,0.11210621472700733
+sample_0977,w/o transport-aware footprint,No footprint,0.026283656871933347
+sample_0979,w/o transport-aware footprint,No footprint,0.08799376601913045
+sample_1000,w/o transport-aware footprint,No footprint,0.09617529833409622
+sample_1002,w/o transport-aware footprint,No footprint,-0.08208658825904214
+sample_1003,w/o transport-aware footprint,No footprint,0.07105181444921727
+sample_1015,w/o transport-aware footprint,No footprint,0.004664205281006528
+sample_1018,w/o transport-aware footprint,No footprint,0.1079332165092951
+sample_1028,w/o transport-aware footprint,No footprint,0.012718428603473275
+sample_1068,w/o transport-aware footprint,No footprint,-0.2716043515944657
+sample_1069,w/o transport-aware footprint,No footprint,-0.1416492745856791
+sample_1072,w/o transport-aware footprint,No footprint,0.052983988374569746
+sample_1078,w/o transport-aware footprint,No footprint,0.035134654711734714
+sample_1081,w/o transport-aware footprint,No footprint,-0.06015601488058597
+sample_1085,w/o transport-aware footprint,No footprint,0.03602564278267684
+sample_1086,w/o transport-aware footprint,No footprint,0.09920235777952169
+sample_1092,w/o transport-aware footprint,No footprint,0.010793582699604176
+sample_1093,w/o transport-aware footprint,No footprint,0.04820706563902111
+sample_1096,w/o transport-aware footprint,No footprint,0.07863894368446267
+sample_1112,w/o transport-aware footprint,No footprint,0.03776240023536914
+sample_1126,w/o transport-aware footprint,No footprint,0.09833321982676224
+sample_1133,w/o transport-aware footprint,No footprint,0.06373410570048532
+sample_1135,w/o transport-aware footprint,No footprint,0.04280106337774403
+sample_1139,w/o transport-aware footprint,No footprint,0.06477203196679016
+sample_1167,w/o transport-aware footprint,No footprint,0.1215358186111184
+sample_1175,w/o transport-aware footprint,No footprint,0.06697957373590324
+sample_1185,w/o transport-aware footprint,No footprint,0.012375274215700505
+sample_1211,w/o transport-aware footprint,No footprint,0.20498888976834884
+sample_1215,w/o transport-aware footprint,No footprint,0.05462597186437168
+sample_1230,w/o transport-aware footprint,No footprint,0.08937619914252393
+sample_1244,w/o transport-aware footprint,No footprint,0.06203928985654794
+sample_1259,w/o transport-aware footprint,No footprint,-0.014232295146469176
+sample_1262,w/o transport-aware footprint,No footprint,0.12024014958578111
+sample_1266,w/o transport-aware footprint,No footprint,0.1577946217818641
+sample_1276,w/o transport-aware footprint,No footprint,0.1211326123153863
+sample_1285,w/o transport-aware footprint,No footprint,-0.03287531177842895
+sample_1286,w/o transport-aware footprint,No footprint,-0.07648657629863831
+sample_1288,w/o transport-aware footprint,No footprint,0.07538261494185061
+sample_1292,w/o transport-aware footprint,No footprint,-0.006684536545083275
+sample_1319,w/o transport-aware footprint,No footprint,0.08297107286668504
+sample_1327,w/o transport-aware footprint,No footprint,-0.10901295526567012
+sample_1328,w/o transport-aware footprint,No footprint,0.13449606797319003
+sample_1366,w/o transport-aware footprint,No footprint,0.1755221842744138
+sample_1372,w/o transport-aware footprint,No footprint,0.15679325027208224
+sample_1378,w/o transport-aware footprint,No footprint,-0.04648656094294412
+sample_1384,w/o transport-aware footprint,No footprint,-0.059330256726801256
+sample_1389,w/o transport-aware footprint,No footprint,0.07455388442616173
+sample_1404,w/o transport-aware footprint,No footprint,0.0054791699822078765
+sample_1429,w/o transport-aware footprint,No footprint,-0.016390215688872556
+sample_1432,w/o transport-aware footprint,No footprint,0.022618547281845314
+sample_1438,w/o transport-aware footprint,No footprint,0.10009721089244261
+sample_1455,w/o transport-aware footprint,No footprint,0.0016313499269465792
+sample_1470,w/o transport-aware footprint,No footprint,-0.11066937145421851
+sample_1482,w/o transport-aware footprint,No footprint,0.041170994563449526
+sample_1486,w/o transport-aware footprint,No footprint,0.048085722450097235
+sample_1513,w/o transport-aware footprint,No footprint,0.0006595137767997361
+sample_1516,w/o transport-aware footprint,No footprint,-0.14260732759446537
+sample_1529,w/o transport-aware footprint,No footprint,0.1000438466658059
+sample_1566,w/o transport-aware footprint,No footprint,0.062212032660181826
+sample_1572,w/o transport-aware footprint,No footprint,-0.1455824379279842
+sample_1599,w/o transport-aware footprint,No footprint,0.011438038110117899
+sample_1620,w/o transport-aware footprint,No footprint,0.18528598106207012
+sample_1634,w/o transport-aware footprint,No footprint,0.190766164287964
+sample_1635,w/o transport-aware footprint,No footprint,-0.021686089534396102
+sample_1642,w/o transport-aware footprint,No footprint,0.04198384824267576
+sample_1643,w/o transport-aware footprint,No footprint,0.04998592311312
+sample_1683,w/o transport-aware footprint,No footprint,0.15527003201585798
+sample_1686,w/o transport-aware footprint,No footprint,0.0834322917938144
+sample_1688,w/o transport-aware footprint,No footprint,-0.12949157176036674
+sample_1697,w/o transport-aware footprint,No footprint,0.08589536007365883
+sample_1717,w/o transport-aware footprint,No footprint,0.01851270607742561
+sample_1718,w/o transport-aware footprint,No footprint,0.11274205586327057
+sample_1729,w/o transport-aware footprint,No footprint,0.03814307515279458
+sample_1731,w/o transport-aware footprint,No footprint,-0.08270584130783132
+sample_1734,w/o transport-aware footprint,No footprint,-0.07226810100585512
+sample_1741,w/o transport-aware footprint,No footprint,0.050174849249304376
+sample_1760,w/o transport-aware footprint,No footprint,-0.029318524588989092
+sample_1765,w/o transport-aware footprint,No footprint,-0.05523778199395635
+sample_1787,w/o transport-aware footprint,No footprint,0.02881755594203894
+sample_1809,w/o transport-aware footprint,No footprint,0.02554270264415537
+sample_1811,w/o transport-aware footprint,No footprint,0.080831912670562
+sample_1812,w/o transport-aware footprint,No footprint,-0.09665755931999531
+sample_1815,w/o transport-aware footprint,No footprint,0.0405799097566486
+sample_1826,w/o transport-aware footprint,No footprint,-0.0004768450132216495
+sample_1837,w/o transport-aware footprint,No footprint,0.14902320865609553
+sample_1839,w/o transport-aware footprint,No footprint,0.10627188616861571
+sample_1843,w/o transport-aware footprint,No footprint,0.06777989876409851
+sample_1858,w/o transport-aware footprint,No footprint,0.14491458560958448
+sample_1863,w/o transport-aware footprint,No footprint,0.17795144156349418
+sample_1865,w/o transport-aware footprint,No footprint,0.12725463069021414
+sample_1869,w/o transport-aware footprint,No footprint,-0.029380245142197503
+sample_1881,w/o transport-aware footprint,No footprint,-0.03409286783078669
+sample_1885,w/o transport-aware footprint,No footprint,-0.08098694300295661
+sample_1893,w/o transport-aware footprint,No footprint,0.1425619999541089
+sample_1894,w/o transport-aware footprint,No footprint,0.06345079684695487
+sample_1904,w/o transport-aware footprint,No footprint,0.16708746719182976
+sample_1927,w/o transport-aware footprint,No footprint,0.05078524322479239
+sample_1944,w/o transport-aware footprint,No footprint,0.02241342840442495
+sample_1989,w/o transport-aware footprint,No footprint,-0.06614768024835893
+sample_1993,w/o transport-aware footprint,No footprint,0.08691607187873407
+sample_2021,w/o transport-aware footprint,No footprint,0.03768744022691284
+sample_2024,w/o transport-aware footprint,No footprint,-0.0021368711924181216
+sample_2044,w/o transport-aware footprint,No footprint,0.08179177689564376
+sample_2059,w/o transport-aware footprint,No footprint,-0.026547495073686922
+sample_2067,w/o transport-aware footprint,No footprint,0.08007983913029693
+sample_2069,w/o transport-aware footprint,No footprint,0.013678544987829055
+sample_2070,w/o transport-aware footprint,No footprint,-0.024544510849958123
+sample_2072,w/o transport-aware footprint,No footprint,-0.0036973954276395826
+sample_2077,w/o transport-aware footprint,No footprint,0.10822472023694996
+sample_2079,w/o transport-aware footprint,No footprint,0.083332489908441
+sample_2086,w/o transport-aware footprint,No footprint,-0.004105293396478138
+sample_2087,w/o transport-aware footprint,No footprint,0.07757540627677473
+sample_2111,w/o transport-aware footprint,No footprint,0.04284633860451226
+sample_2119,w/o transport-aware footprint,No footprint,0.01759229389994632
+sample_2121,w/o transport-aware footprint,No footprint,-0.06661332214046423
+sample_2129,w/o transport-aware footprint,No footprint,-0.34266891655552556
+sample_2166,w/o transport-aware footprint,No footprint,-0.03381062618461739
+sample_2167,w/o transport-aware footprint,No footprint,0.0852828730364541
+sample_2172,w/o transport-aware footprint,No footprint,0.029447614095901242
+sample_2175,w/o transport-aware footprint,No footprint,0.09214481488843607
+sample_2196,w/o transport-aware footprint,No footprint,0.17928897041712288
+sample_2199,w/o transport-aware footprint,No footprint,0.021000289845467868
+sample_2202,w/o transport-aware footprint,No footprint,-0.03965162599695182
+sample_2207,w/o transport-aware footprint,No footprint,0.10140779089550833
+sample_2208,w/o transport-aware footprint,No footprint,0.048710311177756926
+sample_2209,w/o transport-aware footprint,No footprint,0.10204634125671364
+sample_2225,w/o transport-aware footprint,No footprint,-0.06896106288257664
+sample_2234,w/o transport-aware footprint,No footprint,0.06516509078261257
+sample_2259,w/o transport-aware footprint,No footprint,-0.026038524791980766
+sample_2263,w/o transport-aware footprint,No footprint,0.012822358468661865
+sample_2266,w/o transport-aware footprint,No footprint,-0.0800923682630032
+sample_2270,w/o transport-aware footprint,No footprint,0.22119230521984684
+sample_2271,w/o transport-aware footprint,No footprint,-0.07361878047712256
+sample_2281,w/o transport-aware footprint,No footprint,-0.05950047548026427
+sample_2293,w/o transport-aware footprint,No footprint,-0.004060829840745517
+sample_2299,w/o transport-aware footprint,No footprint,0.08168400285515709
+sample_2306,w/o transport-aware footprint,No footprint,-0.009390642400738392
+sample_2323,w/o transport-aware footprint,No footprint,0.008991615124399166
+sample_2357,w/o transport-aware footprint,No footprint,0.04212362643142398
+sample_2361,w/o transport-aware footprint,No footprint,0.02055795886190459
+sample_2372,w/o transport-aware footprint,No footprint,0.18931984426465231
+sample_2375,w/o transport-aware footprint,No footprint,0.0028818021932692783
+sample_2378,w/o transport-aware footprint,No footprint,0.05118102463374463
+sample_2385,w/o transport-aware footprint,No footprint,0.03484621846651548
+sample_2409,w/o transport-aware footprint,No footprint,0.1726877065407409
+sample_2413,w/o transport-aware footprint,No footprint,-0.2269917226369399
+sample_2418,w/o transport-aware footprint,No footprint,0.09106123580941183
+sample_2435,w/o transport-aware footprint,No footprint,0.006373605772691304
+sample_2440,w/o transport-aware footprint,No footprint,-0.16106786966155917
+sample_2442,w/o transport-aware footprint,No footprint,0.1172971192442881
+sample_2453,w/o transport-aware footprint,No footprint,-0.014322197581509766
+sample_2472,w/o transport-aware footprint,No footprint,-0.16792495815629138
+sample_2477,w/o transport-aware footprint,No footprint,0.0872150681151862
+sample_2478,w/o transport-aware footprint,No footprint,-0.2006639058786569
+sample_2483,w/o transport-aware footprint,No footprint,0.039167655743808094
+sample_2494,w/o transport-aware footprint,No footprint,-0.1293362672442352
+sample_2505,w/o transport-aware footprint,No footprint,0.09003274499158886
+sample_2533,w/o transport-aware footprint,No footprint,0.21961747869916448
+sample_2536,w/o transport-aware footprint,No footprint,0.016348755473941434
+sample_2584,w/o transport-aware footprint,No footprint,0.039119944998485257
+sample_2589,w/o transport-aware footprint,No footprint,-0.04668912582469964
+sample_2600,w/o transport-aware footprint,No footprint,-0.03976733084486206
+sample_2603,w/o transport-aware footprint,No footprint,0.022595792443008245
+sample_2614,w/o transport-aware footprint,No footprint,0.22024878451711533
+sample_2643,w/o transport-aware footprint,No footprint,-0.09769814595305415
+sample_2650,w/o transport-aware footprint,No footprint,0.225112649944319
+sample_2655,w/o transport-aware footprint,No footprint,0.11151832296868391
+sample_2676,w/o transport-aware footprint,No footprint,-0.052033725211603654
+sample_2682,w/o transport-aware footprint,No footprint,-0.09722014782656785
+sample_2684,w/o transport-aware footprint,No footprint,-0.07847613497043127
+sample_2698,w/o transport-aware footprint,No footprint,-0.010991243799487349
+sample_2702,w/o transport-aware footprint,No footprint,-0.11086819956442617
+sample_2711,w/o transport-aware footprint,No footprint,0.01277486712315934
+sample_2719,w/o transport-aware footprint,No footprint,0.008134022340414493
+sample_2741,w/o transport-aware footprint,No footprint,0.07639966957427857
+sample_2745,w/o transport-aware footprint,No footprint,-0.20157807944610673
+sample_2747,w/o transport-aware footprint,No footprint,-0.05899194129352103
+sample_2751,w/o transport-aware footprint,No footprint,0.15157332653673183
+sample_2759,w/o transport-aware footprint,No footprint,0.02966146801926639
+sample_2769,w/o transport-aware footprint,No footprint,-0.30823664616164953
+sample_2771,w/o transport-aware footprint,No footprint,0.018188703254161
+sample_2784,w/o transport-aware footprint,No footprint,0.18560335665123773
+sample_2799,w/o transport-aware footprint,No footprint,-0.0203684858253802
+sample_2804,w/o transport-aware footprint,No footprint,0.06640247900762697
+sample_2833,w/o transport-aware footprint,No footprint,0.09103082158765441
+sample_2844,w/o transport-aware footprint,No footprint,-0.018102794077436646
+sample_2850,w/o transport-aware footprint,No footprint,0.014390926111081503
+sample_2872,w/o transport-aware footprint,No footprint,0.06720775347936847
+sample_2873,w/o transport-aware footprint,No footprint,-0.0042808412464337975
+sample_2874,w/o transport-aware footprint,No footprint,0.12100332535503389
+sample_2887,w/o transport-aware footprint,No footprint,-0.1542109767195078
+sample_2909,w/o transport-aware footprint,No footprint,-0.0053213208582455485
+sample_2932,w/o transport-aware footprint,No footprint,0.021206587966195345
+sample_2934,w/o transport-aware footprint,No footprint,0.14922041194138502
+sample_2936,w/o transport-aware footprint,No footprint,0.04605941468578617
+sample_2945,w/o transport-aware footprint,No footprint,0.058909127153753404
+sample_2948,w/o transport-aware footprint,No footprint,0.0461369084003872
+sample_2951,w/o transport-aware footprint,No footprint,0.028119260624859477
+sample_2956,w/o transport-aware footprint,No footprint,0.06548165195341449
+sample_2961,w/o transport-aware footprint,No footprint,-0.022548091381459856
+sample_2977,w/o transport-aware footprint,No footprint,0.11396867544330958
+sample_2987,w/o transport-aware footprint,No footprint,-0.08902186815073043
+sample_2993,w/o transport-aware footprint,No footprint,-0.035873723914923605
+sample_0002,w/o query-canonical reliability,No reliability,-0.00607514584190616
+sample_0006,w/o query-canonical reliability,No reliability,0.04614696968455978
+sample_0022,w/o query-canonical reliability,No reliability,0.05742727098428113
+sample_0032,w/o query-canonical reliability,No reliability,0.00817454932346684
+sample_0038,w/o query-canonical reliability,No reliability,0.011073982227161383
+sample_0079,w/o query-canonical reliability,No reliability,0.01594261113388351
+sample_0096,w/o query-canonical reliability,No reliability,0.06080482640047069
+sample_0100,w/o query-canonical reliability,No reliability,-0.00897276696557131
+sample_0108,w/o query-canonical reliability,No reliability,-0.20989198574940338
+sample_0113,w/o query-canonical reliability,No reliability,0.10891328260751965
+sample_0122,w/o query-canonical reliability,No reliability,0.03418894694203656
+sample_0128,w/o query-canonical reliability,No reliability,0.04860043038308437
+sample_0130,w/o query-canonical reliability,No reliability,0.03853106660617689
+sample_0158,w/o query-canonical reliability,No reliability,0.024600217017813897
+sample_0163,w/o query-canonical reliability,No reliability,0.07668182297802328
+sample_0180,w/o query-canonical reliability,No reliability,0.07701948088637245
+sample_0187,w/o query-canonical reliability,No reliability,0.10627147889600363
+sample_0189,w/o query-canonical reliability,No reliability,0.06255615524055069
+sample_0192,w/o query-canonical reliability,No reliability,0.04017572357210275
+sample_0207,w/o query-canonical reliability,No reliability,0.043925661517671966
+sample_0234,w/o query-canonical reliability,No reliability,0.07718401166814626
+sample_0240,w/o query-canonical reliability,No reliability,0.00982026959001836
+sample_0248,w/o query-canonical reliability,No reliability,0.06156863456916584
+sample_0260,w/o query-canonical reliability,No reliability,-0.18047224325602385
+sample_0276,w/o query-canonical reliability,No reliability,0.02241264359041295
+sample_0280,w/o query-canonical reliability,No reliability,0.18966220039668458
+sample_0290,w/o query-canonical reliability,No reliability,0.005089323778891153
+sample_0297,w/o query-canonical reliability,No reliability,-0.05753661036525792
+sample_0300,w/o query-canonical reliability,No reliability,0.03348298834928354
+sample_0308,w/o query-canonical reliability,No reliability,0.04620413814467261
+sample_0322,w/o query-canonical reliability,No reliability,0.09956577248292275
+sample_0328,w/o query-canonical reliability,No reliability,0.03072171809028368
+sample_0335,w/o query-canonical reliability,No reliability,-0.08890033765433647
+sample_0347,w/o query-canonical reliability,No reliability,-0.16839652015810053
+sample_0350,w/o query-canonical reliability,No reliability,0.0221303174475862
+sample_0378,w/o query-canonical reliability,No reliability,0.0533047952752832
+sample_0382,w/o query-canonical reliability,No reliability,0.010157549476271677
+sample_0386,w/o query-canonical reliability,No reliability,0.013446979668521264
+sample_0396,w/o query-canonical reliability,No reliability,-0.04117768435596769
+sample_0397,w/o query-canonical reliability,No reliability,-0.14226852980541638
+sample_0401,w/o query-canonical reliability,No reliability,0.01523421212994791
+sample_0409,w/o query-canonical reliability,No reliability,0.16141910754272926
+sample_0418,w/o query-canonical reliability,No reliability,0.10264937196500284
+sample_0436,w/o query-canonical reliability,No reliability,0.06864808891293539
+sample_0438,w/o query-canonical reliability,No reliability,-0.060064358906852244
+sample_0447,w/o query-canonical reliability,No reliability,0.025980768635832874
+sample_0449,w/o query-canonical reliability,No reliability,-0.008161826280456141
+sample_0456,w/o query-canonical reliability,No reliability,-0.0004071103266000131
+sample_0458,w/o query-canonical reliability,No reliability,0.04499951028185023
+sample_0469,w/o query-canonical reliability,No reliability,0.05128532390391127
+sample_0472,w/o query-canonical reliability,No reliability,-0.022143422762071374
+sample_0473,w/o query-canonical reliability,No reliability,0.04033459371341763
+sample_0511,w/o query-canonical reliability,No reliability,-0.023494977510473247
+sample_0521,w/o query-canonical reliability,No reliability,0.039486262138032524
+sample_0525,w/o query-canonical reliability,No reliability,0.035047446072195454
+sample_0535,w/o query-canonical reliability,No reliability,-0.0033363765235878695
+sample_0536,w/o query-canonical reliability,No reliability,0.017498177990376895
+sample_0541,w/o query-canonical reliability,No reliability,0.053660881642259906
+sample_0566,w/o query-canonical reliability,No reliability,0.06802718405128494
+sample_0585,w/o query-canonical reliability,No reliability,-0.20933013654013488
+sample_0603,w/o query-canonical reliability,No reliability,0.07878100894949269
+sample_0610,w/o query-canonical reliability,No reliability,0.1328283439326179
+sample_0626,w/o query-canonical reliability,No reliability,-0.0045452800000281846
+sample_0633,w/o query-canonical reliability,No reliability,0.08581369092869318
+sample_0646,w/o query-canonical reliability,No reliability,0.06360364119072226
+sample_0647,w/o query-canonical reliability,No reliability,0.03758220096739262
+sample_0652,w/o query-canonical reliability,No reliability,-0.021696769107011793
+sample_0661,w/o query-canonical reliability,No reliability,0.16054632035145344
+sample_0666,w/o query-canonical reliability,No reliability,0.2769076356602508
+sample_0674,w/o query-canonical reliability,No reliability,0.11424072145431652
+sample_0676,w/o query-canonical reliability,No reliability,0.008875760177709413
+sample_0681,w/o query-canonical reliability,No reliability,0.07128274112276067
+sample_0712,w/o query-canonical reliability,No reliability,0.19720888714483487
+sample_0751,w/o query-canonical reliability,No reliability,0.037304165202619366
+sample_0761,w/o query-canonical reliability,No reliability,0.07309140953204207
+sample_0777,w/o query-canonical reliability,No reliability,0.03482683400246411
+sample_0778,w/o query-canonical reliability,No reliability,-0.018691366068826376
+sample_0791,w/o query-canonical reliability,No reliability,0.084006580160078
+sample_0796,w/o query-canonical reliability,No reliability,0.0827283227796809
+sample_0807,w/o query-canonical reliability,No reliability,0.1672836647052135
+sample_0817,w/o query-canonical reliability,No reliability,0.15501681950043733
+sample_0823,w/o query-canonical reliability,No reliability,-0.06705308085007355
+sample_0858,w/o query-canonical reliability,No reliability,0.06666736111311766
+sample_0860,w/o query-canonical reliability,No reliability,-0.04669691030921219
+sample_0867,w/o query-canonical reliability,No reliability,0.02672726471043474
+sample_0870,w/o query-canonical reliability,No reliability,0.034150392104798255
+sample_0875,w/o query-canonical reliability,No reliability,-0.01718259504956654
+sample_0881,w/o query-canonical reliability,No reliability,-0.036018831482266145
+sample_0895,w/o query-canonical reliability,No reliability,-0.11252263175343413
+sample_0911,w/o query-canonical reliability,No reliability,-0.1649428238216578
+sample_0913,w/o query-canonical reliability,No reliability,0.16490948971692448
+sample_0914,w/o query-canonical reliability,No reliability,-0.14127943350461497
+sample_0920,w/o query-canonical reliability,No reliability,0.04654951746346203
+sample_0932,w/o query-canonical reliability,No reliability,-0.020028994016707602
+sample_0942,w/o query-canonical reliability,No reliability,-0.037991539534206975
+sample_0953,w/o query-canonical reliability,No reliability,0.04449255156588605
+sample_0960,w/o query-canonical reliability,No reliability,0.07792822908181951
+sample_0974,w/o query-canonical reliability,No reliability,0.1387426092312749
+sample_0977,w/o query-canonical reliability,No reliability,-0.028140120262823753
+sample_0979,w/o query-canonical reliability,No reliability,3.953188403849062e-05
+sample_1000,w/o query-canonical reliability,No reliability,0.13229630255414437
+sample_1002,w/o query-canonical reliability,No reliability,-0.10470480556694839
+sample_1003,w/o query-canonical reliability,No reliability,0.023474779704736548
+sample_1015,w/o query-canonical reliability,No reliability,-0.011343284299513812
+sample_1018,w/o query-canonical reliability,No reliability,0.05690013815287287
+sample_1028,w/o query-canonical reliability,No reliability,-0.015808068238010287
+sample_1068,w/o query-canonical reliability,No reliability,-0.2647649498919168
+sample_1069,w/o query-canonical reliability,No reliability,-0.09804784606243444
+sample_1072,w/o query-canonical reliability,No reliability,-0.06206772116679904
+sample_1078,w/o query-canonical reliability,No reliability,0.009173345636220964
+sample_1081,w/o query-canonical reliability,No reliability,-0.01777878305901981
+sample_1085,w/o query-canonical reliability,No reliability,0.02400324916149943
+sample_1086,w/o query-canonical reliability,No reliability,0.017630854587729727
+sample_1092,w/o query-canonical reliability,No reliability,0.027539343631507784
+sample_1093,w/o query-canonical reliability,No reliability,0.049339792460739496
+sample_1096,w/o query-canonical reliability,No reliability,0.06807010153516146
+sample_1112,w/o query-canonical reliability,No reliability,0.14470457139180148
+sample_1126,w/o query-canonical reliability,No reliability,0.1110500427175779
+sample_1133,w/o query-canonical reliability,No reliability,0.053465639024718015
+sample_1135,w/o query-canonical reliability,No reliability,0.14465895362879577
+sample_1139,w/o query-canonical reliability,No reliability,-0.004757493488339426
+sample_1167,w/o query-canonical reliability,No reliability,0.09176622403890744
+sample_1175,w/o query-canonical reliability,No reliability,0.051418652230061146
+sample_1185,w/o query-canonical reliability,No reliability,-0.1267671860530939
+sample_1211,w/o query-canonical reliability,No reliability,0.2020892850338588
+sample_1215,w/o query-canonical reliability,No reliability,0.07082031881024897
+sample_1230,w/o query-canonical reliability,No reliability,0.029846996757921462
+sample_1244,w/o query-canonical reliability,No reliability,0.0232496515877727
+sample_1259,w/o query-canonical reliability,No reliability,0.028385408682919167
+sample_1262,w/o query-canonical reliability,No reliability,0.0198521366995994
+sample_1266,w/o query-canonical reliability,No reliability,0.18028509890690458
+sample_1276,w/o query-canonical reliability,No reliability,0.12464506327971059
+sample_1285,w/o query-canonical reliability,No reliability,-0.05798354414786078
+sample_1286,w/o query-canonical reliability,No reliability,-0.011193719083646969
+sample_1288,w/o query-canonical reliability,No reliability,-0.008859586422739874
+sample_1292,w/o query-canonical reliability,No reliability,-0.01200382466092953
+sample_1319,w/o query-canonical reliability,No reliability,-0.04045100293134696
+sample_1327,w/o query-canonical reliability,No reliability,-0.11266849808715484
+sample_1328,w/o query-canonical reliability,No reliability,0.05077137075174187
+sample_1366,w/o query-canonical reliability,No reliability,0.041910899786209876
+sample_1372,w/o query-canonical reliability,No reliability,0.14181534218986036
+sample_1378,w/o query-canonical reliability,No reliability,0.044686083850481784
+sample_1384,w/o query-canonical reliability,No reliability,-0.1457221000405221
+sample_1389,w/o query-canonical reliability,No reliability,0.17503046639412412
+sample_1404,w/o query-canonical reliability,No reliability,0.1318166397038092
+sample_1429,w/o query-canonical reliability,No reliability,0.06910543110660805
+sample_1432,w/o query-canonical reliability,No reliability,0.011615838535863232
+sample_1438,w/o query-canonical reliability,No reliability,-0.10270795350480566
+sample_1455,w/o query-canonical reliability,No reliability,-0.011793959631365869
+sample_1470,w/o query-canonical reliability,No reliability,-0.09111283646429336
+sample_1482,w/o query-canonical reliability,No reliability,-0.019675502638391684
+sample_1486,w/o query-canonical reliability,No reliability,0.035061397240971126
+sample_1513,w/o query-canonical reliability,No reliability,-0.02257258648176652
+sample_1516,w/o query-canonical reliability,No reliability,-0.04456367035111175
+sample_1529,w/o query-canonical reliability,No reliability,0.09514133040837791
+sample_1566,w/o query-canonical reliability,No reliability,0.037431293613537586
+sample_1572,w/o query-canonical reliability,No reliability,-0.0937695574109968
+sample_1599,w/o query-canonical reliability,No reliability,-0.0806198698489955
+sample_1620,w/o query-canonical reliability,No reliability,0.247831999472078
+sample_1634,w/o query-canonical reliability,No reliability,0.06766986082799287
+sample_1635,w/o query-canonical reliability,No reliability,-0.02239658165892444
+sample_1642,w/o query-canonical reliability,No reliability,-0.012975865453250801
+sample_1643,w/o query-canonical reliability,No reliability,0.059334604073005504
+sample_1683,w/o query-canonical reliability,No reliability,0.04323607829446208
+sample_1686,w/o query-canonical reliability,No reliability,0.1209952628955222
+sample_1688,w/o query-canonical reliability,No reliability,-0.1368410275561167
+sample_1697,w/o query-canonical reliability,No reliability,0.06626596724491762
+sample_1717,w/o query-canonical reliability,No reliability,0.00027236561728316566
+sample_1718,w/o query-canonical reliability,No reliability,0.036706269886816134
+sample_1729,w/o query-canonical reliability,No reliability,0.04434346397837485
+sample_1731,w/o query-canonical reliability,No reliability,-0.04433596554186059
+sample_1734,w/o query-canonical reliability,No reliability,-0.062379007378119744
+sample_1741,w/o query-canonical reliability,No reliability,0.05373096123944432
+sample_1760,w/o query-canonical reliability,No reliability,-0.06876585720712136
+sample_1765,w/o query-canonical reliability,No reliability,0.0983151805994722
+sample_1787,w/o query-canonical reliability,No reliability,0.07905959490786252
+sample_1809,w/o query-canonical reliability,No reliability,0.04340510685915122
+sample_1811,w/o query-canonical reliability,No reliability,0.030332921190335593
+sample_1812,w/o query-canonical reliability,No reliability,-0.16205550203050367
+sample_1815,w/o query-canonical reliability,No reliability,0.03638351441227711
+sample_1826,w/o query-canonical reliability,No reliability,-0.02106976394918325
+sample_1837,w/o query-canonical reliability,No reliability,0.11046632500132225
+sample_1839,w/o query-canonical reliability,No reliability,0.01765188525632344
+sample_1843,w/o query-canonical reliability,No reliability,0.03368392226271366
+sample_1858,w/o query-canonical reliability,No reliability,0.14436873857518306
+sample_1863,w/o query-canonical reliability,No reliability,0.07906690762853397
+sample_1865,w/o query-canonical reliability,No reliability,0.07117120824940448
+sample_1869,w/o query-canonical reliability,No reliability,0.005017046899835287
+sample_1881,w/o query-canonical reliability,No reliability,0.0017675272001781983
+sample_1885,w/o query-canonical reliability,No reliability,-0.14212988850945718
+sample_1893,w/o query-canonical reliability,No reliability,0.13605377232829852
+sample_1894,w/o query-canonical reliability,No reliability,0.0471232312522889
+sample_1904,w/o query-canonical reliability,No reliability,0.07454406410164027
+sample_1927,w/o query-canonical reliability,No reliability,0.0381182558525035
+sample_1944,w/o query-canonical reliability,No reliability,-0.009118716820950334
+sample_1989,w/o query-canonical reliability,No reliability,-0.06047325114632374
+sample_1993,w/o query-canonical reliability,No reliability,0.03460724838932294
+sample_2021,w/o query-canonical reliability,No reliability,-0.009086436765253336
+sample_2024,w/o query-canonical reliability,No reliability,0.04118511254651536
+sample_2044,w/o query-canonical reliability,No reliability,0.04617095381057945
+sample_2059,w/o query-canonical reliability,No reliability,-0.02057017883933454
+sample_2067,w/o query-canonical reliability,No reliability,0.08399904203077713
+sample_2069,w/o query-canonical reliability,No reliability,0.0663503460664423
+sample_2070,w/o query-canonical reliability,No reliability,0.007504272491638764
+sample_2072,w/o query-canonical reliability,No reliability,0.0566488711215416
+sample_2077,w/o query-canonical reliability,No reliability,0.10214136907871174
+sample_2079,w/o query-canonical reliability,No reliability,0.06664181508434996
+sample_2086,w/o query-canonical reliability,No reliability,0.09943366549759602
+sample_2087,w/o query-canonical reliability,No reliability,0.13757061338221854
+sample_2111,w/o query-canonical reliability,No reliability,-0.006361313698632687
+sample_2119,w/o query-canonical reliability,No reliability,0.026772325790496265
+sample_2121,w/o query-canonical reliability,No reliability,-0.040310744882531946
+sample_2129,w/o query-canonical reliability,No reliability,-0.1478377876372321
+sample_2166,w/o query-canonical reliability,No reliability,-0.09769815336837495
+sample_2167,w/o query-canonical reliability,No reliability,-0.019357156417182275
+sample_2172,w/o query-canonical reliability,No reliability,0.050674199930277664
+sample_2175,w/o query-canonical reliability,No reliability,0.11101876023232315
+sample_2196,w/o query-canonical reliability,No reliability,0.08569790481883677
+sample_2199,w/o query-canonical reliability,No reliability,0.0732498864119897
+sample_2202,w/o query-canonical reliability,No reliability,-0.02900343651133863
+sample_2207,w/o query-canonical reliability,No reliability,0.03107928608652699
+sample_2208,w/o query-canonical reliability,No reliability,0.04120760999562656
+sample_2209,w/o query-canonical reliability,No reliability,0.022172619373222013
+sample_2225,w/o query-canonical reliability,No reliability,-0.04313429522869627
+sample_2234,w/o query-canonical reliability,No reliability,0.019496003927598538
+sample_2259,w/o query-canonical reliability,No reliability,-0.03904723306196767
+sample_2263,w/o query-canonical reliability,No reliability,-0.01692286391838982
+sample_2266,w/o query-canonical reliability,No reliability,-0.15824977264342038
+sample_2270,w/o query-canonical reliability,No reliability,0.040727195558118545
+sample_2271,w/o query-canonical reliability,No reliability,0.015538802257934137
+sample_2281,w/o query-canonical reliability,No reliability,-0.009320214551154615
+sample_2293,w/o query-canonical reliability,No reliability,0.013047016619442409
+sample_2299,w/o query-canonical reliability,No reliability,-0.015057168161118462
+sample_2306,w/o query-canonical reliability,No reliability,-0.010607115145330859
+sample_2323,w/o query-canonical reliability,No reliability,0.03256195151917485
+sample_2357,w/o query-canonical reliability,No reliability,0.10115550941135643
+sample_2361,w/o query-canonical reliability,No reliability,0.043658959771896266
+sample_2372,w/o query-canonical reliability,No reliability,0.15879995661172763
+sample_2375,w/o query-canonical reliability,No reliability,0.0737326673346197
+sample_2378,w/o query-canonical reliability,No reliability,0.09588527247959355
+sample_2385,w/o query-canonical reliability,No reliability,0.020160296189330573
+sample_2409,w/o query-canonical reliability,No reliability,0.09264638871828701
+sample_2413,w/o query-canonical reliability,No reliability,-0.30104079381047655
+sample_2418,w/o query-canonical reliability,No reliability,-0.06975873697260426
+sample_2435,w/o query-canonical reliability,No reliability,-0.04250807785466204
+sample_2440,w/o query-canonical reliability,No reliability,-0.165616912877239
+sample_2442,w/o query-canonical reliability,No reliability,0.05379630088682141
+sample_2453,w/o query-canonical reliability,No reliability,-0.047220107468677
+sample_2472,w/o query-canonical reliability,No reliability,-0.1623210851190342
+sample_2477,w/o query-canonical reliability,No reliability,0.10426901869656469
+sample_2478,w/o query-canonical reliability,No reliability,-0.2499567063645446
+sample_2483,w/o query-canonical reliability,No reliability,0.03808147325010969
+sample_2494,w/o query-canonical reliability,No reliability,0.002697695771134323
+sample_2505,w/o query-canonical reliability,No reliability,0.0851453432617042
+sample_2533,w/o query-canonical reliability,No reliability,0.08042793874135368
+sample_2536,w/o query-canonical reliability,No reliability,0.038883753007981525
+sample_2584,w/o query-canonical reliability,No reliability,0.08261652350179172
+sample_2589,w/o query-canonical reliability,No reliability,0.0015028415922831995
+sample_2600,w/o query-canonical reliability,No reliability,0.05604846892879811
+sample_2603,w/o query-canonical reliability,No reliability,0.0033640894415591927
+sample_2614,w/o query-canonical reliability,No reliability,0.0074411726071755835
+sample_2643,w/o query-canonical reliability,No reliability,-0.049347126930676444
+sample_2650,w/o query-canonical reliability,No reliability,0.12096196628168998
+sample_2655,w/o query-canonical reliability,No reliability,-0.016626562322212268
+sample_2676,w/o query-canonical reliability,No reliability,-0.08797697259386894
+sample_2682,w/o query-canonical reliability,No reliability,-0.07426725703818315
+sample_2684,w/o query-canonical reliability,No reliability,-0.0963767941726722
+sample_2698,w/o query-canonical reliability,No reliability,0.010313696944880824
+sample_2702,w/o query-canonical reliability,No reliability,-0.10399965470166694
+sample_2711,w/o query-canonical reliability,No reliability,-0.02425701431451943
+sample_2719,w/o query-canonical reliability,No reliability,-0.05314248720249748
+sample_2741,w/o query-canonical reliability,No reliability,-0.0471421314548407
+sample_2745,w/o query-canonical reliability,No reliability,-0.2511544314555978
+sample_2747,w/o query-canonical reliability,No reliability,-0.052017788833720435
+sample_2751,w/o query-canonical reliability,No reliability,0.060728774216793346
+sample_2759,w/o query-canonical reliability,No reliability,-0.01432894748836211
+sample_2769,w/o query-canonical reliability,No reliability,-0.2177046056873661
+sample_2771,w/o query-canonical reliability,No reliability,0.002551478631905524
+sample_2784,w/o query-canonical reliability,No reliability,0.10111710201270663
+sample_2799,w/o query-canonical reliability,No reliability,-0.010664987670241932
+sample_2804,w/o query-canonical reliability,No reliability,0.03836562244787589
+sample_2833,w/o query-canonical reliability,No reliability,-0.01901765320822768
+sample_2844,w/o query-canonical reliability,No reliability,0.006347337006133991
+sample_2850,w/o query-canonical reliability,No reliability,0.012874822968602317
+sample_2872,w/o query-canonical reliability,No reliability,0.06990064995702006
+sample_2873,w/o query-canonical reliability,No reliability,-0.013076649895425674
+sample_2874,w/o query-canonical reliability,No reliability,0.13949786051543844
+sample_2887,w/o query-canonical reliability,No reliability,-0.10365778884982357
+sample_2909,w/o query-canonical reliability,No reliability,-0.043160576384942306
+sample_2932,w/o query-canonical reliability,No reliability,0.05082883703880359
+sample_2934,w/o query-canonical reliability,No reliability,0.2546795405246589
+sample_2936,w/o query-canonical reliability,No reliability,-0.01610767728511453
+sample_2945,w/o query-canonical reliability,No reliability,0.019035492517131103
+sample_2948,w/o query-canonical reliability,No reliability,0.05834647816822569
+sample_2951,w/o query-canonical reliability,No reliability,0.0166614111060136
+sample_2956,w/o query-canonical reliability,No reliability,0.019080929430631888
+sample_2961,w/o query-canonical reliability,No reliability,-0.015872192826746567
+sample_2977,w/o query-canonical reliability,No reliability,0.19565712403696223
+sample_2987,w/o query-canonical reliability,No reliability,-0.0013597876409598975
+sample_2993,w/o query-canonical reliability,No reliability,-0.07923624870901069
+sample_0002,w/o source-relative query cue,No source cue,0.007127763169143431
+sample_0006,w/o source-relative query cue,No source cue,0.09183149609690966
+sample_0022,w/o source-relative query cue,No source cue,0.11949847616534237
+sample_0032,w/o source-relative query cue,No source cue,0.11845688276905031
+sample_0038,w/o source-relative query cue,No source cue,0.05938349684168487
+sample_0079,w/o source-relative query cue,No source cue,0.0766830956321598
+sample_0096,w/o source-relative query cue,No source cue,0.13591383458856565
+sample_0100,w/o source-relative query cue,No source cue,0.01679028767101942
+sample_0108,w/o source-relative query cue,No source cue,-0.21691407381068784
+sample_0113,w/o source-relative query cue,No source cue,0.11079465634323216
+sample_0122,w/o source-relative query cue,No source cue,0.029471253862718427
+sample_0128,w/o source-relative query cue,No source cue,0.030493262132159082
+sample_0130,w/o source-relative query cue,No source cue,0.07768734971007885
+sample_0158,w/o source-relative query cue,No source cue,-0.0018203486710726136
+sample_0163,w/o source-relative query cue,No source cue,0.07661009717814415
+sample_0180,w/o source-relative query cue,No source cue,0.11097224779058579
+sample_0187,w/o source-relative query cue,No source cue,0.09381010134730094
+sample_0189,w/o source-relative query cue,No source cue,-0.027414203872717424
+sample_0192,w/o source-relative query cue,No source cue,0.08206965507961328
+sample_0207,w/o source-relative query cue,No source cue,0.054682337052966656
+sample_0234,w/o source-relative query cue,No source cue,0.04159505881441905
+sample_0240,w/o source-relative query cue,No source cue,0.0485672613717113
+sample_0248,w/o source-relative query cue,No source cue,0.036388758739906546
+sample_0260,w/o source-relative query cue,No source cue,-0.11626636990907058
+sample_0276,w/o source-relative query cue,No source cue,-0.023045563684247483
+sample_0280,w/o source-relative query cue,No source cue,0.09898778327757157
+sample_0290,w/o source-relative query cue,No source cue,-0.09287885776361637
+sample_0297,w/o source-relative query cue,No source cue,-0.09939518597525243
+sample_0300,w/o source-relative query cue,No source cue,0.04194052602337106
+sample_0308,w/o source-relative query cue,No source cue,0.044980606938416545
+sample_0322,w/o source-relative query cue,No source cue,0.06301948163929594
+sample_0328,w/o source-relative query cue,No source cue,0.00697528558741789
+sample_0335,w/o source-relative query cue,No source cue,0.0015868522027830956
+sample_0347,w/o source-relative query cue,No source cue,-0.13442498525313612
+sample_0350,w/o source-relative query cue,No source cue,-0.060845461467189166
+sample_0378,w/o source-relative query cue,No source cue,0.0469614196576581
+sample_0382,w/o source-relative query cue,No source cue,0.08718030239344687
+sample_0386,w/o source-relative query cue,No source cue,-0.05576806192819361
+sample_0396,w/o source-relative query cue,No source cue,-0.006116897471058813
+sample_0397,w/o source-relative query cue,No source cue,-0.1362032409810202
+sample_0401,w/o source-relative query cue,No source cue,0.06354704401808564
+sample_0409,w/o source-relative query cue,No source cue,0.15385698899615297
+sample_0418,w/o source-relative query cue,No source cue,0.050582451872887846
+sample_0436,w/o source-relative query cue,No source cue,0.032548252744579786
+sample_0438,w/o source-relative query cue,No source cue,-0.12934144502111933
+sample_0447,w/o source-relative query cue,No source cue,0.049835655700328774
+sample_0449,w/o source-relative query cue,No source cue,-0.0633894419636698
+sample_0456,w/o source-relative query cue,No source cue,0.09380189360798719
+sample_0458,w/o source-relative query cue,No source cue,0.055926162450579686
+sample_0469,w/o source-relative query cue,No source cue,-0.015056491471096445
+sample_0472,w/o source-relative query cue,No source cue,-0.03225355414017361
+sample_0473,w/o source-relative query cue,No source cue,0.05516229109978765
+sample_0511,w/o source-relative query cue,No source cue,0.08170182720109065
+sample_0521,w/o source-relative query cue,No source cue,0.07332981469137145
+sample_0525,w/o source-relative query cue,No source cue,-0.058199148390502886
+sample_0535,w/o source-relative query cue,No source cue,0.042703848538802935
+sample_0536,w/o source-relative query cue,No source cue,-0.05858824536521434
+sample_0541,w/o source-relative query cue,No source cue,0.1292311574950913
+sample_0566,w/o source-relative query cue,No source cue,0.02927419807867737
+sample_0585,w/o source-relative query cue,No source cue,-0.08944071708067092
+sample_0603,w/o source-relative query cue,No source cue,0.06498412327298753
+sample_0610,w/o source-relative query cue,No source cue,0.09967847054506962
+sample_0626,w/o source-relative query cue,No source cue,-0.09281682520260781
+sample_0633,w/o source-relative query cue,No source cue,0.15805509837802856
+sample_0646,w/o source-relative query cue,No source cue,0.05072987427525144
+sample_0647,w/o source-relative query cue,No source cue,0.10052165454940987
+sample_0652,w/o source-relative query cue,No source cue,0.0014521408901030375
+sample_0661,w/o source-relative query cue,No source cue,0.1650973012367154
+sample_0666,w/o source-relative query cue,No source cue,0.24491134872558895
+sample_0674,w/o source-relative query cue,No source cue,0.00783441500320492
+sample_0676,w/o source-relative query cue,No source cue,0.016992671248982294
+sample_0681,w/o source-relative query cue,No source cue,0.04330886540539691
+sample_0712,w/o source-relative query cue,No source cue,0.24415552328443135
+sample_0751,w/o source-relative query cue,No source cue,0.03330445765774226
+sample_0761,w/o source-relative query cue,No source cue,0.16971862945305327
+sample_0777,w/o source-relative query cue,No source cue,0.01025004824115816
+sample_0778,w/o source-relative query cue,No source cue,-0.0070055464669709355
+sample_0791,w/o source-relative query cue,No source cue,0.013667621956428566
+sample_0796,w/o source-relative query cue,No source cue,0.0018676611773327245
+sample_0807,w/o source-relative query cue,No source cue,0.18932559186801812
+sample_0817,w/o source-relative query cue,No source cue,0.1998479498264284
+sample_0823,w/o source-relative query cue,No source cue,-0.07664732675724495
+sample_0858,w/o source-relative query cue,No source cue,0.00036022895612397576
+sample_0860,w/o source-relative query cue,No source cue,0.006992697071769749
+sample_0867,w/o source-relative query cue,No source cue,0.11154651925622838
+sample_0870,w/o source-relative query cue,No source cue,0.05058312295066986
+sample_0875,w/o source-relative query cue,No source cue,0.04791848218669659
+sample_0881,w/o source-relative query cue,No source cue,-0.0227086132424833
+sample_0895,w/o source-relative query cue,No source cue,-0.16729409823872732
+sample_0911,w/o source-relative query cue,No source cue,-0.21047748919804554
+sample_0913,w/o source-relative query cue,No source cue,0.15473337619535632
+sample_0914,w/o source-relative query cue,No source cue,-0.030062633158608743
+sample_0920,w/o source-relative query cue,No source cue,0.02046046210121455
+sample_0932,w/o source-relative query cue,No source cue,-0.0406558504612583
+sample_0942,w/o source-relative query cue,No source cue,-0.13566711435749823
+sample_0953,w/o source-relative query cue,No source cue,0.04636208454515223
+sample_0960,w/o source-relative query cue,No source cue,0.07789769604489372
+sample_0974,w/o source-relative query cue,No source cue,0.0915890522337578
+sample_0977,w/o source-relative query cue,No source cue,-0.05092728234536037
+sample_0979,w/o source-relative query cue,No source cue,0.07112339854106964
+sample_1000,w/o source-relative query cue,No source cue,0.008108367944292816
+sample_1002,w/o source-relative query cue,No source cue,-0.13255112496579358
+sample_1003,w/o source-relative query cue,No source cue,0.018949238476015373
+sample_1015,w/o source-relative query cue,No source cue,-0.0004301691093693272
+sample_1018,w/o source-relative query cue,No source cue,0.1307917664271948
+sample_1028,w/o source-relative query cue,No source cue,-0.07898973773819029
+sample_1068,w/o source-relative query cue,No source cue,-0.19640308263269501
+sample_1069,w/o source-relative query cue,No source cue,-0.1325626263100087
+sample_1072,w/o source-relative query cue,No source cue,-0.1322422902788175
+sample_1078,w/o source-relative query cue,No source cue,0.00764542341216623
+sample_1081,w/o source-relative query cue,No source cue,0.04048513208361515
+sample_1085,w/o source-relative query cue,No source cue,0.03211998174053721
+sample_1086,w/o source-relative query cue,No source cue,-0.011380628657865821
+sample_1092,w/o source-relative query cue,No source cue,-0.052452593839841355
+sample_1093,w/o source-relative query cue,No source cue,0.03758249483570908
+sample_1096,w/o source-relative query cue,No source cue,-0.031449877824988315
+sample_1112,w/o source-relative query cue,No source cue,0.02977158475348818
+sample_1126,w/o source-relative query cue,No source cue,0.13004265162078565
+sample_1133,w/o source-relative query cue,No source cue,0.12338987334667251
+sample_1135,w/o source-relative query cue,No source cue,0.11328243459141796
+sample_1139,w/o source-relative query cue,No source cue,0.10165127004218999
+sample_1167,w/o source-relative query cue,No source cue,0.04619081876010045
+sample_1175,w/o source-relative query cue,No source cue,0.06764478351198833
+sample_1185,w/o source-relative query cue,No source cue,-0.12030737872200181
+sample_1211,w/o source-relative query cue,No source cue,0.15004218352698073
+sample_1215,w/o source-relative query cue,No source cue,0.04273359302040025
+sample_1230,w/o source-relative query cue,No source cue,0.01018781814871672
+sample_1244,w/o source-relative query cue,No source cue,0.08326705259783185
+sample_1259,w/o source-relative query cue,No source cue,0.020004269294009003
+sample_1262,w/o source-relative query cue,No source cue,0.044797218143700634
+sample_1266,w/o source-relative query cue,No source cue,0.1742419676442345
+sample_1276,w/o source-relative query cue,No source cue,0.08254283731634426
+sample_1285,w/o source-relative query cue,No source cue,-0.09368496138606253
+sample_1286,w/o source-relative query cue,No source cue,-0.1366748625901414
+sample_1288,w/o source-relative query cue,No source cue,0.04011182976883643
+sample_1292,w/o source-relative query cue,No source cue,-0.027959780405173662
+sample_1319,w/o source-relative query cue,No source cue,0.02052719853805529
+sample_1327,w/o source-relative query cue,No source cue,-0.058113789025847185
+sample_1328,w/o source-relative query cue,No source cue,0.17433606864726103
+sample_1366,w/o source-relative query cue,No source cue,0.09591891636497374
+sample_1372,w/o source-relative query cue,No source cue,0.1302898126564187
+sample_1378,w/o source-relative query cue,No source cue,0.015325858618264299
+sample_1384,w/o source-relative query cue,No source cue,-0.0949741959813093
+sample_1389,w/o source-relative query cue,No source cue,0.08373582940395152
+sample_1404,w/o source-relative query cue,No source cue,0.020061697483053975
+sample_1429,w/o source-relative query cue,No source cue,-0.07993503217759756
+sample_1432,w/o source-relative query cue,No source cue,0.02464495910583453
+sample_1438,w/o source-relative query cue,No source cue,0.09696397176361815
+sample_1455,w/o source-relative query cue,No source cue,0.020597502838720194
+sample_1470,w/o source-relative query cue,No source cue,-0.1171764012832035
+sample_1482,w/o source-relative query cue,No source cue,0.03299664125844959
+sample_1486,w/o source-relative query cue,No source cue,0.029280258675893123
+sample_1513,w/o source-relative query cue,No source cue,-0.04266394538774809
+sample_1516,w/o source-relative query cue,No source cue,-0.13314009255536963
+sample_1529,w/o source-relative query cue,No source cue,0.13341266812527564
+sample_1566,w/o source-relative query cue,No source cue,0.007078970865493139
+sample_1572,w/o source-relative query cue,No source cue,-0.11508205020206386
+sample_1599,w/o source-relative query cue,No source cue,-0.026893775054112612
+sample_1620,w/o source-relative query cue,No source cue,0.05853119389495931
+sample_1634,w/o source-relative query cue,No source cue,0.10796779002753998
+sample_1635,w/o source-relative query cue,No source cue,-0.049334440267760904
+sample_1642,w/o source-relative query cue,No source cue,-0.018150381899944668
+sample_1643,w/o source-relative query cue,No source cue,0.04259998865702186
+sample_1683,w/o source-relative query cue,No source cue,0.1586624866330264
+sample_1686,w/o source-relative query cue,No source cue,0.03532594941195255
+sample_1688,w/o source-relative query cue,No source cue,-0.14595135906843437
+sample_1697,w/o source-relative query cue,No source cue,0.11351382206493787
+sample_1717,w/o source-relative query cue,No source cue,0.03055610112043361
+sample_1718,w/o source-relative query cue,No source cue,0.05214131149486201
+sample_1729,w/o source-relative query cue,No source cue,0.026844251740553937
+sample_1731,w/o source-relative query cue,No source cue,-0.0842308917446769
+sample_1734,w/o source-relative query cue,No source cue,-0.04401231677913442
+sample_1741,w/o source-relative query cue,No source cue,0.14436643267782423
+sample_1760,w/o source-relative query cue,No source cue,-0.08403318588909592
+sample_1765,w/o source-relative query cue,No source cue,0.0004134386962757475
+sample_1787,w/o source-relative query cue,No source cue,0.005638813656848041
+sample_1809,w/o source-relative query cue,No source cue,0.013119763750869873
+sample_1811,w/o source-relative query cue,No source cue,0.002140933491376562
+sample_1812,w/o source-relative query cue,No source cue,-0.08520926810143548
+sample_1815,w/o source-relative query cue,No source cue,0.03109797389717489
+sample_1826,w/o source-relative query cue,No source cue,-0.0007816530609501271
+sample_1837,w/o source-relative query cue,No source cue,0.05364188948047599
+sample_1839,w/o source-relative query cue,No source cue,0.013207032756277992
+sample_1843,w/o source-relative query cue,No source cue,0.16615768295196987
+sample_1858,w/o source-relative query cue,No source cue,0.15912702532222012
+sample_1863,w/o source-relative query cue,No source cue,0.1544060617720392
+sample_1865,w/o source-relative query cue,No source cue,0.09081241092918946
+sample_1869,w/o source-relative query cue,No source cue,0.03139514583677594
+sample_1881,w/o source-relative query cue,No source cue,0.04083527722836339
+sample_1885,w/o source-relative query cue,No source cue,-0.16951981198385535
+sample_1893,w/o source-relative query cue,No source cue,0.19961476240047815
+sample_1894,w/o source-relative query cue,No source cue,0.08034508008972996
+sample_1904,w/o source-relative query cue,No source cue,0.16383203150914272
+sample_1927,w/o source-relative query cue,No source cue,0.006446129500076614
+sample_1944,w/o source-relative query cue,No source cue,0.0017461018674812534
+sample_1989,w/o source-relative query cue,No source cue,0.03286362659268738
+sample_1993,w/o source-relative query cue,No source cue,0.08603561850974772
+sample_2021,w/o source-relative query cue,No source cue,0.06773039952280557
+sample_2024,w/o source-relative query cue,No source cue,0.06396736864464359
+sample_2044,w/o source-relative query cue,No source cue,0.06225268202076406
+sample_2059,w/o source-relative query cue,No source cue,-0.015709516352561792
+sample_2067,w/o source-relative query cue,No source cue,0.13325872827083718
+sample_2069,w/o source-relative query cue,No source cue,0.0953844004046891
+sample_2070,w/o source-relative query cue,No source cue,-0.02265360420557483
+sample_2072,w/o source-relative query cue,No source cue,0.05203533176119468
+sample_2077,w/o source-relative query cue,No source cue,0.15082755907981205
+sample_2079,w/o source-relative query cue,No source cue,0.12615890958841713
+sample_2086,w/o source-relative query cue,No source cue,0.044957265875670505
+sample_2087,w/o source-relative query cue,No source cue,0.04862877372111152
+sample_2111,w/o source-relative query cue,No source cue,0.02792322294057492
+sample_2119,w/o source-relative query cue,No source cue,-0.020184541378896692
+sample_2121,w/o source-relative query cue,No source cue,0.022202927491039137
+sample_2129,w/o source-relative query cue,No source cue,-0.21127542339541083
+sample_2166,w/o source-relative query cue,No source cue,0.017527346620182294
+sample_2167,w/o source-relative query cue,No source cue,0.05552374004011151
+sample_2172,w/o source-relative query cue,No source cue,0.023452597937624442
+sample_2175,w/o source-relative query cue,No source cue,0.039125189457515086
+sample_2196,w/o source-relative query cue,No source cue,0.04384066987308466
+sample_2199,w/o source-relative query cue,No source cue,0.0629038738367359
+sample_2202,w/o source-relative query cue,No source cue,-0.03577090378200287
+sample_2207,w/o source-relative query cue,No source cue,-0.012278160741079236
+sample_2208,w/o source-relative query cue,No source cue,0.039919769853952514
+sample_2209,w/o source-relative query cue,No source cue,0.11617692929970158
+sample_2225,w/o source-relative query cue,No source cue,-0.04103414468782285
+sample_2234,w/o source-relative query cue,No source cue,0.0026969270485895924
+sample_2259,w/o source-relative query cue,No source cue,-0.06042743148441887
+sample_2263,w/o source-relative query cue,No source cue,0.01607392120573159
+sample_2266,w/o source-relative query cue,No source cue,-0.09108734993603113
+sample_2270,w/o source-relative query cue,No source cue,0.16796063646515325
+sample_2271,w/o source-relative query cue,No source cue,-0.027784327989866964
+sample_2281,w/o source-relative query cue,No source cue,0.04124744596114416
+sample_2293,w/o source-relative query cue,No source cue,-0.016022901638347187
+sample_2299,w/o source-relative query cue,No source cue,0.04662432441077291
+sample_2306,w/o source-relative query cue,No source cue,0.06367285079760954
+sample_2323,w/o source-relative query cue,No source cue,0.04265354364351093
+sample_2357,w/o source-relative query cue,No source cue,0.046401820309391995
+sample_2361,w/o source-relative query cue,No source cue,-0.014015552835727862
+sample_2372,w/o source-relative query cue,No source cue,0.17118635871657306
+sample_2375,w/o source-relative query cue,No source cue,0.08007239923091314
+sample_2378,w/o source-relative query cue,No source cue,-0.0043089490375204376
+sample_2385,w/o source-relative query cue,No source cue,0.055608616947741774
+sample_2409,w/o source-relative query cue,No source cue,0.1150891263258158
+sample_2413,w/o source-relative query cue,No source cue,-0.1743216856266283
+sample_2418,w/o source-relative query cue,No source cue,-0.025595395186283842
+sample_2435,w/o source-relative query cue,No source cue,0.009245909339220315
+sample_2440,w/o source-relative query cue,No source cue,-0.21444477005197227
+sample_2442,w/o source-relative query cue,No source cue,0.06085154026404327
+sample_2453,w/o source-relative query cue,No source cue,0.019220983219052967
+sample_2472,w/o source-relative query cue,No source cue,-0.150306799014017
+sample_2477,w/o source-relative query cue,No source cue,0.12097020336710906
+sample_2478,w/o source-relative query cue,No source cue,-0.1841368268688507
+sample_2483,w/o source-relative query cue,No source cue,0.05664275707349653
+sample_2494,w/o source-relative query cue,No source cue,-0.052326426426999806
+sample_2505,w/o source-relative query cue,No source cue,0.09165436942491467
+sample_2533,w/o source-relative query cue,No source cue,0.07357737411115073
+sample_2536,w/o source-relative query cue,No source cue,0.02446659972518961
+sample_2584,w/o source-relative query cue,No source cue,0.08627163800011683
+sample_2589,w/o source-relative query cue,No source cue,-0.09491038012158748
+sample_2600,w/o source-relative query cue,No source cue,0.008378094355515064
+sample_2603,w/o source-relative query cue,No source cue,0.03482839453146269
+sample_2614,w/o source-relative query cue,No source cue,0.11238514889842732
+sample_2643,w/o source-relative query cue,No source cue,-0.07728414932855499
+sample_2650,w/o source-relative query cue,No source cue,0.09887812925981987
+sample_2655,w/o source-relative query cue,No source cue,0.1278404235520585
+sample_2676,w/o source-relative query cue,No source cue,0.020749353570308715
+sample_2682,w/o source-relative query cue,No source cue,-0.10241776112241041
+sample_2684,w/o source-relative query cue,No source cue,-0.08760604797972182
+sample_2698,w/o source-relative query cue,No source cue,-0.05701485260227368
+sample_2702,w/o source-relative query cue,No source cue,0.0014790039024664692
+sample_2711,w/o source-relative query cue,No source cue,-0.058602932702567334
+sample_2719,w/o source-relative query cue,No source cue,0.0057857271917947095
+sample_2741,w/o source-relative query cue,No source cue,0.007583942745391203
+sample_2745,w/o source-relative query cue,No source cue,-0.17973834247040166
+sample_2747,w/o source-relative query cue,No source cue,-0.06653341901876542
+sample_2751,w/o source-relative query cue,No source cue,0.10211880710913368
+sample_2759,w/o source-relative query cue,No source cue,0.025021017773011356
+sample_2769,w/o source-relative query cue,No source cue,-0.28341505500754566
+sample_2771,w/o source-relative query cue,No source cue,-0.006416655132309601
+sample_2784,w/o source-relative query cue,No source cue,0.18217891933043695
+sample_2799,w/o source-relative query cue,No source cue,-0.04124533515250939
+sample_2804,w/o source-relative query cue,No source cue,0.09360381770910453
+sample_2833,w/o source-relative query cue,No source cue,-0.039966369573705696
+sample_2844,w/o source-relative query cue,No source cue,0.003210911805870631
+sample_2850,w/o source-relative query cue,No source cue,0.02054221390503741
+sample_2872,w/o source-relative query cue,No source cue,0.10256972029900568
+sample_2873,w/o source-relative query cue,No source cue,-0.05506617903843419
+sample_2874,w/o source-relative query cue,No source cue,0.09691179017764295
+sample_2887,w/o source-relative query cue,No source cue,-0.11649479473447888
+sample_2909,w/o source-relative query cue,No source cue,-0.010244715390740344
+sample_2932,w/o source-relative query cue,No source cue,0.10549150798215445
+sample_2934,w/o source-relative query cue,No source cue,0.255055571631169
+sample_2936,w/o source-relative query cue,No source cue,0.016273613823444277
+sample_2945,w/o source-relative query cue,No source cue,0.01032549818646944
+sample_2948,w/o source-relative query cue,No source cue,0.04441611505094889
+sample_2951,w/o source-relative query cue,No source cue,0.05931619378125785
+sample_2956,w/o source-relative query cue,No source cue,0.08093374923056651
+sample_2961,w/o source-relative query cue,No source cue,0.05263027607914861
+sample_2977,w/o source-relative query cue,No source cue,0.066070475454029
+sample_2987,w/o source-relative query cue,No source cue,-0.05255831932080307
+sample_2993,w/o source-relative query cue,No source cue,-0.10321071267732307

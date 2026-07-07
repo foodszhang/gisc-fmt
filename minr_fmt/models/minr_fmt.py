@@ -9,19 +9,37 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ..config_extractor import ConfigExtractor
 from ..network.encoder import (
-    UNet,
     GateFusion,
     PointFeatureSampler,
+    UNet,
 )
+from ..network.feature_refinement import FeatureRefinement
 from ..network.fusion import (
     BackgroundGuidanceInteraction,
     CrossViewResidualFusion,
     ScaleFusionNet,
 )
+from ..network.ptfa import (
+    PCFSSigmaCalibrator,
+    compute_exit_depth_sigma,
+    ptfa_sample_corrected_exit_depth_gaussian,
+    ptfa_sample_exit_depth_gaussian,
+    ptfa_sample_fixed_gaussian,
+    ptfa_sample_pcfs_corrected_exit_depth_gaussian,
+)
+from ..network.query_aggregation import (
+    CanonicalReliabilityAggregator,
+    ConsensusResidualGate,
+    GeometryViewGate,
+    MeanPriorResidualGate,
+    ReliabilityViewGate,
+    TransportConsensusAdapter,
+)
 from ..utils.cam import project_points_to_camera
-from ..config_extractor import ConfigExtractor
-
+from ..utils.fmt_simgen_projection import project_points_mm_to_detector
+from ..utils.view_selection import select_views_by_angles
 
 # ===== 核心模块 =====
 
@@ -124,6 +142,101 @@ class ImplicitSourceField(nn.Module):
         return self.mlp_out(z)
 
 
+class EvidenceAwareOwnershipNet(nn.Module):
+    """Query-evidence conditioned source-slot ownership predictor."""
+
+    def __init__(self, feature_dim: int, hidden_dim: int, geom_dim: int = 6):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(feature_dim * 2 + geom_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(
+        self,
+        canonical_feature: torch.Tensor,
+        pcfs_feature: torch.Tensor,
+        slot_geom: torch.Tensor,
+    ) -> torch.Tensor:
+        B, N, M, _ = slot_geom.shape
+        canonical = torch.nan_to_num(canonical_feature, nan=0.0, posinf=0.0, neginf=0.0)
+        pcfs = torch.nan_to_num(pcfs_feature, nan=0.0, posinf=0.0, neginf=0.0)
+        geom = torch.nan_to_num(slot_geom, nan=0.0, posinf=0.0, neginf=0.0).clamp(-20.0, 20.0)
+        canonical = canonical[:, :, None, :].expand(-1, -1, M, -1)
+        pcfs = pcfs[:, :, None, :].expand(-1, -1, M, -1)
+        ownership_input = torch.cat([canonical, pcfs, geom], dim=-1)
+        ownership_input = torch.nan_to_num(ownership_input, nan=0.0, posinf=0.0, neginf=0.0)
+        return self.net(ownership_input.reshape(B * N * M, -1)).reshape(B, N, M)
+
+
+class SourceInstanceFieldDecoder(nn.Module):
+    """Shared local implicit source field for source-instance decoding."""
+
+    def __init__(self, feature_dim: int, hidden_dim: int, local_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(feature_dim * 2 + local_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(
+        self,
+        canonical_feature: torch.Tensor,
+        pcfs_feature: torch.Tensor,
+        local_source_features: torch.Tensor,
+    ) -> torch.Tensor:
+        B, N, K, _ = local_source_features.shape
+        canonical = torch.nan_to_num(canonical_feature, nan=0.0, posinf=0.0, neginf=0.0)
+        pcfs = torch.nan_to_num(pcfs_feature, nan=0.0, posinf=0.0, neginf=0.0)
+        local = torch.nan_to_num(local_source_features, nan=0.0, posinf=0.0, neginf=0.0)
+        local = local.clamp(-20.0, 20.0)
+        canonical = canonical[:, :, None, :].expand(-1, -1, K, -1)
+        pcfs = pcfs[:, :, None, :].expand(-1, -1, K, -1)
+        decoder_input = torch.cat([canonical, pcfs, local], dim=-1)
+        decoder_input = torch.nan_to_num(decoder_input, nan=0.0, posinf=0.0, neginf=0.0)
+        return self.net(decoder_input.reshape(B * N * K, -1)).reshape(B, N, K, 1)
+
+
+class ResidualScorer(nn.Module):
+    """Small zero-initialized residual scorer for query-level logit correction."""
+
+    def __init__(self, in_dim: int, hidden_dim: int = 128):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(self, scorer_input: torch.Tensor) -> torch.Tensor:
+        return self.net(scorer_input)
+
+
+class QueryAuxHead(nn.Module):
+    """Lightweight query-level auxiliary prediction head."""
+
+    def __init__(self, feature_dim: int, hidden_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(feature_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, feature: torch.Tensor) -> torch.Tensor:
+        return self.net(feature)
+
+
 # ===== 主网络 =====
 
 
@@ -151,7 +264,12 @@ class PointDensityNet(nn.Module):
         # 提取所有参数
         net_params = ConfigExtractor.extract_network_params(config)
         geo_params = ConfigExtractor.extract_geometry_config(config)
+        ptfa_params = ConfigExtractor.extract_ptfa_config(config)
+        residual_scorer_params = ConfigExtractor.extract_residual_scorer_config(config)
+        refinement_params = ConfigExtractor.extract_feature_refinement_config(config)
+        query_agg_params = ConfigExtractor.extract_query_aggregation_config(config)
         gisc_params = ConfigExtractor.extract_gisc_fmt_config(config)
+        gisc_ablation_params = ConfigExtractor.extract_gisc_ablation_config(config)
         view_angles = ConfigExtractor.extract_view_angles(config)
 
         # 网络基本参数
@@ -170,20 +288,125 @@ class PointDensityNet(nn.Module):
         implicit_hidden = gisc_params["implicit_field_hidden_dim"]
         implicit_d_x = gisc_params["implicit_field_d_x"]
         implicit_d_f = gisc_params["implicit_field_d_f"]
-        view_weight_embed = gisc_params["view_weight_embed_dim"]
-        view_weight_hidden = gisc_params["view_weight_hidden_dim"]
         ms_params = gisc_params["multiscale"]
         bg_params = gisc_params["background"]
 
         # 几何参数
         self.camera_distance = geo_params["camera_distance"]
         self.detector_size = geo_params["detector_size"]
+        self.detector_resolution = geo_params["detector_resolution"]
+        self.fov_mm = geo_params["fov_mm"]
         self.global_voxel_shape = geo_params["global_voxel_shape"]
+        self.volume_center_world = geo_params["volume_center_world"]
+        self.use_fmt_simgen_projection = geo_params["use_fmt_simgen_projection"]
+        self.transpose_feature_map_for_sampling = geo_params["transpose_feature_map_for_sampling"]
+        self.ptfa_enabled = bool(ptfa_params["enabled"])
+        self.ptfa_scales = set(ptfa_params["scales"])
+        self.ptfa_mode = str(ptfa_params["mode"])
+        self.ptfa_window = int(ptfa_params["window"])
+        self.ptfa_sigma_px = float(ptfa_params["sigma_px"])
+        self.ptfa_sigma_min = float(ptfa_params["sigma_min"])
+        self.ptfa_sigma_max = float(ptfa_params["sigma_max"])
+        self.ptfa_exit_depth_max_mm = float(ptfa_params["exit_depth_max_mm"])
+        self.ptfa_invert_depth = bool(ptfa_params["invert_depth"])
+        pcfs_params = ptfa_params["pcfs"]
+        self.pcfs_hidden_dim = int(pcfs_params["hidden_dim"])
+        self.pcfs_delta_max = float(pcfs_params["delta_max"])
+        self.pcfs_warmup_epochs = int(pcfs_params["warmup_epochs"])
+        self.pcfs_norm = str(pcfs_params["norm"])
+        self.pcfs_use_bounded_delta = bool(pcfs_params["use_bounded_delta"])
+        self.pcfs_use_sigma_bounds = bool(pcfs_params["use_sigma_bounds"])
+        self.pcfs_current_epoch = 0
+        self.aggregation_mode = str(query_agg_params["aggregation_mode"])
+        self.residual_scorer_enabled = bool(residual_scorer_params["enabled"])
+        self.residual_scorer_lambda = float(residual_scorer_params["lambda_r"])
+        self.residual_scorer_input_mode = str(residual_scorer_params["input_mode"])
+        self.feature_refinement_enabled = bool(refinement_params["enabled"])
+        self.feature_refinement_ptfa_view_aggregation = str(
+            refinement_params["ptfa_view_aggregation"]
+        )
         self.view_list = view_angles[:num_views]
+        self.view_subset = gisc_ablation_params["view_subset"]
+        if self.view_subset is not None:
+            select_views_by_angles(
+                torch.empty(len(self.view_list)), self.view_list, self.view_subset
+            )
+        self.active_view_mask = [
+            self.view_subset is None or int(v) in self.view_subset for v in self.view_list
+        ]
+        if not any(self.active_view_mask):
+            raise ValueError("model.gisc.view_subset selects zero views")
         self.pos_enc_dim = pos_enc_dim
         self.feature_dim = feature_dim
         self.num_views = num_views
         self.config = config
+        self.store_forward_debug = bool(
+            ConfigExtractor._model_cfg(config).get("store_forward_debug", False)
+        )
+        source_cue_cfg = ConfigExtractor._model_cfg(config).get("source_instance_cue", {}) or {}
+        self.source_instance_cue_enabled = bool(source_cue_cfg.get("enabled", False))
+        self.source_instance_cue_dim = int(source_cue_cfg.get("dim", 10))
+        self.source_instance_tau_s_mm = float(source_cue_cfg.get("tau_s_mm", 5.0))
+        if self.source_instance_cue_enabled and self.source_instance_cue_dim not in {8, 10}:
+            raise ValueError(
+                f"model.source_instance_cue.dim must be 8 or 10, got {self.source_instance_cue_dim}"
+            )
+        source_decoder_cfg = (
+            ConfigExtractor._model_cfg(config).get("source_instance_decoder", {}) or {}
+        )
+        self.source_instance_decoder_enabled = bool(source_decoder_cfg.get("enabled", False))
+        source_decoder_top_k = source_decoder_cfg.get("top_k", 2)
+        self.source_instance_decoder_top_k = (
+            None if source_decoder_top_k is None else int(source_decoder_top_k)
+        )
+        self.source_instance_decoder_use_all_slots = bool(
+            source_decoder_cfg.get("use_all_slots", False)
+        )
+        self.source_instance_decoder_merge = str(source_decoder_cfg.get("merge", "weighted_sum"))
+        self.source_instance_decoder_output_components = bool(
+            source_decoder_cfg.get("output_components", False)
+        )
+        self.source_instance_ownership_mode = str(
+            source_decoder_cfg.get("ownership_mode", "distance")
+        )
+        self.source_instance_ownership_temperature = float(
+            source_decoder_cfg.get("ownership_temperature", 1.0)
+        )
+        self.source_instance_ownership_logit_clip = float(
+            source_decoder_cfg.get("ownership_logit_clip", 30.0)
+        )
+        self.source_instance_component_logit_clip = float(
+            source_decoder_cfg.get("component_logit_clip", 30.0)
+        )
+        self.source_instance_detach_ownership_feature = bool(
+            source_decoder_cfg.get("detach_ownership_feature", False)
+        )
+        self.source_instance_decoder_local_dim = int(source_decoder_cfg.get("local_dim", 6))
+        if (
+            self.source_instance_decoder_top_k is not None
+            and self.source_instance_decoder_top_k < 1
+        ):
+            raise ValueError("model.source_instance_decoder.top_k must be >= 1")
+        if self.source_instance_decoder_merge not in {"weighted_sum", "max_merge", "soft_union"}:
+            raise ValueError(
+                "model.source_instance_decoder.merge must be 'weighted_sum', 'max_merge', "
+                "or 'soft_union', "
+                f"got {self.source_instance_decoder_merge}"
+            )
+        if self.source_instance_ownership_mode not in {"distance", "evidence_aware"}:
+            raise ValueError(
+                "model.source_instance_decoder.ownership_mode must be 'distance' or "
+                f"'evidence_aware', got {self.source_instance_ownership_mode}"
+            )
+        aux_heads_cfg = ConfigExtractor._model_cfg(config).get("aux_heads", {}) or {}
+        center_cfg = aux_heads_cfg.get("center", {}) or {}
+        distance_cfg = aux_heads_cfg.get("distance", {}) or {}
+        self.center_aux_head_enabled = bool(center_cfg.get("enabled", False))
+        self.distance_aux_head_enabled = bool(distance_cfg.get("enabled", False))
+        self.aux_head_hidden_dim = int(aux_heads_cfg.get("hidden_dim", 64))
+        self.center_residual_warmup_epochs = int(center_cfg.get("residual_warmup_epochs", 0))
+        self.center_logit_residual = float(center_cfg.get("logit_residual", 0.0))
+        self.center_residual_current_epoch = 0
 
         assert len(self.view_list) == num_views, (
             f"view_list length {len(self.view_list)} != num_views {num_views}"
@@ -338,9 +561,236 @@ class PointDensityNet(nn.Module):
             d_x=implicit_d_x,
             d_f=implicit_d_f,
         )
+        if self.source_instance_decoder_enabled:
+            self.source_instance_decoder = SourceInstanceFieldDecoder(
+                feature_dim=feature_dim,
+                hidden_dim=int(source_decoder_cfg.get("hidden_dim", 64)),
+                local_dim=self.source_instance_decoder_local_dim,
+            )
+            if self.source_instance_ownership_mode == "evidence_aware":
+                self.source_ownership_net = EvidenceAwareOwnershipNet(
+                    feature_dim=feature_dim,
+                    hidden_dim=int(source_decoder_cfg.get("ownership_hidden_dim", 64)),
+                    geom_dim=6,
+                )
+        if self.center_aux_head_enabled:
+            self.center_head = QueryAuxHead(feature_dim, self.aux_head_hidden_dim)
+        if self.distance_aux_head_enabled:
+            self.distance_head = QueryAuxHead(feature_dim, self.aux_head_hidden_dim)
 
-        # 点采样器
+        if self.residual_scorer_enabled:
+            if self.residual_scorer_input_mode == "bilinear_s3":
+                residual_in_dim = pos_enc_dim + feature_dim
+            elif self.residual_scorer_input_mode == "bilinear_s3_plus_s1_ptfa":
+                residual_in_dim = pos_enc_dim + feature_dim + feature_dim + 5
+            else:
+                raise NotImplementedError(
+                    f"Unknown residual_scorer.input_mode: {self.residual_scorer_input_mode}"
+                )
+            self.residual_scorer = ResidualScorer(
+                in_dim=residual_in_dim,
+                hidden_dim=int(residual_scorer_params["hidden_dim"]),
+            )
+            self.residual_scorer_input_dim = residual_in_dim
+
+        if self.feature_refinement_enabled:
+            if self.aggregation_mode != "legacy_multiscale":
+                raise ValueError("feature_refinement currently requires legacy_multiscale fusion")
+            if self.residual_scorer_enabled:
+                raise ValueError(
+                    "E8 feature_refinement is defined with residual_scorer.enabled=false"
+                )
+            expected_geom_dim = 5 + (
+                self.source_instance_cue_dim if self.source_instance_cue_enabled else 0
+            )
+            if int(refinement_params["geom_dim"]) != expected_geom_dim:
+                raise ValueError(
+                    "feature refinement geom_dim must match E12 geometry plus optional "
+                    f"source cue; expected {expected_geom_dim}, got "
+                    f"{int(refinement_params['geom_dim'])}"
+                )
+            self.feature_refinement = FeatureRefinement(
+                feature_dim=feature_dim,
+                geom_dim=int(refinement_params["geom_dim"]),
+                hidden_dim=int(refinement_params["hidden_dim"]),
+                zero_init=bool(refinement_params["zero_init"]),
+            )
+            self.feature_refinement_input_dim = feature_dim * 3 + int(refinement_params["geom_dim"])
+            if self.feature_refinement_ptfa_view_aggregation == "reliability_gate":
+                gate_cfg = refinement_params["reliability_gate"]
+                self.reliability_gate_geom_set = str(gate_cfg["geom_set"])
+                if self.reliability_gate_geom_set == "full":
+                    reliability_geom_dim = 12
+                elif self.reliability_gate_geom_set == "compact":
+                    reliability_geom_dim = 8
+                else:
+                    raise ValueError(
+                        "model.feature_refinement.reliability_gate.geom_set must be "
+                        f"'full' or 'compact', got {self.reliability_gate_geom_set}"
+                    )
+                mix_cfg = gate_cfg["residual_mix"]
+                self.reliability_view_gate = ReliabilityViewGate(
+                    geom_dim=reliability_geom_dim,
+                    hidden_dim=int(gate_cfg["hidden_dim"]),
+                    temperature=float(gate_cfg["temperature"]),
+                    zero_init=bool(gate_cfg["zero_init"]),
+                    norm=str(gate_cfg["norm"]),
+                    residual_mix_enabled=bool(mix_cfg["enabled"]),
+                    residual_mix_gamma=float(mix_cfg["gamma"]),
+                )
+                self.reliability_view_gate_input_dim = reliability_geom_dim
+            elif self.feature_refinement_ptfa_view_aggregation == "consensus_residual_gate":
+                consensus_cfg = refinement_params["consensus_residual_gate"]
+                self.consensus_residual_gate_use_evidence_stats = bool(
+                    consensus_cfg["use_evidence_stats"]
+                )
+                consensus_input_dim = 8 + (
+                    4 if self.consensus_residual_gate_use_evidence_stats else 0
+                )
+                self.consensus_residual_gate = ConsensusResidualGate(
+                    input_dim=consensus_input_dim,
+                    hidden_dim=int(consensus_cfg["hidden_dim"]),
+                    gamma=float(consensus_cfg["gamma"]),
+                    norm=str(consensus_cfg["norm"]),
+                )
+                self.consensus_residual_gate_input_dim = consensus_input_dim
+            elif self.feature_refinement_ptfa_view_aggregation == "mean_prior_residual_gate":
+                mean_prior_cfg = refinement_params["mean_prior_residual_gate"]
+                mean_prior_input_dim = 8 + 4
+                self.mean_prior_residual_gate = MeanPriorResidualGate(
+                    input_dim=mean_prior_input_dim,
+                    hidden_dim=int(mean_prior_cfg["hidden_dim"]),
+                    scale_max=float(mean_prior_cfg["scale_max"]),
+                    norm=str(mean_prior_cfg["norm"]),
+                )
+                self.mean_prior_residual_gate_input_dim = mean_prior_input_dim
+                self.mean_prior_alpha_max = float(mean_prior_cfg["alpha_max"])
+                self.mean_prior_warmup_epochs = int(mean_prior_cfg["warmup_epochs"])
+                self.mean_prior_gate_lr_mult = float(mean_prior_cfg["gate_lr_mult"])
+                anchor_cfg = mean_prior_cfg["anchor_loss"]
+                self.mean_prior_anchor_loss_enabled = bool(anchor_cfg["enabled"])
+                self.mean_prior_anchor_loss_beta = float(anchor_cfg["beta"])
+                self.mean_prior_current_epoch = 0
+            elif self.feature_refinement_ptfa_view_aggregation == "transport_consensus_adapter":
+                tca_cfg = refinement_params["transport_consensus_adapter"]
+                self.transport_consensus_adapter = TransportConsensusAdapter(
+                    feature_dim=feature_dim,
+                    geom_dim=int(refinement_params["geom_dim"]),
+                    hidden_dim=int(tca_cfg["hidden_dim"]),
+                    epsilon=float(tca_cfg["epsilon"]),
+                    include_dev_norm=bool(tca_cfg["include_dev_norm"]),
+                    zero_init=bool(tca_cfg["zero_init"]),
+                )
+            elif self.feature_refinement_ptfa_view_aggregation == "canonical_reliability":
+                canonical_cfg = refinement_params["canonical_reliability"]
+                self.canonical_reliability_aggregator = CanonicalReliabilityAggregator(
+                    feature_dim=feature_dim,
+                    geom_dim=8,
+                    hidden_dim=int(canonical_cfg["hidden_dim"]),
+                    temperature=float(canonical_cfg["temperature"]),
+                    residual_epsilon=float(canonical_cfg["residual_epsilon"]),
+                    zero_init=bool(canonical_cfg["zero_init"]),
+                )
+            elif self.feature_refinement_ptfa_view_aggregation != "masked_mean":
+                raise NotImplementedError(
+                    "Unknown feature_refinement.ptfa_view_aggregation: "
+                    f"{self.feature_refinement_ptfa_view_aggregation}"
+                )
+
+        if self.ptfa_mode == "pcfs_corrected_exit_depth_gaussian":
+            self.pcfs_sigma_calibrator = PCFSSigmaCalibrator(
+                geom_dim=8,
+                hidden_dim=self.pcfs_hidden_dim,
+                delta_max=self.pcfs_delta_max,
+                norm=self.pcfs_norm,
+                zero_init=bool(pcfs_params["zero_init"]),
+                use_bounded_delta=self.pcfs_use_bounded_delta,
+            )
+
+        if self.aggregation_mode == "corrected_exit_ptfa_geom_gate":
+            self.query_view_gate = GeometryViewGate(
+                geom_dim=9,
+                hidden_dim=int(query_agg_params["hidden_dim"]),
+                temperature=float(query_agg_params["temperature"]),
+                zero_init=bool(query_agg_params["zero_init"]),
+            )
+        elif self.aggregation_mode != "legacy_multiscale":
+            raise NotImplementedError(f"Unknown aggregation_mode: {self.aggregation_mode}")
+
+        self.last_ptfa_stats = {}
+        self.last_query_aggregation_weights = None
+        self.last_s1_ptfa_evidence_stats = {}
+        self.last_feature_refinement_stats = {}
+        self.last_reliability_gate_stats = {}
+        self.last_reliability_gate_weights = None
+        self.last_consensus_residual_gate_stats = {}
+        self.last_mean_prior_residual_gate_stats = {}
+        self.last_transport_consensus_adapter_stats = {}
+        self.last_feature_refinement_anchor_loss = None
+        self.last_feature_refinement_debug = {}
+        self.last_source_cue_stats = {}
+        self.last_source_nearest_dist = None
+        self.last_source_decoder_stats = {}
         self.sampler = PointFeatureSampler()
+
+    def _active_view_mask_tensor(self, device: torch.device) -> torch.Tensor:
+        return torch.tensor(self.active_view_mask, device=device, dtype=torch.bool)
+
+    def _apply_sparse_view_mask_to_features(self, view_features) -> None:
+        if self.view_subset is None:
+            return
+        for view_name, active in zip(self.view_list, self.active_view_mask):
+            if not active and view_name in view_features:
+                view_features[view_name] = torch.zeros_like(view_features[view_name])
+
+    def _apply_sparse_view_mask_to_pack(
+        self, projection_pack: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        if self.view_subset is None:
+            return projection_pack
+        mask = self._active_view_mask_tensor(projection_pack["valid"].device).view(1, 1, -1)
+        pack = dict(projection_pack)
+        pack["valid"] = projection_pack["valid"] & mask
+        return pack
+
+    def _add_query_aux_outputs(self, aux_outputs: dict, query_feature: torch.Tensor) -> dict:
+        if self.center_aux_head_enabled and "center_logits" not in aux_outputs:
+            aux_outputs["center_logits"] = self.center_head(query_feature)
+        if self.distance_aux_head_enabled and "distance_logits" not in aux_outputs:
+            aux_outputs["distance_logits"] = self.distance_head(query_feature)
+        return aux_outputs
+
+    def set_training_epoch(self, epoch: int) -> None:
+        """Expose Lightning's epoch to modules with epoch-dependent warmup."""
+        self.mean_prior_current_epoch = int(epoch)
+        self.pcfs_current_epoch = int(epoch)
+        self.center_residual_current_epoch = int(epoch)
+
+    def _center_residual_alpha(self) -> float:
+        warmup = max(int(getattr(self, "center_residual_warmup_epochs", 0)), 0)
+        scale = float(getattr(self, "center_logit_residual", 0.0))
+        if scale <= 0:
+            return 0.0
+        if warmup <= 0:
+            return scale
+        epoch = max(int(getattr(self, "center_residual_current_epoch", 0)), 0)
+
+        return scale * min(1.0, float(epoch) / float(warmup))
+
+    def _mean_prior_alpha(self) -> float:
+        warmup = max(int(getattr(self, "mean_prior_warmup_epochs", 0)), 0)
+        alpha_max = float(getattr(self, "mean_prior_alpha_max", 0.0))
+        if warmup <= 0:
+            return alpha_max
+        epoch = max(int(getattr(self, "mean_prior_current_epoch", 0)), 0)
+        return alpha_max * min(1.0, float(epoch) / float(warmup))
+
+    def _pcfs_alpha(self) -> float:
+        warmup = max(int(getattr(self, "pcfs_warmup_epochs", 0)), 0)
+        if warmup <= 0:
+            return 1.0
+        epoch = max(int(getattr(self, "pcfs_current_epoch", 0)), 0)
+        return min(1.0, float(epoch) / float(warmup))
 
     def _forward_shared_unet(self, multi_view_images):
         """向量化执行共享U-Net"""
@@ -456,7 +906,6 @@ class PointDensityNet(nn.Module):
     def _vectorized_grid_sample(self, view_features, x3d):
         """向量化grid_sample采样所有视角特征"""
         B, N, _ = x3d.shape
-        C = next(iter(view_features.values())).shape[1]
 
         grids_list = []
         feature_maps_list = []
@@ -475,8 +924,8 @@ class PointDensityNet(nn.Module):
             feat_map = feat_map.permute(0, 1, 3, 2)
             feature_maps_list.append(feat_map)
 
-        grids_batched = torch.cat(grids_list, dim=0)
-        feat_batched = torch.cat(feature_maps_list, dim=0)
+        grids_batched = torch.cat(grids_list, dim=0).contiguous()
+        feat_batched = torch.cat(feature_maps_list, dim=0).contiguous()
 
         sampled_feats = F.grid_sample(
             feat_batched,
@@ -497,6 +946,737 @@ class PointDensityNet(nn.Module):
         f = torch.stack(f_list, dim=2)
         return f
 
+    def _vectorized_grid_sample_fmt(self, view_features, points_mm: torch.Tensor):
+        """Sample view features with FMT-SimGen trunk-local mm projection."""
+        return self._vectorized_grid_sample_fmt_pack(
+            view_features, self._fmt_projection_pack(points_mm)
+        )
+
+    def _vectorized_grid_sample_fmt_pack(
+        self,
+        view_features,
+        projection_pack: dict[str, torch.Tensor],
+    ):
+        """Sample view features with a precomputed FMT-SimGen projection pack."""
+        B = projection_pack["grid"].shape[0]
+        grids_list = []
+        feature_maps_list = []
+        for v_idx, view_name in enumerate(self.view_list):
+            if view_name not in view_features:
+                continue
+            grid = projection_pack["grid"][:, :, v_idx, :]
+            grids_list.append(grid.unsqueeze(1))
+
+            feat_map = view_features[view_name]
+            if self.transpose_feature_map_for_sampling:
+                feat_map = feat_map.permute(0, 1, 3, 2)
+            feature_maps_list.append(feat_map)
+
+        grids_batched = torch.cat(grids_list, dim=0)
+        feat_batched = torch.cat(feature_maps_list, dim=0)
+
+        sampled_feats = F.grid_sample(
+            feat_batched,
+            grids_batched,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=True,
+        )
+        sampled_feats = sampled_feats.squeeze(2).permute(0, 2, 1)
+
+        f_list = []
+        for v_idx in range(self.num_views):
+            f_v = sampled_feats[v_idx * B : (v_idx + 1) * B]
+            f_list.append(f_v)
+
+        f = torch.stack(f_list, dim=2)
+
+        # Keep invalid FOV samples exactly zero after interpolation.
+        valid = projection_pack["valid"].unsqueeze(-1).to(dtype=f.dtype)
+        return f * valid
+
+    def _fmt_projection_grids(self, points_mm: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return FMT-SimGen projection grids and valid masks in view_list order."""
+        pack = self._fmt_projection_pack(points_mm)
+        return pack["grid"], pack["valid"]
+
+    def _fmt_projection_pack(self, points_mm: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Return FMT-SimGen projection tensors in view_list order."""
+        grids = []
+        depths = []
+        valid_masks = []
+        uv_px_list = []
+        uv_phys_list = []
+        for view_name in self.view_list:
+            grid, depth, valid_mask, uv_px, uv_phys = project_points_mm_to_detector(
+                points_mm,
+                angle_deg=int(view_name),
+                camera_distance_mm=self.camera_distance,
+                fov_mm=self.fov_mm,
+                detector_resolution=self.detector_resolution,
+                volume_center_world=self.volume_center_world,
+                align_corners=True,
+            )
+            grids.append(grid)
+            depths.append(depth)
+            valid_masks.append(valid_mask)
+            uv_px_list.append(uv_px)
+            uv_phys_list.append(uv_phys)
+        return self._apply_sparse_view_mask_to_pack(
+            {
+                "grid": torch.stack(grids, dim=2),
+                "depth": torch.stack(depths, dim=2),
+                "valid": torch.stack(valid_masks, dim=2),
+                "uv_px": torch.stack(uv_px_list, dim=2),
+                "uv_phys": torch.stack(uv_phys_list, dim=2),
+            }
+        )
+
+    def _view_feature_dict_to_tensor(self, view_features) -> torch.Tensor:
+        """Pack view feature dict into [B,V,C,H,W] in view_list order."""
+        feature_maps = []
+        for view_name in self.view_list:
+            feat_map = view_features[view_name]
+            if self.transpose_feature_map_for_sampling:
+                feat_map = feat_map.permute(0, 1, 3, 2)
+            feature_maps.append(feat_map)
+        return torch.stack(feature_maps, dim=1)
+
+    def _ptfa_sample_fixed_gaussian(self, view_features, points_mm: torch.Tensor):
+        """Sample view features with fixed Gaussian PTFA in detector feature-map space."""
+        return self._ptfa_sample_fixed_gaussian_pack(
+            view_features, self._fmt_projection_pack(points_mm)
+        )
+
+    def _ptfa_sample_fixed_gaussian_pack(
+        self,
+        view_features,
+        projection_pack: dict[str, torch.Tensor],
+    ):
+        """Sample view features with fixed Gaussian PTFA using a projection pack."""
+        center_grid = projection_pack["grid"]
+        valid_mask = projection_pack["valid"]
+        feature_map = self._view_feature_dict_to_tensor(view_features)
+        return ptfa_sample_fixed_gaussian(
+            feature_map,
+            center_grid,
+            valid_mask,
+            window=self.ptfa_window,
+            sigma_px=self.ptfa_sigma_px,
+        )
+
+    def _ptfa_sample_exit_depth_gaussian(
+        self,
+        view_features,
+        points_mm: torch.Tensor,
+        depth_maps: torch.Tensor,
+        query_depth: torch.Tensor,
+    ):
+        """Sample view features with exit-depth-dependent Gaussian PTFA."""
+        center_grid, valid_mask = self._fmt_projection_grids(points_mm)
+        feature_map = self._view_feature_dict_to_tensor(view_features)
+        sampled, _stats = ptfa_sample_exit_depth_gaussian(
+            feature_map,
+            center_grid,
+            valid_mask,
+            depth_maps,
+            query_depth,
+            sigma_min=self.ptfa_sigma_min,
+            sigma_max=self.ptfa_sigma_max,
+            exit_depth_max=self.ptfa_exit_depth_max_mm,
+            window=self.ptfa_window,
+        )
+        return sampled
+
+    def _ptfa_sample_corrected_exit_depth_gaussian(
+        self,
+        view_features,
+        projection_pack: dict[str, torch.Tensor],
+        depth_maps: torch.Tensor,
+    ):
+        """Sample view features with corrected exit-depth-dependent Gaussian PTFA."""
+        feature_map = self._view_feature_dict_to_tensor(view_features)
+        sampled, stats = ptfa_sample_corrected_exit_depth_gaussian(
+            feature_map,
+            projection_pack["grid"],
+            projection_pack["valid"],
+            depth_maps,
+            projection_pack["depth"],
+            sigma_min=self.ptfa_sigma_min,
+            sigma_max=self.ptfa_sigma_max,
+            exit_depth_max=self.ptfa_exit_depth_max_mm,
+            window=self.ptfa_window,
+            invert_depth=self.ptfa_invert_depth,
+        )
+        return sampled, stats
+
+    def _build_pcfs_geometry_features(
+        self,
+        projection_pack: dict[str, torch.Tensor],
+        ptfa_stats: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Build PCFS calibration geometry [B,N,V,8]."""
+        grid = projection_pack["grid"]
+        dtype = grid.dtype
+        device = grid.device
+        grid_x = grid[..., 0]
+        grid_y = grid[..., 1]
+        boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
+        raw_depth_like_norm = (
+            ptfa_stats["raw_depth_like_mm"] / float(self.ptfa_exit_depth_max_mm)
+        ).clamp(0.0, 1.0)
+        angles = (
+            torch.tensor([float(v) for v in self.view_list], device=device, dtype=dtype)
+            * torch.pi
+            / 180.0
+        )
+        shape = [1] * (grid_x.dim() - 1) + [len(self.view_list)]
+        sin_a = torch.sin(angles).view(*shape).expand_as(grid_x)
+        cos_a = torch.cos(angles).view(*shape).expand_as(grid_x)
+        valid_float = projection_pack["valid"].to(device=device, dtype=dtype)
+        geom = torch.stack(
+            [
+                depth_eff_norm,
+                raw_depth_like_norm,
+                boundary_margin,
+                grid_x,
+                grid_y,
+                sin_a,
+                cos_a,
+                valid_float,
+            ],
+            dim=-1,
+        )
+        return torch.nan_to_num(geom, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _ptfa_sample_pcfs_corrected_exit_depth_gaussian(
+        self,
+        view_features,
+        projection_pack: dict[str, torch.Tensor],
+        depth_maps: torch.Tensor,
+    ):
+        """Sample view features with PCFS-calibrated corrected exit-depth sigma."""
+        feature_map = self._view_feature_dict_to_tensor(view_features)
+        base_stats = compute_exit_depth_sigma(
+            center_grid=projection_pack["grid"],
+            depth_maps=depth_maps.to(feature_map.device),
+            query_depth=projection_pack["depth"],
+            sigma_min=self.ptfa_sigma_min,
+            sigma_max=self.ptfa_sigma_max,
+            exit_depth_max=self.ptfa_exit_depth_max_mm,
+            invert_depth=self.ptfa_invert_depth,
+        )
+        geom = self._build_pcfs_geometry_features(projection_pack, base_stats)
+        delta_h = self.pcfs_sigma_calibrator(geom)
+        sampled, stats = ptfa_sample_pcfs_corrected_exit_depth_gaussian(
+            feature_map,
+            projection_pack["grid"],
+            projection_pack["valid"],
+            depth_maps,
+            projection_pack["depth"],
+            sigma_min=self.ptfa_sigma_min,
+            sigma_max=self.ptfa_sigma_max,
+            exit_depth_max=self.ptfa_exit_depth_max_mm,
+            window=self.ptfa_window,
+            delta_h=delta_h,
+            alpha=self._pcfs_alpha(),
+            invert_depth=self.ptfa_invert_depth,
+            base_stats=base_stats,
+            use_sigma_bounds=self.pcfs_use_sigma_bounds,
+        )
+        return sampled, stats
+
+    def _build_query_geometry_features(
+        self,
+        projection_pack: dict[str, torch.Tensor],
+        ptfa_stats: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Build geometry-only gate features [B,N,V,9]."""
+        grid = projection_pack["grid"]
+        dtype = grid.dtype
+        device = grid.device
+        grid_x = grid[..., 0]
+        grid_y = grid[..., 1]
+        boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
+        denom = max(self.ptfa_sigma_max - self.ptfa_sigma_min, 1.0e-12)
+        sigma_norm = ((ptfa_stats["sigma_px"] - self.ptfa_sigma_min) / denom).clamp(0.0, 1.0)
+
+        angles = torch.as_tensor([float(v) for v in self.view_list], device=device, dtype=dtype) * (
+            torch.pi / 180.0
+        )
+        angle_feat = torch.stack(
+            [
+                torch.sin(angles),
+                torch.cos(angles),
+                torch.sin(2.0 * angles),
+                torch.cos(2.0 * angles),
+            ],
+            dim=-1,
+        ).view(1, 1, self.num_views, 4)
+        angle_feat = angle_feat.expand(grid.shape[0], grid.shape[1], -1, -1)
+        geom = torch.cat(
+            [
+                grid_x.unsqueeze(-1),
+                grid_y.unsqueeze(-1),
+                boundary_margin.unsqueeze(-1),
+                depth_eff_norm.unsqueeze(-1),
+                sigma_norm.unsqueeze(-1),
+                angle_feat,
+            ],
+            dim=-1,
+        )
+        return torch.nan_to_num(geom, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _build_reliability_geometry_features(
+        self,
+        projection_pack: dict[str, torch.Tensor],
+        ptfa_stats: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Build geometry/depth-only reliability features [B,N,V,G]."""
+        grid = projection_pack["grid"]
+        dtype = grid.dtype
+        device = grid.device
+        grid_x = grid[..., 0]
+        grid_y = grid[..., 1]
+        boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
+        center_distance = torch.sqrt((grid_x.square() + grid_y.square()).clamp_min(0.0))
+        raw_depth_like_norm = (
+            ptfa_stats["raw_depth_like_mm"] / float(self.ptfa_exit_depth_max_mm)
+        ).clamp(0.0, 1.0)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
+        denom = max(self.ptfa_sigma_max - self.ptfa_sigma_min, 1.0e-12)
+        sigma_norm = ((ptfa_stats["sigma_px"] - self.ptfa_sigma_min) / denom).clamp(0.0, 1.0)
+        valid_float = projection_pack["valid"].to(dtype=dtype)
+
+        angles = torch.as_tensor([float(v) for v in self.view_list], device=device, dtype=dtype) * (
+            torch.pi / 180.0
+        )
+        angle_feat = torch.stack(
+            [
+                torch.sin(angles),
+                torch.cos(angles),
+                torch.sin(2.0 * angles),
+                torch.cos(2.0 * angles),
+            ],
+            dim=-1,
+        ).view(1, 1, self.num_views, 4)
+        angle_feat = angle_feat.expand(grid.shape[0], grid.shape[1], -1, -1)
+        if getattr(self, "reliability_gate_geom_set", "full") == "compact":
+            geom = torch.cat(
+                [
+                    grid_x.unsqueeze(-1),
+                    grid_y.unsqueeze(-1),
+                    boundary_margin.unsqueeze(-1),
+                    depth_eff_norm.unsqueeze(-1),
+                    sigma_norm.unsqueeze(-1),
+                    angle_feat[..., 0:2],
+                    valid_float.unsqueeze(-1),
+                ],
+                dim=-1,
+            )
+        else:
+            geom = torch.cat(
+                [
+                    grid_x.unsqueeze(-1),
+                    grid_y.unsqueeze(-1),
+                    boundary_margin.unsqueeze(-1),
+                    raw_depth_like_norm.unsqueeze(-1),
+                    depth_eff_norm.unsqueeze(-1),
+                    sigma_norm.unsqueeze(-1),
+                    valid_float.unsqueeze(-1),
+                    center_distance.unsqueeze(-1),
+                    angle_feat,
+                ],
+                dim=-1,
+            )
+        return torch.nan_to_num(geom, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _build_canonical_reliability_geometry_features(
+        self,
+        projection_pack: dict[str, torch.Tensor],
+        ptfa_stats: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Build compact interpretable geometry features [B,N,V,8]."""
+        grid = projection_pack["grid"]
+        dtype = grid.dtype
+        device = grid.device
+        grid_x = grid[..., 0]
+        grid_y = grid[..., 1]
+        boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
+        denom = max(self.ptfa_sigma_max - self.ptfa_sigma_min, 1.0e-12)
+        sigma_norm = ((ptfa_stats["sigma_px"] - self.ptfa_sigma_min) / denom).clamp(0.0, 1.0)
+        valid_float = projection_pack["valid"].to(dtype=dtype)
+        angles = torch.as_tensor([float(v) for v in self.view_list], device=device, dtype=dtype) * (
+            torch.pi / 180.0
+        )
+        angle_feat = torch.stack([torch.sin(angles), torch.cos(angles)], dim=-1).view(
+            1, 1, self.num_views, 2
+        )
+        angle_feat = angle_feat.expand(grid.shape[0], grid.shape[1], -1, -1)
+        geom = torch.cat(
+            [
+                grid_x.unsqueeze(-1),
+                grid_y.unsqueeze(-1),
+                boundary_margin.unsqueeze(-1),
+                depth_eff_norm.unsqueeze(-1),
+                sigma_norm.unsqueeze(-1),
+                angle_feat,
+                valid_float.unsqueeze(-1),
+            ],
+            dim=-1,
+        )
+        return torch.nan_to_num(geom, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _build_consensus_residual_gate_input(
+        self,
+        f_view: torch.Tensor,
+        f_mean: torch.Tensor,
+        projection_pack: dict[str, torch.Tensor],
+        ptfa_stats: dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Build [B,N,V,D] compact geometry plus evidence stats for E9c."""
+        grid = projection_pack["grid"]
+        dtype = f_view.dtype
+        device = f_view.device
+        grid_x = grid[..., 0].to(device=device, dtype=dtype)
+        grid_y = grid[..., 1].to(device=device, dtype=dtype)
+        boundary_margin = (1.0 - torch.maximum(grid_x.abs(), grid_y.abs())).clamp(0.0, 1.0)
+        depth_eff_norm = (
+            ptfa_stats["depth_eff_mm"].to(device=device, dtype=dtype)
+            / float(self.ptfa_exit_depth_max_mm)
+        ).clamp(0.0, 1.0)
+        denom = max(self.ptfa_sigma_max - self.ptfa_sigma_min, 1.0e-12)
+        sigma_norm = (
+            (ptfa_stats["sigma_px"].to(device=device, dtype=dtype) - float(self.ptfa_sigma_min))
+            / denom
+        ).clamp(0.0, 1.0)
+        valid_float = projection_pack["valid"].to(device=device, dtype=dtype)
+        angles = torch.as_tensor([float(v) for v in self.view_list], device=device, dtype=dtype) * (
+            torch.pi / 180.0
+        )
+        angle_feat = torch.stack([torch.sin(angles), torch.cos(angles)], dim=-1).view(
+            1, 1, self.num_views, 2
+        )
+        angle_feat = angle_feat.expand(grid.shape[0], grid.shape[1], -1, -1)
+        compact_geom = torch.cat(
+            [
+                grid_x.unsqueeze(-1),
+                grid_y.unsqueeze(-1),
+                boundary_margin.unsqueeze(-1),
+                depth_eff_norm.unsqueeze(-1),
+                sigma_norm.unsqueeze(-1),
+                angle_feat,
+                valid_float.unsqueeze(-1),
+            ],
+            dim=-1,
+        )
+
+        if not getattr(self, "consensus_residual_gate_use_evidence_stats", True):
+            return torch.nan_to_num(compact_geom, nan=0.0, posinf=0.0, neginf=0.0)
+
+        C = max(f_view.shape[-1], 1)
+        delta = f_view - f_mean.unsqueeze(2)
+        ptfa_l2_norm = f_view.norm(dim=-1) / (float(C) ** 0.5)
+        ptfa_abs_mean = f_view.abs().mean(dim=-1)
+        ptfa_delta_norm = delta.norm(dim=-1) / (float(C) ** 0.5)
+        f_norm = f_view.norm(dim=-1)
+        mean_norm = f_mean.norm(dim=-1).unsqueeze(2)
+        ptfa_cos_to_mean = (f_view * f_mean.unsqueeze(2)).sum(dim=-1) / (
+            f_norm * mean_norm
+        ).clamp_min(1.0e-6)
+        evidence = torch.stack(
+            [ptfa_l2_norm, ptfa_abs_mean, ptfa_delta_norm, ptfa_cos_to_mean],
+            dim=-1,
+        )
+        gate_input = torch.cat([compact_geom, evidence], dim=-1)
+        return torch.nan_to_num(gate_input, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _reliability_gate_stats(
+        self,
+        weights: torch.Tensor,
+        projection_pack: dict[str, torch.Tensor],
+        ptfa_stats: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Summarize reliability gate behavior for smoke/debug reporting."""
+        valid = projection_pack["valid"].to(dtype=weights.dtype, device=weights.device)
+        has_valid = projection_pack["valid"].any(dim=-1)
+        valid_weights = weights[projection_pack["valid"]]
+        if valid_weights.numel() == 0:
+            valid_weights = weights.new_zeros(1)
+        valid_count = valid.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        uniform = torch.where(
+            has_valid.unsqueeze(-1),
+            valid / valid_count,
+            torch.zeros_like(valid),
+        )
+        uniform_diff = (weights - uniform).abs()[projection_pack["valid"]]
+        if uniform_diff.numel() == 0:
+            uniform_diff = weights.new_zeros(1)
+        entropy = -(weights * torch.log(weights.clamp_min(1.0e-12))).sum(dim=-1)
+        entropy_valid = entropy[has_valid]
+        if entropy_valid.numel() == 0:
+            entropy_valid = entropy.new_zeros(1)
+        depth_eff_norm = (ptfa_stats["depth_eff_mm"] / float(self.ptfa_exit_depth_max_mm)).clamp(
+            0.0, 1.0
+        )
+        sigma_px = ptfa_stats["sigma_px"]
+        return {
+            "reliability_weights_mean": valid_weights.detach().mean(),
+            "reliability_weights_std": valid_weights.detach().std(unbiased=False),
+            "reliability_weights_min": valid_weights.detach().min(),
+            "reliability_weights_max": valid_weights.detach().max(),
+            "reliability_weights_entropy": entropy_valid.detach().mean(),
+            "reliability_uniform_absdiff_mean": uniform_diff.detach().mean(),
+            "reliability_max_weight_mean": weights.max(dim=-1).values[has_valid].detach().mean(),
+            "valid_weight_sum_mean": weights.sum(dim=-1)[has_valid].detach().mean(),
+            "invalid_weight_max": (weights * (1.0 - valid)).detach().amax(),
+            "valid_view_count_mean": valid.sum(dim=-1).detach().mean(),
+            "depth_eff_norm_mean": depth_eff_norm.detach().mean(),
+            "depth_eff_norm_std": depth_eff_norm.detach().std(unbiased=False),
+            "sigma_px_mean": sigma_px.detach().mean(),
+            "sigma_px_std": sigma_px.detach().std(unbiased=False),
+            "sigma_px_min": sigma_px.detach().min(),
+            "sigma_px_max": sigma_px.detach().max(),
+        }
+
+    @staticmethod
+    def _valid_masked_mean(f: torch.Tensor, valid: torch.Tensor) -> torch.Tensor:
+        """Mean over views, excluding invalid projections."""
+        weights = valid.unsqueeze(-1).to(dtype=f.dtype, device=f.device)
+        denom = weights.sum(dim=2).clamp_min(1.0)
+        return (f * weights).sum(dim=2) / denom
+
+    def _geometry_summary(self, projection_pack: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Build [B,N,5] geometry summary for residual scorer side evidence."""
+        grid = projection_pack["grid"]
+        valid = projection_pack["valid"].to(dtype=grid.dtype)
+        valid_count = valid.sum(dim=2).clamp_min(1.0)
+        valid_ratio = valid.mean(dim=2)
+
+        boundary = (1.0 - torch.maximum(grid[..., 0].abs(), grid[..., 1].abs())).clamp(0.0, 1.0)
+        boundary_valid = boundary * valid
+        mean_boundary = boundary_valid.sum(dim=2) / valid_count
+        min_boundary = torch.where(
+            projection_pack["valid"],
+            boundary,
+            torch.ones_like(boundary),
+        ).amin(dim=2)
+        min_boundary = torch.where(valid_count > 0, min_boundary, torch.zeros_like(min_boundary))
+
+        depth_norm = (projection_pack["depth"].squeeze(-1) / float(self.camera_distance)).clamp(
+            0.0, 1.0
+        )
+        depth_valid = depth_norm * valid
+        mean_depth = depth_valid.sum(dim=2) / valid_count
+        var_depth = ((depth_norm - mean_depth.unsqueeze(-1)).square() * valid).sum(
+            dim=2
+        ) / valid_count
+        std_depth = torch.sqrt(var_depth.clamp_min(0.0))
+
+        summary = torch.stack(
+            [valid_ratio, mean_boundary, min_boundary, mean_depth, std_depth], dim=-1
+        )
+        return torch.nan_to_num(summary, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _s1_ptfa_evidence(
+        self,
+        features_s1_dict,
+        projection_pack: dict[str, torch.Tensor],
+        depth_maps: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Aggregate s1 PTFA evidence with a valid-view mean for side evidence paths."""
+        if self.ptfa_mode == "fixed_gaussian":
+            s1_ptfa = self._ptfa_sample_fixed_gaussian_pack(features_s1_dict, projection_pack)
+            self.last_ptfa_stats = {}
+        elif self.ptfa_mode == "corrected_exit_depth_gaussian":
+            if depth_maps is None:
+                raise ValueError(
+                    "model.ptfa.mode=corrected_exit_depth_gaussian requires batch depth_maps"
+                )
+            s1_ptfa, ptfa_stats = self._ptfa_sample_corrected_exit_depth_gaussian(
+                features_s1_dict, projection_pack, depth_maps
+            )
+            self.last_ptfa_stats = {k: v.detach() for k, v in ptfa_stats.items()}
+        elif self.ptfa_mode == "pcfs_corrected_exit_depth_gaussian":
+            if depth_maps is None:
+                raise ValueError(
+                    "model.ptfa.mode=pcfs_corrected_exit_depth_gaussian requires batch depth_maps"
+                )
+            s1_ptfa, ptfa_stats = self._ptfa_sample_pcfs_corrected_exit_depth_gaussian(
+                features_s1_dict, projection_pack, depth_maps
+            )
+            self.last_ptfa_stats = {k: v.detach() for k, v in ptfa_stats.items()}
+        else:
+            raise NotImplementedError(f"Unsupported s1 PTFA evidence mode: {self.ptfa_mode}")
+
+        if self.feature_refinement_ptfa_view_aggregation == "masked_mean":
+            s1_evidence = self._valid_masked_mean(s1_ptfa, projection_pack["valid"])
+            self.last_reliability_gate_stats = {}
+            self.last_reliability_gate_weights = None
+            self.last_consensus_residual_gate_stats = {}
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+            self.last_feature_refinement_anchor_loss = None
+        elif self.feature_refinement_ptfa_view_aggregation == "reliability_gate":
+            if self.ptfa_mode != "corrected_exit_depth_gaussian":
+                raise ValueError(
+                    "reliability_gate aggregation requires corrected_exit_depth_gaussian"
+                )
+            geom_view = self._build_reliability_geometry_features(projection_pack, ptfa_stats)
+            s1_evidence, weights = self.reliability_view_gate(
+                s1_ptfa, geom_view, projection_pack["valid"]
+            )
+            self.last_reliability_gate_weights = weights.detach()
+            self.last_reliability_gate_stats = self._reliability_gate_stats(
+                weights, projection_pack, ptfa_stats
+            )
+            self.last_consensus_residual_gate_stats = {}
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+            self.last_feature_refinement_anchor_loss = None
+        elif self.feature_refinement_ptfa_view_aggregation == "consensus_residual_gate":
+            if self.ptfa_mode != "corrected_exit_depth_gaussian":
+                raise ValueError(
+                    "consensus_residual_gate aggregation requires corrected_exit_depth_gaussian"
+                )
+            f_mean = self._valid_masked_mean(s1_ptfa, projection_pack["valid"])
+            gate_input = self._build_consensus_residual_gate_input(
+                s1_ptfa, f_mean, projection_pack, ptfa_stats
+            )
+            s1_evidence, consensus_stats = self.consensus_residual_gate(
+                s1_ptfa, gate_input, projection_pack["valid"]
+            )
+            self.last_consensus_residual_gate_stats = {
+                k: v.detach() if torch.is_tensor(v) else v
+                for k, v in consensus_stats.items()
+                if k != "confidence"
+            }
+            self.last_consensus_residual_gate_stats["confidence"] = consensus_stats[
+                "confidence"
+            ].detach()
+            self.last_reliability_gate_stats = {}
+            self.last_reliability_gate_weights = None
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+            self.last_feature_refinement_anchor_loss = None
+        elif self.feature_refinement_ptfa_view_aggregation == "mean_prior_residual_gate":
+            if self.ptfa_mode != "corrected_exit_depth_gaussian":
+                raise ValueError(
+                    "mean_prior_residual_gate aggregation requires corrected_exit_depth_gaussian"
+                )
+            f_mean = self._valid_masked_mean(s1_ptfa, projection_pack["valid"])
+            gate_input = self._build_consensus_residual_gate_input(
+                s1_ptfa, f_mean, projection_pack, ptfa_stats
+            )
+            alpha = self._mean_prior_alpha()
+            s1_evidence, mean_prior_stats = self.mean_prior_residual_gate(
+                s1_ptfa, gate_input, projection_pack["valid"], alpha
+            )
+            self.last_mean_prior_residual_gate_stats = {
+                k: v.detach() if torch.is_tensor(v) else v
+                for k, v in mean_prior_stats.items()
+                if k != "residual_scale"
+            }
+            self.last_mean_prior_residual_gate_stats["residual_scale"] = mean_prior_stats[
+                "residual_scale"
+            ].detach()
+            if self.mean_prior_anchor_loss_enabled:
+                self.last_feature_refinement_anchor_loss = (
+                    self.mean_prior_anchor_loss_beta * mean_prior_stats["anchor_loss"]
+                )
+            else:
+                self.last_feature_refinement_anchor_loss = None
+            self.last_reliability_gate_stats = {}
+            self.last_reliability_gate_weights = None
+            self.last_consensus_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+        elif self.feature_refinement_ptfa_view_aggregation == "transport_consensus_adapter":
+            if self.ptfa_mode != "corrected_exit_depth_gaussian":
+                raise ValueError(
+                    "transport_consensus_adapter aggregation requires corrected_exit_depth_gaussian"
+                )
+            geom_summary = self._geometry_summary(projection_pack).to(dtype=s1_ptfa.dtype)
+            s1_evidence, tca_stats = self.transport_consensus_adapter(
+                s1_ptfa, projection_pack["valid"], geom_summary
+            )
+            self.last_transport_consensus_adapter_stats = {
+                k: v.detach() if torch.is_tensor(v) else v for k, v in tca_stats.items()
+            }
+            self.last_reliability_gate_stats = {}
+            self.last_reliability_gate_weights = None
+            self.last_consensus_residual_gate_stats = {}
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_feature_refinement_anchor_loss = None
+        elif self.feature_refinement_ptfa_view_aggregation == "canonical_reliability":
+            if self.ptfa_mode not in {
+                "corrected_exit_depth_gaussian",
+                "pcfs_corrected_exit_depth_gaussian",
+            }:
+                raise ValueError(
+                    "canonical_reliability aggregation requires corrected or PCFS "
+                    "corrected-exit-depth PTFA"
+                )
+            geom_view = self._build_canonical_reliability_geometry_features(
+                projection_pack, ptfa_stats
+            )
+            s1_evidence, weights, canonical_stats = self.canonical_reliability_aggregator(
+                s1_ptfa, geom_view, projection_pack["valid"]
+            )
+            self.last_reliability_gate_weights = weights.detach()
+            self.last_reliability_gate_stats = {
+                k: v.detach() if torch.is_tensor(v) else v
+                for k, v in canonical_stats.items()
+                if k != "weights"
+            }
+            self.last_consensus_residual_gate_stats = {}
+            self.last_mean_prior_residual_gate_stats = {}
+            self.last_transport_consensus_adapter_stats = {}
+            self.last_feature_refinement_anchor_loss = None
+        else:
+            raise NotImplementedError(
+                "Unknown feature_refinement.ptfa_view_aggregation: "
+                f"{self.feature_refinement_ptfa_view_aggregation}"
+            )
+        self.last_s1_ptfa_evidence_stats = {
+            "mean": s1_evidence.detach().mean(),
+            "std": s1_evidence.detach().std(),
+            "norm": s1_evidence.detach().norm(),
+        }
+        return s1_evidence
+
+    def _residual_scorer_input(
+        self,
+        gamma_x: torch.Tensor,
+        s3_query_feat: torch.Tensor,
+        features_s1_dict,
+        projection_pack: dict[str, torch.Tensor] | None,
+    ) -> torch.Tensor:
+        if self.residual_scorer_input_mode == "bilinear_s3":
+            self.last_s1_ptfa_evidence_stats = {}
+            return torch.cat([gamma_x, s3_query_feat], dim=-1)
+
+        if self.residual_scorer_input_mode != "bilinear_s3_plus_s1_ptfa":
+            raise NotImplementedError(
+                f"Unknown residual_scorer.input_mode: {self.residual_scorer_input_mode}"
+            )
+        if projection_pack is None:
+            raise ValueError("bilinear_s3_plus_s1_ptfa requires FMT-SimGen projection_pack")
+
+        s1_evidence = self._s1_ptfa_evidence(features_s1_dict, projection_pack)
+        geom_summary = self._geometry_summary(projection_pack).to(dtype=s1_evidence.dtype)
+        return torch.cat([gamma_x, s3_query_feat, s1_evidence, geom_summary], dim=-1)
+
     def _compute_depth(self, x3d: torch.Tensor) -> torch.Tensor:
         """Compute a view-independent depth cue for each 3D point.
 
@@ -513,7 +1693,422 @@ class PointDensityNet(nn.Module):
         )
         return depths[..., 0:1]
 
-    def forward(self, view_projections, x3d, gamma_x=None, bg_guidance=None):
+    def _source_ownership_pack(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+    ) -> dict[str, torch.Tensor] | None:
+        """Compute distance-only measurement-derived source ownership for query points."""
+        if source_hypotheses is None:
+            return None
+
+        centers = source_hypotheses["centers"].to(device=points_mm.device, dtype=points_mm.dtype)
+        scores = source_hypotheses.get("peak_scores")
+        scales = source_hypotheses.get("scales")
+        valid = source_hypotheses.get("valid")
+        if scores is None:
+            scores = centers.new_ones(centers.shape[:2])
+        else:
+            scores = scores.to(device=points_mm.device, dtype=points_mm.dtype)
+        if scales is None:
+            scales = centers.new_ones(centers.shape[:2])
+        else:
+            scales = scales.to(device=points_mm.device, dtype=points_mm.dtype)
+        if valid is None:
+            valid = centers.new_ones(centers.shape[:2])
+        else:
+            valid = valid.to(device=points_mm.device, dtype=points_mm.dtype)
+
+        valid_bool = valid > 0.5
+        diff = points_mm[:, :, None, :] - centers[:, None, :, :]
+        dist = torch.linalg.norm(diff, dim=-1)
+        tau = max(float(self.source_instance_tau_s_mm), 1.0e-6)
+        logits = scores[:, None, :] - (dist.square() / (tau * tau))
+        logits = logits.masked_fill(~valid_bool[:, None, :], -1.0e9)
+        has_peak = valid_bool.any(dim=1)
+        ownership = torch.softmax(logits, dim=-1)
+        ownership = torch.where(has_peak[:, None, None], ownership, torch.zeros_like(ownership))
+        entropy = -(ownership * torch.log(ownership.clamp_min(1.0e-8))).sum(dim=-1)
+        top2 = torch.topk(ownership, k=min(2, ownership.shape[-1]), dim=-1).values
+        top1 = top2[..., 0]
+        margin = top1 - (top2[..., 1] if top2.shape[-1] > 1 else torch.zeros_like(top1))
+        return {
+            "centers": centers,
+            "scores": scores,
+            "scales": scales,
+            "valid_bool": valid_bool,
+            "has_peak": has_peak,
+            "ownership": ownership,
+            "ownership_entropy": entropy,
+            "ownership_margin": margin,
+            "tau": points_mm.new_tensor(tau),
+        }
+
+    def _source_slots_pack(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+        use_all_slots: bool = True,
+        top_k: int | None = None,
+        canonical_feature: torch.Tensor | None = None,
+        pcfs_feature: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor] | None:
+        """Pack over-complete measurement-derived source slots for query decoding."""
+        pack = self._source_ownership_pack(points_mm, source_hypotheses)
+        if pack is None:
+            return None
+
+        centers = pack["centers"]
+        scores = pack["scores"]
+        scales = pack["scales"]
+        valid_bool = pack["valid_bool"]
+        distance_ownership = pack["ownership"]
+        tau = pack["tau"].clamp_min(1.0e-6)
+        B, N, M_total = distance_ownership.shape
+
+        if use_all_slots:
+            slot_idx = torch.arange(M_total, device=points_mm.device).view(1, 1, M_total)
+            slot_idx = slot_idx.expand(B, N, -1)
+            slot_centers = centers[:, None, :, :].expand(-1, N, -1, -1)
+            slot_scores = scores[:, None, :].expand(-1, N, -1)
+            slot_scales = scales[:, None, :].expand(-1, N, -1)
+            slot_valid_bool = valid_bool
+            query_slot_valid_bool = valid_bool[:, None, :].expand(-1, N, -1)
+        else:
+            k = min(int(top_k if top_k is not None else 2), M_total)
+            _top_own, slot_idx = torch.topk(distance_ownership, k=k, dim=-1)
+            centers_exp = centers[:, None, :, :].expand(-1, N, -1, -1)
+            scores_exp = scores[:, None, :].expand(-1, N, -1)
+            scales_exp = scales[:, None, :].expand(-1, N, -1)
+            valid_exp = valid_bool[:, None, :].expand(-1, N, -1)
+            slot_centers = centers_exp.gather(2, slot_idx[..., None].expand(-1, -1, -1, 3))
+            slot_scores = scores_exp.gather(-1, slot_idx)
+            slot_scales = scales_exp.gather(-1, slot_idx)
+            query_slot_valid_bool = valid_exp.gather(-1, slot_idx)
+            slot_valid_bool = query_slot_valid_bool.any(dim=1)
+
+        rel_xyz = points_mm[:, :, None, :] - slot_centers
+        dist = torch.linalg.norm(rel_xyz, dim=-1, keepdim=True)
+        score_term = slot_scores[:, :, :, None]
+        scale_term = slot_scales[:, :, :, None]
+        geom_features = torch.cat([rel_xyz / tau, dist / tau, score_term, scale_term / tau], dim=-1)
+        geom_features = torch.nan_to_num(geom_features, nan=0.0, posinf=0.0, neginf=0.0)
+
+        if (
+            self.source_instance_ownership_mode == "evidence_aware"
+            and canonical_feature is not None
+            and pcfs_feature is not None
+        ):
+            own_canonical = canonical_feature
+            own_pcfs = pcfs_feature
+            if self.source_instance_detach_ownership_feature:
+                own_canonical = own_canonical.detach()
+                own_pcfs = own_pcfs.detach()
+            ownership_logits = self.source_ownership_net(
+                own_canonical, own_pcfs, geom_features.to(dtype=canonical_feature.dtype)
+            ).to(dtype=points_mm.dtype)
+            ownership_logits = ownership_logits / max(
+                float(self.source_instance_ownership_temperature), 1.0e-6
+            )
+        else:
+            ownership_logits = slot_scores[:, :, :] - dist.squeeze(-1).square()
+
+        own_clip = max(float(getattr(self, "source_instance_ownership_logit_clip", 30.0)), 1.0)
+        ownership_logits = torch.nan_to_num(
+            ownership_logits, nan=0.0, posinf=own_clip, neginf=-own_clip
+        ).clamp(-own_clip, own_clip)
+        ownership_logits = ownership_logits.masked_fill(~query_slot_valid_bool, -1.0e9)
+        has_slot = query_slot_valid_bool.any(dim=-1)
+        ownership = torch.softmax(ownership_logits, dim=-1)
+        ownership = torch.nan_to_num(ownership, nan=0.0, posinf=0.0, neginf=0.0)
+        ownership = torch.where(has_slot[:, :, None], ownership, torch.zeros_like(ownership))
+        ownership = ownership.masked_fill(~query_slot_valid_bool, 0.0)
+
+        entropy = -(ownership * torch.log(ownership.clamp_min(1.0e-8))).sum(dim=-1)
+        valid_count = query_slot_valid_bool.float().sum(dim=-1).clamp_min(1.0)
+        entropy_denom = valid_count.clamp_min(2.0).log()
+        entropy = torch.where(
+            valid_count > 1.0,
+            entropy / entropy_denom,
+            entropy,
+        )
+        top2 = torch.topk(ownership, k=min(2, ownership.shape[-1]), dim=-1).values
+        top1 = top2[..., 0]
+        margin = top1 - (top2[..., 1] if top2.shape[-1] > 1 else torch.zeros_like(top1))
+
+        return {
+            **pack,
+            "slot_idx": slot_idx,
+            "slot_centers": slot_centers,
+            "slot_scores": slot_scores,
+            "slot_scales": slot_scales,
+            "slot_valid_bool": slot_valid_bool,
+            "query_slot_valid_bool": query_slot_valid_bool,
+            "slot_rel_xyz": rel_xyz,
+            "slot_dist": dist,
+            "slot_geom_features": geom_features,
+            "ownership_logits": ownership_logits,
+            "ownership": ownership,
+            "ownership_entropy": entropy,
+            "ownership_margin": margin,
+            "has_slot": has_slot,
+        }
+
+    def _source_topk_pack(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+        top_k: int,
+    ) -> dict[str, torch.Tensor] | None:
+        pack = self._source_slots_pack(
+            points_mm, source_hypotheses, use_all_slots=False, top_k=top_k
+        )
+        if pack is None:
+            return None
+
+        return {
+            **pack,
+            "top_idx": pack["slot_idx"],
+            "top_ownership": pack["ownership"],
+            "top_centers": pack["slot_centers"],
+            "top_scores": pack["slot_scores"],
+            "top_rel_xyz": pack["slot_rel_xyz"],
+            "top_dist": pack["slot_dist"],
+        }
+
+    def _source_instance_cue(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+    ) -> torch.Tensor:
+        """Build query-level measurement-derived source-instance cues.
+
+        The hypotheses are derived from proposal heatmaps outside this module and must not
+        contain GT source centers, bbox, or foreground labels.
+        """
+        B, N, _ = points_mm.shape
+        if not self.source_instance_cue_enabled:
+            return points_mm.new_zeros((B, N, 0))
+        if source_hypotheses is None:
+            self.last_source_cue_stats = {
+                "num_detected_peaks": points_mm.new_zeros(()),
+                "ownership_entropy_mean": points_mm.new_zeros(()),
+                "cue_abs_mean": points_mm.new_zeros(()),
+            }
+            self.last_source_nearest_dist = None
+            return points_mm.new_zeros((B, N, self.source_instance_cue_dim))
+
+        topk = self._source_topk_pack(points_mm, source_hypotheses, top_k=2)
+        assert topk is not None
+        centers = topk["centers"]
+        valid_bool = topk["valid_bool"]
+        has_peak = topk["has_peak"]
+        ownership = topk["ownership"]
+        top_own = topk["top_ownership"]
+        top1_idx = topk["top_idx"][..., 0]
+        tau = topk["tau"]
+        rel_xyz = topk["top_rel_xyz"][..., 0, :] / tau
+        top1_dist = topk["top_dist"][..., 0, :] / tau
+        top1_own = top_own[..., 0:1]
+        if top_own.shape[-1] > 1:
+            top2_own = top_own[..., 1:2]
+        else:
+            top2_own = torch.zeros_like(top1_own)
+        margin = top1_own - top2_own
+        entropy = -(ownership * torch.log(ownership.clamp_min(1.0e-8))).sum(dim=-1, keepdim=True)
+        denom = valid_bool.float().sum(dim=1, keepdim=True).clamp_min(1.0).log()
+        entropy = torch.where(denom[:, None, :] > 0, entropy / denom[:, None, :], entropy)
+        top1_score = topk["scores"][:, None, :].expand(-1, N, -1).gather(-1, top1_idx[..., None])
+        num_peaks_norm = (valid_bool.float().sum(dim=1, keepdim=True) / max(1, centers.shape[1]))[
+            :, None, :
+        ].expand(-1, N, -1)
+
+        if self.source_instance_cue_dim == 10:
+            cue = torch.cat(
+                [
+                    rel_xyz,
+                    top1_dist,
+                    top1_own,
+                    top2_own,
+                    margin,
+                    entropy,
+                    top1_score,
+                    num_peaks_norm,
+                ],
+                dim=-1,
+            )
+        else:
+            cue = torch.cat(
+                [rel_xyz, top1_dist, top1_own, margin, entropy, top1_score],
+                dim=-1,
+            )
+        cue = torch.nan_to_num(cue, nan=0.0, posinf=0.0, neginf=0.0)
+        cue = torch.where(has_peak[:, None, None], cue, torch.zeros_like(cue))
+        self.last_source_nearest_dist = top1_dist.squeeze(-1).detach()
+        self.last_source_cue_stats = {
+            "num_detected_peaks": valid_bool.float().sum(dim=1).mean().detach(),
+            "ownership_entropy_mean": entropy.detach().mean(),
+            "top1_ownership_mean": top1_own.detach().mean(),
+            "ownership_margin_mean": margin.detach().mean(),
+            "nearest_peak_dist_mean": top1_dist.detach().mean(),
+            "cue_abs_mean": cue.detach().abs().mean(),
+        }
+        return cue
+
+    def _source_instance_decode(
+        self,
+        points_mm: torch.Tensor,
+        source_hypotheses: dict[str, torch.Tensor] | None,
+        canonical_feature: torch.Tensor,
+        pcfs_feature: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]] | None:
+        """Decode local source fields and merge source slots into query logits."""
+        if not self.source_instance_decoder_enabled:
+            self.last_source_decoder_stats = {}
+            return None
+
+        slots = self._source_slots_pack(
+            points_mm,
+            source_hypotheses,
+            use_all_slots=self.source_instance_decoder_use_all_slots,
+            top_k=self.source_instance_decoder_top_k,
+            canonical_feature=canonical_feature,
+            pcfs_feature=pcfs_feature,
+        )
+        if slots is None:
+            self.last_source_decoder_stats = {
+                "fallback_density_head": points_mm.new_ones(()),
+                "valid_slot_count_mean": points_mm.new_zeros(()),
+                "ownership_entropy_mean": points_mm.new_zeros(()),
+                "ownership_top1_mean": points_mm.new_zeros(()),
+                "ownership_margin_mean": points_mm.new_zeros(()),
+                "inactive_slot_ratio": points_mm.new_ones(()),
+            }
+            return None
+
+        has_slot = slots["has_slot"]
+        if not bool(has_slot.any().item()):
+            zero = points_mm.new_zeros(())
+            self.last_source_decoder_stats = {
+                "fallback_density_head": points_mm.new_ones(()),
+                "valid_slot_count_mean": zero,
+                "ownership_entropy_mean": zero,
+                "ownership_top1_mean": zero,
+                "ownership_margin_mean": zero,
+                "inactive_slot_ratio": points_mm.new_ones(()),
+            }
+            return None
+
+        tau = slots["tau"]
+        rel_xyz = slots["slot_rel_xyz"] / tau
+        dist = slots["slot_dist"] / tau
+        peak_score = slots["slot_scores"][..., None]
+        scale = slots["slot_scales"][..., None] / tau
+        ownership = slots["ownership"]
+        slot_count = ownership.shape[-1]
+        margin = slots["ownership_margin"][:, :, None, None].expand(-1, -1, slot_count, -1)
+        if self.source_instance_decoder_local_dim <= 6:
+            local_features = torch.cat([rel_xyz, dist, peak_score, ownership[..., None]], dim=-1)
+        else:
+            local_features = torch.cat(
+                [rel_xyz, dist, peak_score, scale, ownership[..., None], margin], dim=-1
+            )
+        if local_features.shape[-1] < self.source_instance_decoder_local_dim:
+            pad = local_features.new_zeros(
+                (
+                    *local_features.shape[:-1],
+                    self.source_instance_decoder_local_dim - local_features.shape[-1],
+                )
+            )
+            local_features = torch.cat([local_features, pad], dim=-1)
+        elif local_features.shape[-1] > self.source_instance_decoder_local_dim:
+            local_features = local_features[..., : self.source_instance_decoder_local_dim]
+        local_features = torch.nan_to_num(local_features, nan=0.0, posinf=0.0, neginf=0.0)
+
+        local_logits = self.source_instance_decoder(
+            canonical_feature, pcfs_feature, local_features.to(dtype=canonical_feature.dtype)
+        )
+        logit_clip = max(float(getattr(self, "source_instance_component_logit_clip", 30.0)), 1.0)
+        local_logits = torch.nan_to_num(
+            local_logits, nan=0.0, posinf=logit_clip, neginf=-logit_clip
+        ).clamp(-logit_clip, logit_clip)
+        slot_valid = slots["slot_valid_bool"]
+        query_slot_valid = slots["query_slot_valid_bool"]
+        raw_local_logits = local_logits
+        masked_local_logits = raw_local_logits.masked_fill(~query_slot_valid[:, :, :, None], -1.0e9)
+        local_prob = torch.sigmoid(raw_local_logits).masked_fill(
+            ~query_slot_valid[:, :, :, None], 0.0
+        )
+        ownership_exp = ownership[..., None].to(dtype=local_logits.dtype)
+        if self.source_instance_decoder_merge == "weighted_sum":
+            logits = (ownership_exp * raw_local_logits).sum(dim=2)
+            density_prob = torch.sigmoid(logits)
+            union_prob_mean = density_prob.detach().mean()
+        elif self.source_instance_decoder_merge == "soft_union":
+            weighted_prob = (ownership_exp * local_prob).clamp(0.0, 1.0)
+            density_prob = 1.0 - torch.prod(1.0 - weighted_prob, dim=2)
+            density_prob = density_prob.clamp(1.0e-6, 1.0 - 1.0e-6)
+            logits = torch.logit(density_prob)
+            union_prob_mean = density_prob.detach().mean()
+        else:
+            logits = masked_local_logits.max(dim=2).values
+            density_prob = torch.sigmoid(logits)
+            union_prob_mean = density_prob.detach().mean()
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=logit_clip, neginf=-logit_clip)
+        logits = logits.clamp(-logit_clip, logit_clip)
+        logits = torch.where(has_slot[:, :, None], logits, torch.zeros_like(logits))
+
+        top2 = torch.topk(ownership, k=min(2, ownership.shape[-1]), dim=-1).values
+        top1 = top2[..., 0]
+        margin_mean = top1 - (top2[..., 1] if top2.shape[-1] > 1 else torch.zeros_like(top1))
+
+        valid_local_logits = raw_local_logits[query_slot_valid[:, :, :, None]]
+        if valid_local_logits.numel() == 0:
+            local_logit_mean = points_mm.new_zeros(())
+            local_logit_std = points_mm.new_zeros(())
+        else:
+            local_logit_mean = valid_local_logits.detach().mean()
+            local_logit_std = valid_local_logits.detach().std()
+
+        self.last_source_decoder_stats = {
+            "fallback_density_head": points_mm.new_zeros(()),
+            "valid_slot_count_mean": slot_valid.float().sum(dim=1).detach().mean(),
+            "ownership_entropy_mean": slots["ownership_entropy"].detach().mean(),
+            "ownership_top1_mean": top1.detach().mean(),
+            "ownership_margin_mean": margin_mean.detach().mean(),
+            "local_logit_mean": local_logit_mean,
+            "local_logit_std": local_logit_std,
+            "local_prob_mean": local_prob.detach().mean(),
+            "soft_union_prob_mean": union_prob_mean,
+            "inactive_slot_ratio": (~slot_valid).float().detach().mean(),
+            "topk_ownership_sum_mean": ownership.sum(dim=-1).detach().mean(),
+        }
+        if self.source_instance_decoder_merge == "weighted_sum":
+            self.last_source_decoder_stats["weighted_sum_prob_mean"] = density_prob.detach().mean()
+
+        source_aux = {}
+        if self.source_instance_decoder_output_components:
+            source_aux = {
+                "source_component_logits": raw_local_logits,
+                "source_component_prob": local_prob,
+                "source_component_ownership": ownership,
+                "source_component_valid": slot_valid,
+                "source_slot_centers": slots["slot_centers"][:, 0, :, :],
+                "source_slot_scores": slots["slot_scores"][:, 0, :],
+            }
+        return logits, source_aux
+
+    def forward(
+        self,
+        view_projections,
+        x3d,
+        gamma_x=None,
+        bg_guidance=None,
+        points_mm=None,
+        depth_maps=None,
+        source_hypotheses=None,
+        aux_only: bool = False,
+    ):
         """
         Args:
             view_projections: dict {view_name: tensor}
@@ -522,30 +2117,148 @@ class PointDensityNet(nn.Module):
 
         Returns:
             logits: [B, N, 1] 密度预测
-            views_no_projections: dict 辅助输出
+            aux_projections: dict auxiliary per-view projection outputs
         """
-        B, N, _ = x3d.shape
-
         # 特征提取（多尺度）
         features_s1_dict, features_s2_dict, features_s3_dict = self._forward_shared_unet(
             view_projections
         )
+        self._apply_sparse_view_mask_to_features(features_s1_dict)
+        self._apply_sparse_view_mask_to_features(features_s2_dict)
+        self._apply_sparse_view_mask_to_features(features_s3_dict)
 
         # 门控融合辅助输出（用final尺度特征）
-        views_no_projections = {}
+        aux_projections = {}
         for v_idx, view_name in enumerate(self.view_list):
             if view_name in features_s1_dict:
                 feat = features_s1_dict[view_name]  # [B, C, H, W]
                 gate_out = self.gate_fusions[v_idx](feat)
-                views_no_projections[view_name] = gate_out.squeeze(1)
+                aux_projections[view_name] = gate_out.squeeze(1)
 
-        # depth: [B, N, 1] (approx 0~camera_distance)
-        depth = self._compute_depth(x3d)
+        if aux_only:
+            first_aux = next(iter(aux_projections.values()))
+            dummy_logits = first_aux.new_zeros((first_aux.shape[0], 1, 1))
+            return dummy_logits, aux_projections
+
+        B, N, _ = x3d.shape
+
+        projection_pack = None
+        if points_mm is not None and self.use_fmt_simgen_projection:
+            projection_pack = self._fmt_projection_pack(points_mm)
+            # FMT-SimGen depth cue is view-independent here: use 0° camera depth.
+            zero_view_idx = self.view_list.index(0) if 0 in self.view_list else 0
+            depth = projection_pack["depth"][:, :, zero_view_idx, :]
+            query_depth_all_views = None
+            if self.ptfa_enabled and self.ptfa_mode == "exit_depth_gaussian":
+                query_depth_all_views = projection_pack["depth"]
+        else:
+            # depth: [B, N, 1] (approx 0~camera_distance)
+            depth = self._compute_depth(x3d)
+            query_depth_all_views = None
 
         # 多尺度点采样
-        f_s1 = self._vectorized_grid_sample(features_s1_dict, x3d)  # [B, N, V, C]
-        f_s2 = self._vectorized_grid_sample(features_s2_dict, x3d)  # [B, N, V, C2]
-        f_s3 = self._vectorized_grid_sample(features_s3_dict, x3d)  # [B, N, V, C3]
+        f_s3_for_residual = None
+        if points_mm is not None and self.use_fmt_simgen_projection:
+            if self.residual_scorer_enabled:
+                # The residual scorer ablation is defined on bilinear s3 features.
+                # Keep this input fixed even when the fusion s3 path uses PTFA.
+                f_s3_for_residual = self._vectorized_grid_sample_fmt_pack(
+                    features_s3_dict, projection_pack
+                )
+
+            if self.aggregation_mode == "corrected_exit_ptfa_geom_gate":
+                if not (
+                    self.ptfa_enabled
+                    and self.ptfa_mode == "corrected_exit_depth_gaussian"
+                    and "s3" in self.ptfa_scales
+                ):
+                    raise ValueError(
+                        "aggregation_mode=corrected_exit_ptfa_geom_gate requires "
+                        "model.ptfa.enabled=true, mode=corrected_exit_depth_gaussian, "
+                        "and scales containing 's3'"
+                    )
+                if depth_maps is None:
+                    raise ValueError(
+                        "model.ptfa.mode=corrected_exit_depth_gaussian requires batch depth_maps"
+                    )
+                assert projection_pack is not None
+                f_s3, ptfa_stats = self._ptfa_sample_corrected_exit_depth_gaussian(
+                    features_s3_dict, projection_pack, depth_maps
+                )
+                g_s3 = self.proj_s3(f_s3)
+                geom = self._build_query_geometry_features(projection_pack, ptfa_stats)
+                fused_feat, agg_weights = self.query_view_gate(g_s3, geom, projection_pack["valid"])
+                self.last_ptfa_stats = {k: v.detach() for k, v in ptfa_stats.items()}
+                self.last_query_aggregation_weights = agg_weights.detach()
+
+                if gamma_x is None:
+                    gamma_x = self._simple_pos_encoding(x3d, self.pos_enc_dim)
+                logits = self.density_head(gamma_x, fused_feat)
+                if self.residual_scorer_enabled:
+                    residual_s3 = f_s3_for_residual
+                    s3_query_feat = self.proj_s3(residual_s3).mean(dim=2)
+                    scorer_input = self._residual_scorer_input(
+                        gamma_x,
+                        s3_query_feat,
+                        features_s1_dict,
+                        projection_pack,
+                    )
+                    residual = self.residual_scorer(scorer_input)
+                    logits = logits + self.residual_scorer_lambda * residual
+
+                aux_projections = self._add_query_aux_outputs(aux_projections, fused_feat)
+                if getattr(self, "enable_background", False):
+                    extra = {"query_view_weights": agg_weights}
+                    fused_feat_bg = fused_feat
+                    if bool(self.bg_guidance_cfg["enable"]):
+                        if bg_guidance is None:
+                            raise ValueError(
+                                "Background guidance is enabled by config, but "
+                                "bg_guidance is None. "
+                                "Please pass bg_guidance=[B,G] (or [B,N,G])."
+                            )
+                        fused_feat_bg, stats = self.bg_guidance_interaction(
+                            fused_feat_bg, bg_guidance
+                        )
+                        extra.update({f"bg_guidance/{k}": v for k, v in stats.items()})
+
+                    background_logits = self.background_head(gamma_x, fused_feat_bg)
+                    extra["background_logits"] = background_logits
+                    return logits, aux_projections, extra
+
+                return logits, aux_projections
+
+            f_s1 = self._vectorized_grid_sample_fmt_pack(features_s1_dict, projection_pack)
+            f_s2 = self._vectorized_grid_sample_fmt_pack(features_s2_dict, projection_pack)
+            if (
+                self.ptfa_enabled
+                and self.ptfa_mode == "exit_depth_gaussian"
+                and "s3" in self.ptfa_scales
+            ):
+                if depth_maps is None:
+                    raise ValueError(
+                        "model.ptfa.mode=exit_depth_gaussian requires batch depth_maps"
+                    )
+                f_s3 = self._ptfa_sample_exit_depth_gaussian(
+                    features_s3_dict, points_mm, depth_maps, query_depth_all_views
+                )
+            elif (
+                self.ptfa_enabled
+                and self.ptfa_mode == "fixed_gaussian"
+                and "s3" in self.ptfa_scales
+            ):
+                f_s3 = self._ptfa_sample_fixed_gaussian(features_s3_dict, points_mm)
+            else:
+                f_s3 = (
+                    f_s3_for_residual
+                    if f_s3_for_residual is not None
+                    else self._vectorized_grid_sample_fmt_pack(features_s3_dict, projection_pack)
+                )
+        else:
+            f_s1 = self._vectorized_grid_sample(features_s1_dict, x3d)  # [B, N, V, C]
+            f_s2 = self._vectorized_grid_sample(features_s2_dict, x3d)  # [B, N, V, C2]
+            f_s3 = self._vectorized_grid_sample(features_s3_dict, x3d)  # [B, N, V, C3]
+            f_s3_for_residual = f_s3
 
         # 通道统一到 C=feature_dim
         g_s1 = f_s1
@@ -559,13 +2272,116 @@ class PointDensityNet(nn.Module):
 
         # 尺度融合（depth-conditioned）
         fused_feat, _a = self.scale_fusion(h1, h2, h3, depth)
+        source_decoder_canonical_feat = fused_feat
 
         # 位置编码
         if gamma_x is None:
             gamma_x = self._simple_pos_encoding(x3d, self.pos_enc_dim)
 
+        if self.feature_refinement_enabled:
+            if projection_pack is None:
+                raise ValueError("feature_refinement requires FMT-SimGen points_mm projection_pack")
+            if not (
+                self.ptfa_enabled
+                and self.ptfa_mode
+                in {
+                    "fixed_gaussian",
+                    "corrected_exit_depth_gaussian",
+                    "pcfs_corrected_exit_depth_gaussian",
+                }
+                and "s1" in self.ptfa_scales
+            ):
+                raise ValueError(
+                    "feature_refinement requires model.ptfa.enabled=true, "
+                    "mode=fixed_gaussian, corrected_exit_depth_gaussian, "
+                    "or pcfs_corrected_exit_depth_gaussian, "
+                    "and scales containing 's1'"
+                )
+            s1_evidence = self._s1_ptfa_evidence(features_s1_dict, projection_pack, depth_maps)
+            geom_summary = self._geometry_summary(projection_pack).to(dtype=fused_feat.dtype)
+            if self.source_instance_cue_enabled:
+                if points_mm is None:
+                    raise ValueError("source_instance_cue requires FMT-SimGen points_mm")
+                source_cue = self._source_instance_cue(points_mm, source_hypotheses).to(
+                    dtype=fused_feat.dtype
+                )
+                geom_summary = torch.cat([geom_summary, source_cue], dim=-1)
+            else:
+                self.last_source_cue_stats = {}
+                self.last_source_nearest_dist = None
+            refined_feat = self.feature_refinement(fused_feat, s1_evidence, geom_summary)
+            self.last_feature_refinement_stats = {
+                "base_mean": fused_feat.detach().mean(),
+                "ptfa_mean": s1_evidence.detach().mean(),
+                "delta_norm": (refined_feat.detach() - fused_feat.detach()).norm(),
+                "refined_norm": refined_feat.detach().norm(),
+            }
+            if self.store_forward_debug:
+                self.last_feature_refinement_debug = {
+                    "f_base": fused_feat.detach(),
+                    "f_ptfa": s1_evidence.detach(),
+                    "f_refined": refined_feat.detach(),
+                }
+            else:
+                self.last_feature_refinement_debug = {}
+            fused_feat = refined_feat
+        else:
+            self.last_feature_refinement_stats = {}
+            self.last_feature_refinement_anchor_loss = None
+            self.last_feature_refinement_debug = {}
+
         # 隐式密度预测
-        logits = self.density_head(gamma_x, fused_feat)
+        source_instance_aux_outputs = {}
+        if self.source_instance_decoder_enabled:
+            if points_mm is None:
+                raise ValueError("source_instance_decoder requires FMT-SimGen points_mm")
+            source_decoded = self._source_instance_decode(
+                points_mm,
+                source_hypotheses,
+                canonical_feature=source_decoder_canonical_feat,
+                pcfs_feature=fused_feat,
+            )
+            if source_decoded is None:
+                logits = self.density_head(gamma_x, fused_feat)
+            else:
+                logits, source_instance_aux_outputs = source_decoded
+        else:
+            self.last_source_decoder_stats = {}
+            logits = self.density_head(gamma_x, fused_feat)
+        # E15: center-aware density residual
+        # 注意：这一步让 center head 不只是辅助任务，而是轻微影响最终 density logits
+
+        center_logits_for_aux = None
+        distance_logits_for_aux = None
+
+        if self.center_aux_head_enabled:
+            center_logits_for_aux = self.center_head(fused_feat)
+            alpha_c = self._center_residual_alpha()
+            if alpha_c > 0.0:
+                logits = logits + alpha_c * center_logits_for_aux
+
+        if self.distance_aux_head_enabled:
+            distance_logits_for_aux = self.distance_head(fused_feat)
+
+        if self.residual_scorer_enabled:
+            residual_s3 = f_s3_for_residual if f_s3_for_residual is not None else f_s3
+            s3_query_feat = self.proj_s3(residual_s3).mean(dim=2)
+            scorer_input = self._residual_scorer_input(
+                gamma_x,
+                s3_query_feat,
+                features_s1_dict,
+                projection_pack,
+            )
+            residual = self.residual_scorer(scorer_input)
+            logits = logits + self.residual_scorer_lambda * residual
+
+        if center_logits_for_aux is not None:
+            aux_projections["center_logits"] = center_logits_for_aux
+        if distance_logits_for_aux is not None:
+            aux_projections["distance_logits"] = distance_logits_for_aux
+
+        aux_projections.update(source_instance_aux_outputs)
+        aux_projections = self._add_query_aux_outputs(aux_projections, fused_feat)
 
         # Background branch (optional)
         if getattr(self, "enable_background", False):
@@ -582,9 +2398,9 @@ class PointDensityNet(nn.Module):
 
             background_logits = self.background_head(gamma_x, fused_feat_bg)  # [B, N, 1]
             extra["background_logits"] = background_logits
-            return logits, views_no_projections, extra
+            return logits, aux_projections, extra
 
-        return logits, views_no_projections
+        return logits, aux_projections
 
     def _simple_pos_encoding(self, x, d_model):
         """Transformer风格的位置编码"""

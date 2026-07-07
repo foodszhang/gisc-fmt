@@ -1,0 +1,10 @@
+name: cnn3d_baseline
+output_type: voxel
+num_views: 7
+geometry:
+  global_voxel_shape: [190, 200, 104]
+cnn3d_baseline:
+  base_channels: 8
+  output_mode: roi
+  paste_roi_to_full: true
+  full_output_shape: [190, 200, 104]

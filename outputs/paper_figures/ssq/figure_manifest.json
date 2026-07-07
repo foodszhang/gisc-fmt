@@ -1,0 +1,115 @@
+{
+  "generator_repo_head_at_generation": "92496da",
+  "generator_script_git_blob_sha": "666e59823bdb47aa70f0c886145e83dc2bb641fe",
+  "generator_script_sha256": "ff22009048099b6f805fa3328200a35ffd1173713b5f88bf89678cc5676e6657",
+  "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
+  "figures": [
+    {
+      "figure_id": "fig_three_source_candidate_contact_sheet",
+      "figure_path": "outputs/paper_figures/ssq/qualitative_cases/fig_three_source_candidate_contact_sheet.pdf",
+      "source_data_path": "outputs/paper_figures/ssq/qualitative_cases/three_source_candidate_contact_sheet.csv",
+      "methods": [
+        "SSQ-FMT",
+        "w/o transport-aware footprint",
+        "w/o query-canonical reliability",
+        "w/o source-relative query cue"
+      ],
+      "samples": [
+        "sample_2378",
+        "sample_1718",
+        "sample_0401",
+        "sample_0300",
+        "sample_2614",
+        "sample_1482",
+        "sample_1378",
+        "sample_1741",
+        "sample_2650",
+        "sample_2077"
+      ],
+      "evaluation_protocol": {
+        "test_set": "fixed 300-sample test.txt",
+        "voxel_threshold": 0.5,
+        "component_iou_threshold": 0.01,
+        "component_centroid_threshold_vox": 3.0,
+        "component_connectivity": 26,
+        "minimum_region_size": 10
+      },
+      "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
+      "git_commit": "92496da",
+      "suitability": "supplementary"
+    },
+    {
+      "figure_id": "fig_source_separation_profiles",
+      "figure_path": "outputs/paper_figures/ssq/qualitative_cases/fig_source_separation_profiles.pdf",
+      "source_data_path": "outputs/paper_figures/ssq/qualitative_cases/source_separation_profile_metrics.csv",
+      "methods": [
+        "GT",
+        "w/o transport-aware footprint",
+        "w/o query-canonical reliability",
+        "w/o source-relative query cue",
+        "SSQ-FMT"
+      ],
+      "samples": [
+        "sample_0712",
+        "sample_0300"
+      ],
+      "evaluation_protocol": {
+        "test_set": "fixed 300-sample test.txt",
+        "voxel_threshold": 0.5,
+        "component_iou_threshold": 0.01,
+        "component_centroid_threshold_vox": 3.0,
+        "component_connectivity": 26,
+        "minimum_region_size": 10
+      },
+      "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
+      "git_commit": "92496da",
+      "suitability": "main text candidate"
+    },
+    {
+      "figure_id": "fig_module_rescue_transitions",
+      "figure_path": "outputs/paper_figures/ssq/paired_improvement/fig_module_rescue_transitions.pdf",
+      "source_data_path": "outputs/paper_figures/ssq/paired_improvement/module_rescue_transitions.csv",
+      "methods": [
+        "SSQ-FMT",
+        "w/o transport-aware footprint",
+        "w/o query-canonical reliability",
+        "w/o source-relative query cue"
+      ],
+      "samples": "test300 GT component count 2/3 and minimum source distance <= 8 mm",
+      "evaluation_protocol": {
+        "test_set": "fixed 300-sample test.txt",
+        "voxel_threshold": 0.5,
+        "component_iou_threshold": 0.01,
+        "component_centroid_threshold_vox": 3.0,
+        "component_connectivity": 26,
+        "minimum_region_size": 10
+      },
+      "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
+      "git_commit": "92496da",
+      "suitability": "supplementary or unsupported"
+    },
+    {
+      "figure_id": "fig_delta_dice_supplementary",
+      "figure_path": "outputs/paper_figures/ssq/paired_improvement/fig_delta_dice_supplementary.pdf",
+      "source_data_path": "outputs/paper_figures/ssq/paired_improvement/paired_delta_dice.csv",
+      "methods": [
+        "SSQ-FMT",
+        "w/o transport-aware footprint",
+        "w/o query-canonical reliability",
+        "w/o source-relative query cue"
+      ],
+      "samples": "test300 paired by sample_id",
+      "evaluation_protocol": {
+        "test_set": "fixed 300-sample test.txt",
+        "voxel_threshold": 0.5,
+        "component_iou_threshold": 0.01,
+        "component_centroid_threshold_vox": 3.0,
+        "component_connectivity": 26,
+        "minimum_region_size": 10
+      },
+      "generation_command": "uv run python tools/visualization/ssq_paper/generate_ssq_paper_figures.py",
+      "git_commit": "92496da",
+      "suitability": "supplementary"
+    }
+  ]
+}

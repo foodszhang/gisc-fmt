@@ -1,0 +1,8 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_main
+  - _self_
+
+name: fmt_simgen_v2_ssq_no_center_aux
+description: Backward-compatible alias for the SSQ mainline without center auxiliary supervision

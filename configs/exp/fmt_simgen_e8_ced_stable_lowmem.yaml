@@ -1,0 +1,27 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e8_ced_s1_ptfa_feature_refine
+  - _self_
+
+name: fmt_simgen_e8_ced_stable_lowmem
+description: E8 corrected exit-depth s1 PTFA stable low-memory protocol with epoch query resampling
+
+data:
+  train_max_samples: null
+  val_max_samples: null
+  test_max_samples: null
+  batch_size: 2
+  eval_batch_size: 1
+  num_queries: 32768
+  sample_num: 32768
+  resample_queries_each_epoch: true
+  query_epoch_seed_stride: 1000003
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  accumulate_grad_batches: 2
+  max_epochs: 60
+  check_val_every_n_epoch: 1

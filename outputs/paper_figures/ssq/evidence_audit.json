@@ -1,0 +1,96 @@
+[
+  {
+    "figure_id": "fig_source_separation_profiles",
+    "intended_claim": "SSQ-FMT separates adjacent and weak multi-source cases better than ablations.",
+    "exact_data_used": "outputs/paper_figures/ssq/qualitative_cases/source_separation_profile_metrics.csv",
+    "sample_selection_rule": "Hard component success constraints for selected adjacent and three-source cases.",
+    "population_subset": "Fixed test300 multi-source samples satisfying selection constraints.",
+    "metric_definition": "Oblique-plane profiles, valley ratio, bridge area, weak-focus retention, component outcome.",
+    "effect_size": "See source_separation_profile_metrics.csv.",
+    "confidence_interval": "Not applicable to case study.",
+    "statistical_test": "Not applicable to case study.",
+    "supports_claim": "case-level visual evidence only",
+    "placement": "main text candidate"
+  },
+  {
+    "figure_id": "fig_module_rescue_transitions",
+    "intended_claim": "SSQ-FMT rescues complete multi-source recovery failures made by ablations.",
+    "exact_data_used": "outputs/paper_figures/ssq/paired_improvement/module_rescue_transitions.csv",
+    "sample_selection_rule": "GT component count 2/3 and minimum source distance <= 8 mm.",
+    "population_subset": "100 hard multi-source test samples.",
+    "metric_definition": "Complete recovery success event from component evaluator.",
+    "effect_size": [
+      {
+        "label": "No footprint",
+        "net_rescued": 9
+      },
+      {
+        "label": "No reliability",
+        "net_rescued": 6
+      },
+      {
+        "label": "No source cue",
+        "net_rescued": 3
+      }
+    ],
+    "confidence_interval": [
+      {
+        "label": "No footprint",
+        "net_rescued_ci95_low": -1.0,
+        "net_rescued_ci95_high": 19.0
+      },
+      {
+        "label": "No reliability",
+        "net_rescued_ci95_low": -4.0,
+        "net_rescued_ci95_high": 16.0
+      },
+      {
+        "label": "No source cue",
+        "net_rescued_ci95_low": -6.0,
+        "net_rescued_ci95_high": 12.0
+      }
+    ],
+    "statistical_test": [
+      {
+        "label": "No footprint",
+        "mcnemar_exact_p": 0.10775214433670044
+      },
+      {
+        "label": "No reliability",
+        "mcnemar_exact_p": 0.30745625495910645
+      },
+      {
+        "label": "No source cue",
+        "mcnemar_exact_p": 0.6636238098144531
+      }
+    ],
+    "supports_claim": "not consistently supported",
+    "placement": "supplementary or unsupported"
+  },
+  {
+    "figure_id": "fig_ssq_module_mechanisms",
+    "intended_claim": "Mechanistic evidence for PTFA, query-canonical reliability, and source cue.",
+    "exact_data_used": "not generated",
+    "sample_selection_rule": "requires analysis-mode internal exports",
+    "population_subset": "not evaluated",
+    "metric_definition": "actual footprint, reliability, and source-cue internals",
+    "effect_size": "not available",
+    "confidence_interval": "not available",
+    "statistical_test": "not available",
+    "supports_claim": "unsupported: actual internal exports are unavailable",
+    "placement": "rejected"
+  },
+  {
+    "figure_id": "fig_module_robustness",
+    "intended_claim": "Inference-time robustness to detector and view perturbations.",
+    "exact_data_used": "not generated",
+    "sample_selection_rule": "requires controlled perturbation inference outputs",
+    "population_subset": "not evaluated",
+    "metric_definition": "Dice, complete recovery rate, merge/sample under perturbation",
+    "effect_size": "not available",
+    "confidence_interval": "not available",
+    "statistical_test": "not available",
+    "supports_claim": "unsupported: perturbation inference has not been run",
+    "placement": "rejected"
+  }
+]

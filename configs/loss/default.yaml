@@ -1,7 +1,8 @@
-scatter_weight: 1.0
-target_scatter_weight: 0.5
+aux_projection_weight: 1.0
+target_aux_projection_weight: 0.5
 start_decay_epoch: 200
 decay_epochs: 200
 pos_weight: 2
 sparse_weight: 0.05
 dice_weight: 0.5
+light_weight: 1.0

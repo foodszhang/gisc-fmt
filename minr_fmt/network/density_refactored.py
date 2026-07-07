@@ -147,7 +147,7 @@ class PointDensityNet(nn.Module):
         view_list = ["-90", "-60", "-30", "0", "30", "60", "90"]
         view_features = {}
         view_specific_features = {}
-        views_no_projections = {}
+        aux_projections = {}
 
         # 1. 使用共享U-Net提取所有视图的特征（减少参数量）
         for view_name, projection in view_projections.items():
@@ -161,10 +161,10 @@ class PointDensityNet(nn.Module):
             view_specific_feat = self.view_adaptors[view_list.index(str(angle))](feat)
             view_specific_features[view_name] = view_specific_feat
             # 3. gate adaptor处理视图独立特征，得到投影重建
-            views_no_projections[view_name] = self.gate_adaptors[
+            aux_projections[view_name] = self.gate_adaptors[
                 view_list.index(str(angle))
             ](view_specific_feat)
-            views_no_projections[view_name] = views_no_projections[view_name].squeeze(1)
+            aux_projections[view_name] = aux_projections[view_name].squeeze(1)
         # 4. 空间注意力融合 - 融合所有视图特征 [B, N, C*num_views]
         fused_feat = self.attention_fusion(x3d, view_specific_features)
         # 5. 基于3D CNN预测光源密度（考虑点之间的空间关系）
@@ -173,4 +173,4 @@ class PointDensityNet(nn.Module):
         total_feat = fused_feat.reshape(B * N, C)
         density = self.density_head(total_feat).view(B, N, 1)
         # 说明：先用view_adaptors处理UNet特征，得到各视图独立特征，再用gate_adaptors处理，最后整体融合做3dcnn回归。
-        return density, views_no_projections
+        return density, aux_projections

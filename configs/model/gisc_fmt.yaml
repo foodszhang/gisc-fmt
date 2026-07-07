@@ -47,3 +47,19 @@ gisc_fmt:
       hidden_dim: 64
       scale: 1.0
       gate_init_bias: 4.0
+
+gisc:
+  # Ablation-facing projection sampling controls. These are translated to the
+  # existing PTFA implementation by ConfigExtractor.
+  footprint_mode: adaptive_constrained
+  use_footprint: true
+  use_adaptive_footprint: true
+  use_physical_constraint: true
+  fixed_sigma: 1.0
+  sigma_min: 0.6
+  sigma_max: 1.5
+  use_depth_cue: true
+  use_center_distance_cue: true
+  view_subset: null
+  log_footprint_stats: true
+  save_debug_predictions: true

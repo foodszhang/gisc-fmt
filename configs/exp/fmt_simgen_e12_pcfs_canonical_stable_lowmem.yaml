@@ -1,0 +1,69 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e11_pcfs_ced_s1_ptfa_feature_refine
+  - _self_
+
+name: fmt_simgen_e12_pcfs_canonical_stable_lowmem
+description: E12 PCFS with canonical reliability feature aggregation and LR warmup
+
+data:
+  train_max_samples: null
+  val_max_samples: null
+  test_max_samples: null
+  batch_size: 2
+  eval_batch_size: 1
+  num_workers: 2
+  pin_memory: false
+  persistent_workers: false
+  prefetch_factor: 1
+  num_queries: 32768
+  sample_num: 32768
+  resample_queries_each_epoch: true
+  query_epoch_seed_stride: 1000003
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  accumulate_grad_batches: 2
+  max_epochs: 60
+  check_val_every_n_epoch: 1
+
+optim:
+  scheduler:
+    warmup_epochs: 5
+    warmup_start_factor: 0.05
+
+model:
+  residual_scorer:
+    enabled: false
+
+  feature_refinement:
+    enabled: true
+    input_mode: s1_ptfa
+    ptfa_view_aggregation: canonical_reliability
+    hidden_dim: 128
+    geom_dim: 5
+    zero_init: true
+    canonical_reliability:
+      hidden_dim: 128
+      temperature: 1.0
+      residual_epsilon: 0.1
+      zero_init: true
+
+  ptfa:
+    enabled: true
+    scales: ["s1"]
+    mode: pcfs_corrected_exit_depth_gaussian
+    window: 5
+    sigma_min: 0.6
+    sigma_max: 1.5
+    exit_depth_max_mm: 20.8
+    invert_depth: true
+    pcfs:
+      hidden_dim: 64
+      delta_max: 0.1
+      warmup_epochs: 10
+      norm: layernorm
+      zero_init: true

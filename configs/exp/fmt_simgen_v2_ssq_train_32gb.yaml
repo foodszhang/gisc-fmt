@@ -1,0 +1,55 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_final
+  - _self_
+
+name: fmt_simgen_v2_ssq_train_32gb
+description: 32GB training profile for Full SSQ-FMT candidate scalar composition
+
+data:
+  sample_num: 8192
+  num_queries: 8192
+  eval_sample_num: 8192
+  query_sampling:
+    num_queries: ${data.num_queries}
+  batch_size: 1
+  eval_batch_size: 1
+
+model:
+  ssq_fmt:
+    hidden_dim: 64
+    encoder:
+      profile: efficient
+    representation:
+      hidden_dim: 64
+      query_chunk_size: 4096
+    routing:
+      query_chunk_size: 4096
+    fusion:
+      query_chunk_size: 4096
+    decoder:
+      positive_ratio_init: 0.03
+      query_chunk_size: 4096
+    memory:
+      checkpoint_encoder: true
+      checkpoint_routing: false
+      checkpoint_representation: false
+      checkpoint_fusion: false
+      checkpoint_decoder: false
+
+loss:
+  pos_weight: 50.0
+  dice_weight: 0.5
+  sparse_weight: 0.1
+  lambda_sdf: 0.0
+
+optim:
+  lr: 0.0005
+  weight_decay: 0.0001
+  scheduler:
+    warmup_epochs: 5
+
+trainer:
+  accumulate_grad_batches: 4
+  check_val_every_n_epoch: 2

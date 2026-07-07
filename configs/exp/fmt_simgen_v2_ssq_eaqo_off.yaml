@@ -1,0 +1,40 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_final
+  - _self_
+
+name: fmt_simgen_v2_ssq_eaqo_off
+description: Phase A SSQ-FMT EAQO disabled control
+
+data:
+  dataset_type: fmt_simgen
+  component_supervision:
+    enabled: true
+    max_components: 5
+
+model:
+  ssq_fmt:
+    density_output_mode: view_complementary
+    composition:
+      mode: view_complementary
+    view_complementary:
+      training_phase: phase_a
+      ablation: full
+      separability_mode: geometry_measurement
+      topk_per_view: 8
+      mmax: 5
+      delta_max_mm: 3.0
+      nms_radius_mm: 3.0
+      sigma_nms_mm: 4.0
+      sigma_assoc_mm: 5.0
+      sigma_min_mm: 1.0
+      sigma_max_mm: 8.0
+      score_threshold: 0.05
+      candidate_conf_threshold: 0.4
+      delta_s: 0.25
+      epsilon_s: 0.1
+      evidence_eta0: 0.25
+      phase_a_aux_loss_scale: 0.25
+    eaqo:
+      enabled: false

@@ -1,23 +1,24 @@
 """LightningDataModule with Hydra configuration support"""
 
+from omegaconf import DictConfig
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
-from omegaconf import DictConfig
 
+from .dataset.fmt_simgen_dataset import FmtSimGenProjDataset
 from .dataset.proj_dataset import MultiProjDataset
 
 
 class TrainingDataModule(LightningDataModule):
     """
     PyTorch Lightning DataModule with Hydra config support
-    
+
     Encapsulates all data loading logic with parameter management via Hydra config.
     """
 
     def __init__(self, cfg: DictConfig):
         """
         Initialize DataModule
-        
+
         Args:
             cfg: Complete Hydra config (DictConfig)
         """
@@ -26,14 +27,15 @@ class TrainingDataModule(LightningDataModule):
 
         # Extract data configuration
         data_cfg = cfg.data
+        self.dataset_type = str(data_cfg.get("dataset_type", "multiproj"))
         self.train_dir = data_cfg.train_dir
         self.val_dir = data_cfg.val_dir
         self.test_dir = data_cfg.test_dir
-        self.block_dir = data_cfg.block_dir
-        
-        if not self.block_dir:
+        self.block_dir = data_cfg.get("block_dir")
+
+        if self.dataset_type != "fmt_simgen" and not self.block_dir:
             raise ValueError("data.block_dir must be specified in the Hydra config")
-        
+
         # DataLoader parameters
         self.batch_size = data_cfg.batch_size
         self.eval_batch_size = data_cfg.eval_batch_size
@@ -51,81 +53,80 @@ class TrainingDataModule(LightningDataModule):
     def setup(self, stage: str = None):
         """
         Create datasets for train/val/test stages
-        
+
         Args:
             stage: 'fit', 'validate', 'test' or None
         """
         if stage in ("fit", "validate", None):
             # Training dataset
             if self.train_dataset is None:
-                self.train_dataset = MultiProjDataset(
-                    data_dir=self.train_dir,
-                    block_dir=self.block_dir,
-                    config=self.cfg,
-                    is_training=True,
-                    split="train",
-                )
+                self.train_dataset = self._make_dataset(self.train_dir, True, "train")
 
             # Validation dataset
             if self.val_dataset is None:
-                self.val_dataset = MultiProjDataset(
-                    data_dir=self.val_dir,
-                    block_dir=self.block_dir,
-                    config=self.cfg,
-                    is_training=False,
-                    split="val",
-                )
+                self.val_dataset = self._make_dataset(self.val_dir, False, "val")
 
         if stage in ("test", None) and self.test_dir:
             if self.test_dataset is None:
-                self.test_dataset = MultiProjDataset(
-                    data_dir=self.test_dir,
-                    block_dir=self.block_dir,
-                    config=self.cfg,
-                    is_training=False,
-                    split="test",
-                )
+                self.test_dataset = self._make_dataset(self.test_dir, False, "test")
+
+    def _make_dataset(self, data_dir, is_training: bool, split: str):
+        if self.dataset_type == "fmt_simgen":
+            return FmtSimGenProjDataset(
+                data_dir=data_dir,
+                config=self.cfg,
+                is_training=is_training,
+                split=split,
+            )
+        return MultiProjDataset(
+            data_dir=data_dir,
+            block_dir=self.block_dir,
+            config=self.cfg,
+            is_training=is_training,
+            split=split,
+        )
 
     def train_dataloader(self) -> DataLoader:
         """Return training dataloader"""
         if self.train_dataset is None:
             self.setup(stage="fit")
 
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            shuffle=self.shuffle,
-            pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
-            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else 2,
-        )
+        kwargs = self._loader_kwargs(shuffle=self.shuffle, batch_size=self.batch_size)
+        return DataLoader(self.train_dataset, **kwargs)
 
     def val_dataloader(self) -> DataLoader:
         """Return validation dataloader"""
         if self.val_dataset is None:
             self.setup(stage="validate")
 
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.eval_batch_size,
-            num_workers=self.num_workers,
-            shuffle=False,
-            pin_memory=self.pin_memory,
-        )
+        kwargs = self._loader_kwargs(shuffle=False, batch_size=self.eval_batch_size)
+        return DataLoader(self.val_dataset, **kwargs)
 
     def test_dataloader(self) -> DataLoader:
         """Return test dataloader"""
         if self.test_dataset is None:
             self.setup(stage="test")
 
-        return DataLoader(
-            self.test_dataset,
-            batch_size=self.eval_batch_size,
-            num_workers=self.num_workers,
-            shuffle=False,
-            pin_memory=self.pin_memory,
-        )
+        kwargs = self._loader_kwargs(shuffle=False, batch_size=self.eval_batch_size)
+        return DataLoader(self.test_dataset, **kwargs)
+
+    def set_epoch(self, epoch: int) -> None:
+        """Forward epoch to datasets that support epoch-aware sampling."""
+        for dataset in (self.train_dataset, self.val_dataset, self.test_dataset):
+            if dataset is not None and hasattr(dataset, "set_epoch"):
+                dataset.set_epoch(epoch)
+
+    def _loader_kwargs(self, shuffle: bool, batch_size: int) -> dict:
+        kwargs = {
+            "batch_size": batch_size,
+            "num_workers": self.num_workers,
+            "shuffle": shuffle,
+            "pin_memory": self.pin_memory,
+        }
+        if self.num_workers > 0:
+            kwargs["persistent_workers"] = self.persistent_workers
+            kwargs["prefetch_factor"] = self.prefetch_factor
+        return kwargs
 
     def get_dataset_info(self) -> dict:
         """Get dataset size information"""
@@ -136,8 +137,8 @@ class TrainingDataModule(LightningDataModule):
             "train_size": len(self.train_dataset) if self.train_dataset else 0,
             "val_size": len(self.val_dataset) if self.val_dataset else 0,
         }
-        
+
         if self.test_dataset:
             info["test_size"] = len(self.test_dataset)
-        
+
         return info

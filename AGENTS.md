@@ -1,0 +1,223 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+
+This is a Python research codebase for GISC-FMT training and evaluation. The main entrypoint is `train.py`, which dispatches Hydra tasks such as `fit`, `validate`, and `test`. Core package code lives in `minr_fmt/`: models in `minr_fmt/models/`, network blocks in `minr_fmt/network/`, datasets in `minr_fmt/dataset/`, and helpers in `minr_fmt/utils/`. Hydra configuration is under `configs/`. Tests live in `tests/`, utility scripts in `scripts/`, and split checkpoint artifacts in `pretrained/`.
+
+## Build, Test, and Development Commands
+
+- `uv sync`: create/update the project environment from `pyproject.toml` and `uv.lock`.
+- `uv run pytest`: run the pytest suite configured for `tests/test_*.py`.
+- `uv run ruff check .`: run lint checks for pycodestyle, pyflakes, warnings, and import ordering.
+- `uv run black .`: format Python files using Black.
+- `uv run python scripts/quick_run_bg.py`: run a lightweight background-branch sanity check.
+- `uv run python train.py fit model=gisc_fmt`: start a training run with the GISC-FMT model.
+- `uv run python train.py fit model=<baseline> data.dataset_type=fmt_simgen`: train an adapted voxel-domain baseline through the shared Hydra/Lightning entrypoint.
+- `uv run python train.py test model=<baseline> ckpt_path=<path> data.dataset_type=fmt_simgen`: evaluate a baseline checkpoint with the shared voxel metrics and output layout.
+- `bash scripts/reassemble_pretrained.sh`: rebuild the provided split checkpoint before evaluation.
+- `uv run python train.py test model=gisc_fmt ckpt_path=pretrained/gisc_fmt_brain1000_best.ckpt`: evaluate a checkpoint.
+
+## Coding Style & Naming Conventions
+
+Use Python 3.12-compatible code. Keep formatting Black-compatible and respect the Ruff line length of 100 characters. Prefer explicit configuration keys over hidden code defaults, matching the Hydra/OmegaConf style. Use `snake_case` for functions, variables, config keys, and modules; use `PascalCase` for model or module classes. Keep Bash scripts guarded with `set -euo pipefail`.
+
+## Baseline Integration Guidelines
+
+Do not add independent baseline training entrypoints. New comparison models must plug into `ModelFactory`, use `configs/model/<name>.yaml`, and run through `train.py fit/validate/test`. Query-wise GISC variants should keep the existing `(density_pred, aux_outputs)` protocol. Voxel-domain baselines should return `{"pred_voxel": logits, "aux_outputs": ...}` and use the shared `TrainingLightningModule` voxel loss/metrics path. Keep adapted baselines from importing GISC-only query projection, footprint scheduling, or confidence completion mechanisms unless the model is explicitly an internal CQR ablation.
+
+## Testing Guidelines
+
+Tests use `pytest` and should be placed in `tests/` with names matching `test_*.py`. Add focused tests for model branches, tensor shapes, config behavior, and backward compatibility. Keep tensors small enough for CPU execution unless GPU behavior is required. Run `uv run pytest` before submitting changes.
+
+## Commit & Pull Request Guidelines
+
+The current history uses concise imperative commit messages, for example `Add split pretrained checkpoint` and `Initial public release (split pretrained)`. Follow that style: describe the concrete change, not the process. Pull requests should include a summary, commands run, dataset/checkpoint assumptions, and metric or behavior changes. Link issues when applicable.
+
+## Security & Configuration Tips
+
+Do not commit private datasets, generated `outputs/`, API keys, or unsplit large checkpoints unless intentionally part of a release. Prefer Hydra command-line overrides for local paths, such as `data.train_dir=/abs/path/to/train`, instead of hard-coding machine-specific paths in tracked configs.
+
+## Current FMT-SimGen v2 Findings
+
+Use `/home/foods/pro/FMT-SimGen/data/fmt_simgen_v2_3k_20k` for the v2 full comparison unless the user requests a different dataset. The fixed split keeps `train.txt` at 2400 samples and splits the original 600 validation samples into `val.txt` 300 and `test.txt` 300 with stratification by `(num_foci, depth_tier)`. The dataset includes descattered projections, and GISC-FMT should use `proj_noscatter.npz` where configured.
+
+The active comparison set excludes the CQR ablation series by user request and focuses on GISC-FMT plus paper baselines: `fem2vox_unet`, `uhr_deepfmt`, `vox_dmrn`, `two_stage_deepfmt`, `fmt_reconnet`, `pgdpnn`, `map_pgan`, `d2_recst`, and `dspgn`. Keep all comparison models on the shared Hydra/Lightning entrypoint and common v2 exp config.
+
+The default formal point-model path is now SSQ-FMT (`model=ssq_fmt`) rather than
+legacy `gisc_fmt`. The SSQ wrapper keeps the mature query-density backbone as the
+main density path and adds SSQ-specific model-side surface normalization,
+measurement-derived candidate diagnostics/routing, and probability-domain output
+`{"density": [B,Nq,1], "aux_outputs": ...}`. The query-density backbone must use
+per-view max-normalized measurements for compatibility with the E15/GISC training
+distribution; SSQ auxiliary/candidate modules may still use sample-level P99.9
+normalization internally. Do not route the formal SSQ path through legacy
+source-slot/source-instance confidence mechanisms or PTFA/canonical-reliability
+ablation settings.
+
+The historical `gisc_fmt` baseline selected `epoch=44-val_dice=0.6930.ckpt` by
+candidate Dice. Its test300 Dice is about 0.662, IoU about 0.512, ASSD about 0.579,
+and HD95 about 2.123 at threshold 0.5. Keep this checkpoint only when a table
+explicitly needs the historical baseline. Do not report it as the current best method.
+
+The strongest archived GISC-FMT test300 result is E13-MSQ-fixed:
+`outputs/fmt_simgen_v2_multisource/runs/e13_msq_fixed_from_mpb/checkpoints/epoch=05-val_dice=0.7432.ckpt`.
+On the same 300-sample test split, Dice is about 0.741, IoU about 0.603, ASSD about
+0.350, and HD95 about 1.120. By `num_foci`, Dice is about 0.799 for one focus, 0.747
+for two foci, and 0.692 for three foci. Recall is about 0.892, 0.810, and 0.696,
+respectively. Multi-source recovery remains the main improvement target.
+
+For the active paper summary and TMI-style figures, use the E15 center-distance
+checkpoint:
+`outputs/fmt_simgen_v2_e15_center_distance_precomputed/checkpoints/epoch=52-val_dice=0.7414.ckpt`.
+Its test300 Dice is about 0.725. Keep E13-MSQ-fixed recorded as the stronger archived
+test result, but do not mix E13 predictions into E15 paper figures.
+
+The checkpoint below is an E15 query-density backbone wrapped by the SSQ interface,
+not the final candidate-composition SSQ-FMT method:
+`outputs/ssq_fmt/e15_backbone_init_perview/checkpoints/ssq_fmt_e15_backbone_init.ckpt`.
+On the 300-sample validation split this gives sampled-query Dice about 0.746, and
+on the 300-sample test split sampled-query Dice about 0.736 at threshold 0.5. Report
+it only as `E15 query-density backbone wrapped by SSQ interface`; do not report it as
+Full SSQ-FMT.
+
+The from-scratch SSQ backbone training path that still used the query-density backbone
+is also not Full SSQ-FMT. Its best staged full-data run reached about 0.720 validation
+Dice and about 0.707 test Dice:
+`outputs/ssq_fmt/full_v2_main_backbone_finetune_lr5e5/checkpoints/epoch=02-val_dice=0.7204.ckpt`.
+It used the same 32768 train/eval queries per sample as E15, not a reduced query
+count. Treat this as a development checkpoint, not the active paper result.
+Experiments with `loss.backbone_logit_loss_weight=1.0` degraded validation Dice
+after resume and should not be used as the default SSQ route. Candidate Gaussian
+prior density was also too weak/noisy when directly unioned into final density;
+keep `model.ssq_fmt.candidates.prior_density_weight=0.0` unless a later validation
+sweep proves otherwise.
+
+The current Full SSQ-FMT implementation is `model=ssq_fmt` with
+`model.ssq_fmt.density_output_mode=candidate_scalar_composition`. In this mode final
+density is always `sum_m pi_m d_m`; `query_density_backbone.enabled` is ignored unless
+`density_output_mode=e15_backbone_baseline` is explicitly selected. The formal modules
+live in `minr_fmt/models/ssq_fmt.py`: `SurfaceMeasurementNormalizer`,
+`SharedSurfaceEncoder`, `GeometryQueryMapper`, `QueryDependentSurfaceSampler`,
+`MeasurementDerivedCandidateBuilder`, `CandidateSurfaceRouter`, `CandidateViewEncoder`,
+`CandidateSpecificViewFusion`, `CandidateAssignmentHead`, `CompensationDensityDecoder`,
+and `CandidateDensityDecoder`.
+
+The final-method repair gate on 2026-06-25 did not yet pass quality thresholds. The
+best short gate so far is
+`outputs/ssq_fmt_final/full_gate_fourier4_bs1/checkpoints/epoch=04-val_dice=0.1037.ckpt`
+from 200 train / 50 val / 5 epochs with 32768 queries, batch size 1 and accumulation 4.
+It confirms the corrected candidate-composition path trains without NaNs and uses
+candidate branches, but validation Dice is far below the >0.4 gate threshold. Do not
+launch formal full-data runs or ablation result tables from this checkpoint.
+
+The 2026-06-25 SSQ final-method refactor found and fixed two separate stability
+issues after the initial commits. First, invalid finite-depth interpolation points
+were returning `NaN` values from `sample_finite_scalar_map`; these NaNs entered
+`detector_side_path_mm`, `detector_side_path_proxy`, routing evidence, `pi`, and final
+density. The fix is to keep validity in `valid_mask`/`finite_depth_mask` while replacing
+invalid sampled scalar values with finite zeros before they enter model MLPs. A 4-train /
+2-val smoke after the fix had `train_nonfinite_loss_skip_epoch=0` and finite density,
+assignment, and loss tensors.
+
+Second, the Residual U-Net pyramid E2 encoder exposed hidden all-query memory retention
+in the SSQ candidate path. `CandidateSpecificViewFusion` and the density decoders now
+support query chunking and activation checkpointing, using the representation chunk size
+by default. Direct E2 single-batch probes with 16384 queries now complete with finite loss
+and about 28.6 GiB reserved on the local RTX 5090, but Lightning training still sits near
+30.5 GiB and is very slow on 32 GB GPUs. Treat 16384-query E2 as a resource-heavy probe,
+not a practical short gate, unless running on a larger GPU or after implementing true
+query microbatch backward.
+
+The same repair attempt showed that E0 shallow two-conv with 16384 queries trains without
+nonfinite skips but plateaus at low validation Dice on 400 train / 100 val: roughly
+0.135, 0.118, 0.132, 0.128, 0.130, 0.129, 0.125 through the first seven validations.
+This is not comparable to the archived E14/E15 query-density results: Full SSQ-FMT uses
+candidate scalar composition `sum_m pi_m d_m` and depends on candidate anchors, routing,
+assignment, and branch decoders. If E2/E1 do not quickly exceed the E0 range, diagnose
+the candidate-composition path against the E15 query-density backbone on the same batch:
+candidate coverage/anchors, assignment mass `pi`, branch density calibration, and
+measurement-supported mask behavior are the likely failure points.
+
+When using the v2 dataset, do not blindly trust detector masks from one source.
+The observed v2 projection/depth samples had finite-depth regions aligned with
+nonzero projection regions, but SSQ should combine geometry-valid projection,
+finite depth, and measurement validity defensively. If early short-gate validation
+Dice stays near zero, stop and inspect prediction distributions before launching
+full training.
+
+FEM-domain methods must be mapped to the common `[190, 200, 104]` voxel grid before
+metrics or figures. Do not report mesh-only Dice as a paper comparison. The verified
+`fem_coarse` and `fem_to_voxel` internal diagnostic voxel Dice is about 0.574. Do not
+present either diagnostic as a paper comparison method. Traditional FEM outputs and
+GAICN must use the shared barycentric mesh-to-voxel mapper before evaluation. The
+available per-sample FEM assets already store a barycentric `[190, 200, 104]`
+interpolation. Reuse their fixed graph, mapping, measurement, and initialization assets
+to accelerate GAICN training, but do not expose their upstream method identity in paper
+tables or figures.
+
+Traditional continuous FEM methods require their own validation-selected voxel operating
+threshold after barycentric interpolation. Do not apply the deep-model probability
+threshold blindly. The corrected test300 results are about 0.459 Dice for Tikhonov at
+threshold `0.0075` and 0.531 Dice for L1 at threshold `0.01`. Their reported Dice, IoU,
+ASSD, HD95, CLE, and related metrics are all computed on the common `[190, 200, 104]`
+voxel grid. ElasticNet was stopped by user request; FISTA and StOMP do not have completed
+post-fix test300 reruns. Exclude their stale pre-fix metrics from the active summary.
+
+Keep deep-baseline training serial: run only one trainer at a time. Use a 200-train /
+50-val short gate before a formal run when adapting a baseline. A deep method below
+0.4 Dice remains available for supplementary metrics and figures, but mark it as below
+the main-table threshold. The recovered paper-like UHR checkpoint remains the valid UHR
+comparison at about 0.525 test300 Dice. PAH2T-Former is about 0.518. Two-stage DeepFMT
+axis and loss fixes improve test300 Dice only to about 0.277, so retain it as a marked
+supplementary comparison unless a later adaptation crosses 0.4.
+The full-data lightweight FEM2Vox residual-prior adaptation reaches about 0.592 test300
+Dice.
+For GAICN, keep training loss in mesh-node space when `gt_nodes.npy` is available, then
+interpolate to the common voxel grid for validation, test metrics, and figures. Cache
+the measurement backprojection once per batch and use two correction phases with the
+cached FEM initialization. The full-data run reaches about 0.559 val Dice and about
+0.559 test300 voxel Dice.
+
+For paper figures, do not display internal FEM-prior diagnostics. Use
+`scripts/render_qualitative_multisource_tmi.py` for the main-text 4-by-6 comparison and
+`scripts/render_tmi_hard_cases.py` for broader diagnostic or supplementary figures. The
+main-text figure must use multi-source cases only, place GISC-FMT immediately before the
+rightmost ground-truth column, omit per-panel metrics, and overlay cyan ground-truth
+wireframes on red prediction surfaces. Keep a marked supplementary deep-baseline figure
+for methods below 0.4 Dice and a separate traditional-FEM supplementary figure.
+
+Template-prior residual adaptation does not rescue the PGDPNN/FMT-ReconNet family on
+the current v2 data. The PGDPNN 200-train / 50-val gate remains below 0.06 val Dice,
+while the FMT-ReconNet smoke remains near the existing low baseline. Retain their
+test300 data and marked supplementary figures; do not promote them to the main table.
+
+## E15 Center-Distance Separation
+
+Use E15 for multi-source separation work. The goal is to improve three-focus and mixed-shape cases without changing the E13 main path.
+
+- Keep the main query-density head unchanged.
+- Add only lightweight auxiliary query heads for center heatmap and distance-to-boundary supervision.
+- Generate auxiliary targets from `gt_voxels` only during training; do not feed them into inference or sampling.
+- Keep the non-GT sampler unchanged and avoid GT ROI leakage.
+- Preferred starting config should inherit from the E13 MPB chain and use `model.aux_heads.*` plus `loss.center_*` settings.
+- Relevant eval slices are full-volume test300, grouped by `num_foci` and shape class, plus component-level recall / missed / merge reporting.
+- Focus metrics: all Dice / Precision / Recall, foci=3 Recall, component recall@3, missed/sample@3, merge/sample@3, mixed-two-shape Dice, and mixed-three-shape Dice.
+- Do not reintroduce experimental-number naming into code-level symbols; name helpers by task semantics only.
+
+## Current Comparison And Training Entry Points
+
+- SSQ-FMT is the default model in `configs/config.yaml`; the main formal SSQ config is
+  `configs/exp/fmt_simgen_v2_ssq_final.yaml`. `fmt_simgen_v2_ssq_main.yaml` is kept as
+  a deprecated alias for the same candidate-composition route.
+- Use the shared entrypoint for SSQ formal runs:
+  `uv run python train.py fit model=ssq_fmt exp=fmt_simgen_v2_ssq_final data.dataset_type=fmt_simgen`.
+- Run the current gate pipeline serially with:
+  `uv run python scripts/run_ssq_final_ablation_pipeline.py --stage gate --variants full post_aggregation shared_fusion assignment_only fixed_footprint`.
+- E15 training configs: `configs/exp/fmt_simgen_v2_e15_center.yaml` and `configs/exp/fmt_simgen_v2_e15_center_distance.yaml`.
+- E15 uses the E13 MPB chain as its base and keeps the main query-density head intact.
+- The auxiliary heads are only supervision helpers; they do not alter non-GT sampling or inference inputs.
+- The completed E15 center-distance checkpoint `epoch=52-val_dice=0.7414.ckpt`
+  reaches about 0.725 test300 Dice. Use it for the active paper summary and figures.
+- Use the shared entrypoint for archived E15/GISC runs: `uv run python train.py fit model=gisc_fmt exp=fmt_simgen_v2_e15_center_distance data.dataset_type=fmt_simgen`.
+- For comparison work, keep the paper baselines on the shared v2 protocol and record the selected checkpoint plus grouped metrics.
+- The most relevant comparison slices remain full-volume test300, grouped by `num_foci`, shape class, and depth tier, with component recall / missed / merge reporting.

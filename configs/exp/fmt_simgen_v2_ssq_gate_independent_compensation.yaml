@@ -1,0 +1,19 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_refined_candidates
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_independent_compensation
+description: Refined candidates with candidate-invariant compensation context
+
+model:
+  ssq_fmt:
+    routing:
+      compensation_routing_mode: independent
+
+optim:
+  lr: 0.00001
+
+trainer:
+  max_epochs: 6

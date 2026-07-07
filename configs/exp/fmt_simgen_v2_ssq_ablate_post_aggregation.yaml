@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_final
+  - _self_
+
+name: fmt_simgen_v2_ssq_ablate_post_aggregation
+description: SSQ-FMT ablation with post-aggregation candidate conditioning
+
+model:
+  ssq_fmt:
+    routing:
+      mode: post_aggregation

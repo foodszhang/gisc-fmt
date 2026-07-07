@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_main
+  - _self_
+
+name: fmt_simgen_v2_ssq_no_distance_aux
+description: Backward-compatible alias for the SSQ mainline without distance-to-boundary auxiliary supervision
+
+model:
+  aux_heads:
+    distance:
+      enabled: false
+
+loss:
+  distance_weight: 0.0

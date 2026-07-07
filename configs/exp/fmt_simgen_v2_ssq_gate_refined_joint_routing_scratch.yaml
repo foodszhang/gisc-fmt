@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_refined_joint_scratch
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_refined_joint_routing_scratch
+description: From-scratch refined-candidate training with joint branch routing
+
+model:
+  ssq_fmt:
+    routing:
+      compensation_routing_mode: joint
+
+trainer:
+  max_epochs: 10

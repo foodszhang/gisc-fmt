@@ -1,0 +1,85 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e15_center_distance
+  - _self_
+
+name: fmt_simgen_real_20260618_luoshu1_v2_main
+description: Fixed 0.5-threshold GISC-FMT mainline for real_20260618_luoshu1 manual-surface v2
+
+data:
+  dataset_type: fmt_simgen
+  data_dir: /home/foods/pro/FMT-SimGen/data/real_20260618_luoshu1_manual_surface_v2_1k_20k
+  train_dir: /home/foods/pro/FMT-SimGen/data/real_20260618_luoshu1_manual_surface_v2_1k_20k
+  val_dir: /home/foods/pro/FMT-SimGen/data/real_20260618_luoshu1_manual_surface_v2_1k_20k
+  test_dir: /home/foods/pro/FMT-SimGen/data/real_20260618_luoshu1_manual_surface_v2_1k_20k
+
+  sample_num: 131072
+  num_queries: 131072
+  eval_sample_num: 262144
+  voxel_size_mm: 0.15
+  voxel_ranges:
+    x: [0, 318]
+    y: [0, 614]
+    z: [0, 136]
+  trunk_size_mm: [47.7, 92.1, 20.4]
+
+  center_distance_targets: false
+  center_distance_require_precomputed: false
+
+  query_sampling:
+    type: nongt_mixed
+    num_queries: ${data.num_queries}
+    trunk_uniform_ratio: 0.10
+    meas_proposal_ratio: 0.55
+    peak_balanced_ratio: 0.35
+    peak_top_m: 3
+    peak_min_distance_cells: 8
+    use_gt_bbox: false
+    use_gt_foreground_oversampling: false
+    use_body_mask: false
+    use_depth_silhouette_mask: false
+
+  source_hypothesis:
+    enabled: true
+    top_m: 3
+    blur_sigma: 1.0
+    min_distance_cells: 4
+    min_value_ratio: 0.1
+
+  batch_size: 1
+  eval_batch_size: 1
+
+model:
+  geometry:
+    global_voxel_shape: [318, 614, 136]
+    volume_center_world: [23.85, 46.05, 10.2]
+
+  aux_heads:
+    hidden_dim: 64
+    center:
+      enabled: false
+    distance:
+      enabled: false
+
+loss:
+  pos_weight: 8
+  sparse_weight: 0.02
+  use_tversky: true
+  tversky_alpha: 0.35
+  tversky_beta: 0.65
+  tversky_gamma: 1.0
+  tversky_weight: 0.3
+  center_weight: 0.0
+  distance_weight: 0.0
+
+trainer:
+  accumulate_grad_batches: 4
+  max_epochs: 80
+
+validation:
+  pred_threshold: 0.5
+
+test:
+  pred_threshold: 0.5
+  voxel_spacing: [0.15, 0.15, 0.15]

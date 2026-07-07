@@ -1,0 +1,14 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_final
+  - _self_
+
+name: fmt_simgen_v2_ssq_ablate_fixed_footprint
+description: SSQ-FMT ablation with fixed detector-plane footprint scale
+
+model:
+  ssq_fmt:
+    footprint:
+      mode: fixed
+      fixed_sigma: 2.0

@@ -1,0 +1,20 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e9_rg_ced_s1_ptfa_feature_refine
+  - _self_
+
+name: fmt_simgen_e9a_stable_rg_ced_s1_ptfa_feature_refine
+description: Stable reliability-gated cED s1 PTFA feature refinement with residual mixing
+
+model:
+  feature_refinement:
+    reliability_gate:
+      hidden_dim: 64
+      temperature: 2.0
+      zero_init: true
+      norm: layernorm
+      geom_set: full
+      residual_mix:
+        enabled: true
+        gamma: 0.1

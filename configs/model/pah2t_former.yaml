@@ -1,0 +1,20 @@
+name: pah2t_former
+output_type: voxel
+num_views: 7
+in_channels: 1
+geometry:
+  global_voxel_shape: [190, 200, 104]
+pah2t_former:
+  # FMT-SimGen sparse projections are resized to [V, 64, 64], matching the
+  # PAH2T paper's 24x64x64 surface-photon-density input scale with V adapted.
+  projection_size: [64, 64]
+  base_channels: 8
+  num_heads: 2
+  proj_tokens: 64
+  gradient_checkpointing: true
+  output_mode: full
+  output_shape: [190, 200, 104]
+  full_output_shape: [190, 200, 104]
+  paste_roi_to_full: false
+  loss_type: mse
+  dice_weight: 0.5

@@ -224,7 +224,7 @@ class VoxDMRN(nn.Module):
             use_bn=False
         )
     
-    def forward(self, projections_dict, points=None):
+    def forward(self, projections_dict, points=None, **kwargs):
         """
         Args:
             projections_dict: dict {view_name: [B, H, W]}
@@ -242,6 +242,14 @@ class VoxDMRN(nn.Module):
 
         # Dense prediction over ROI grid (flattened)
         logits = self.mlp(feat)  # [B, ROI_X*ROI_Y*ROI_Z]
+        if str(getattr(self.config.model, "output_type", "query")).lower() == "voxel":
+            vr = self.config.data.voxel_ranges
+            rx = int(vr.x[1] - vr.x[0])
+            ry = int(vr.y[1] - vr.y[0])
+            rz = int(vr.z[1] - vr.z[0])
+            pred_voxel = logits.view(logits.shape[0], 1, rx, ry, rz)
+            aux_output = {k: v for k, v in projections_dict.items()}
+            return {"pred_voxel": pred_voxel, "aux_outputs": aux_output}
 
         if points is not None:
             # Points are normalized in global voxel coordinates (x,y,z in [0,1]).

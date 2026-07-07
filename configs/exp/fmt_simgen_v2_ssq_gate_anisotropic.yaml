@@ -1,0 +1,22 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_32gb
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_anisotropic
+description: Full SSQ-FMT with measurement-derived anisotropic candidate support
+
+data:
+  ssq_candidates:
+    anisotropic_support: true
+    support_moment_radius_mm: 4.0
+
+optim:
+  lr: 0.00001
+  scheduler:
+    warmup_epochs: 0
+
+trainer:
+  max_epochs: 2
+  check_val_every_n_epoch: 1

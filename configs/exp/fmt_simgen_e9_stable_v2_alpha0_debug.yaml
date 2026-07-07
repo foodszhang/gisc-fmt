@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_e9_stable_v2_mean_prior_residual_ced_s1_ptfa_feature_refine
+  - _self_
+
+name: fmt_simgen_e9_stable_v2_alpha0_debug
+description: Alpha-zero debug config for E9 stable-v2 equivalence to E8-cED
+
+model:
+  feature_refinement:
+    mean_prior_residual_gate:
+      alpha_max: 0.0
+      anchor_loss:
+        enabled: false
+        beta: 0.0

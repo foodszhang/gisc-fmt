@@ -176,14 +176,14 @@ class PointDensityNet(nn.Module):
 
         返回:
         logits: [B, N] - 未归一化密度预测
-        views_no_projections: dict - 辅助输出（各视角的门控融合结果）
+        aux_projections: dict - 辅助输出（各视角的门控融合结果）
         """
         B, N, _ = x3d.shape
 
         # 1. 从各视角提取特征
         view_list = ["-90", "-60", "-30", "0", "30", "60", "90"]
         view_features = {}
-        views_no_projections = {}
+        aux_projections = {}
 
         for view_name, projection in view_projections.items():
             # 确保投影图有通道维度
@@ -199,7 +199,7 @@ class PointDensityNet(nn.Module):
 
             # 门控融合（生成辅助输出）
             gate_out = self.gate_fusions[idx](feat)
-            views_no_projections[view_name] = gate_out.squeeze(1)
+            aux_projections[view_name] = gate_out.squeeze(1)
 
         # 2. 几何投影：从特征图中采样点特征
         # 这部分通常在外部完成（在trainer或main中）
@@ -246,7 +246,7 @@ class PointDensityNet(nn.Module):
         # 5. 改动3：使用隐式源场网络进行最终预测
         logits = self.density_head(gamma_x, fused_feat)  # [B, N]
 
-        return logits, views_no_projections
+        return logits, aux_projections
 
     def _simple_pos_encoding(self, x, d_model):
         """

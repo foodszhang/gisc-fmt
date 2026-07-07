@@ -1,0 +1,39 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_e15_center_distance
+  - _self_
+
+name: fmt_simgen_v2_e15_center_distance_weak
+description: E15 weak center-distance auxiliary, no center residual
+
+data:
+  dataset_type: fmt_simgen
+  center_distance_targets: true
+  center_distance_require_precomputed: true
+  center_distance_subdir: center_distance
+
+model:
+  aux_heads:
+    hidden_dim: 64
+    center:
+      enabled: true
+      logit_residual: 0.0
+      residual_warmup_epochs: 0
+    distance:
+      enabled: true
+
+loss:
+  center_weight: 0.02
+  distance_weight: 0.02
+  center_sigma_mm: 0.5
+
+optim:
+  lr: 0.0005
+  scheduler:
+    warmup_epochs: 5
+    warmup_start_factor: 0.05
+
+trainer:
+  max_epochs: 40
+  gradient_clip_val: 1.0

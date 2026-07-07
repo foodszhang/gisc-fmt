@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - fmt_simgen_v2_ssq_gate_32gb
+  - _self_
+
+name: fmt_simgen_v2_ssq_gate_refined_candidates
+description: Full SSQ-FMT with measurement-only learned candidate proposals
+
+data:
+  ssq_candidates:
+    top_m: 5
+    candidate_filename: candidate_anchors_refiner_gate_v1.npz
+    reextract_candidates: false
+
+optim:
+  lr: 0.00001
+  scheduler:
+    warmup_epochs: 0
+
+trainer:
+  max_epochs: 2
+  check_val_every_n_epoch: 1
